@@ -4,7 +4,9 @@ local M = {}
 function M.get_root(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local fname = vim.api.nvim_buf_get_name(bufnr)
-  return vim.fs.root(fname, { "app.json" }) or vim.fs.root(fname, { ".git" })
+  return vim.fs.root(fname, { "app.json" })
+      or vim.fs.root(vim.fn.getcwd(), { "app.json" })
+      or vim.fs.root(fname, { ".git" })
 end
 
 -- Read and decode app.json from a project root, or nil on failure
