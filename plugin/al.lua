@@ -48,6 +48,52 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- After the AL language server attaches we need to:
+--  1. Send al/setActiveWorkspace — without this the server never loads the project/symbols.
+--  2. Override gd — the server uses al/gotodefinition instead of textDocument/definition
+--     (definitionProvider = false in capabilities is intentional).
+vim.api.nvim_create_autocmd("LspAttach", {
+  group = vim.api.nvim_create_augroup("ALNvimLspAttach", { clear = true }),
+  callback = function(args)
+    local client = vim.lsp.get_client_by_id(args.data.client_id)
+    if not client or client.name ~= "al_language_server" then return end
+
+    local root = client.root_dir
+    if not root then return end
+
+    -- Tell the server which workspace is active and what its settings are.
+    -- This is the trigger for the server to start indexing packages and source files.
+    client:request("al/setActiveWorkspace", {
+      currentWorkspaceFolderPath = root,
+      settings = {
+        packageCachePaths      = { root .. "/.alpackages" },
+        assemblyProbingPaths   = { root .. "/.netpackages" },
+        enableCodeAnalysis     = true,
+        backgroundCodeAnalysis = "Project",
+        enableCodeActions      = true,
+        incrementalBuild       = true,
+      },
+    }, function(err, result)
+      if err then
+        vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
+      elseif result and result.success == false then
+        vim.notify("AL: setActiveWorkspace returned success=false", vim.log.levels.WARN)
+      end
+    end, args.buf)
+
+    -- gd: use the server's custom al/gotodefinition instead of textDocument/definition.
+    vim.keymap.set("n", "gd", function()
+      local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+      client:request("al/gotodefinition", {
+        textDocumentPositionParams = params,
+      }, function(err, result)
+        if err or not result then return end
+        vim.lsp.util.jump_to_location(result, client.offset_encoding)
+      end, args.buf)
+    end, { buffer = args.buf, desc = "AL: Go to definition" })
+  end,
+})
+
 -- ── User commands ─────────────────────────────────────────────────────────────
 
 vim.api.nvim_create_user_command("ALCompile", function(opts)
