@@ -68,10 +68,11 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- Tell the server which workspace is active and what its settings are.
     -- This is the trigger for the server to start indexing packages and source files.
+    -- Structure mirrors what the VSCode AL extension sends: workspacePath at top level,
+    -- settings nested under alResourceConfigurationSettings, setActiveWorkspace = true.
     client:request("al/setActiveWorkspace", {
-      currentWorkspaceFolderPath = root,
-      settings = {
-        workspacePath          = root,
+      workspacePath = root,
+      alResourceConfigurationSettings = {
         packageCachePaths      = { root .. "/.alpackages" },
         assemblyProbingPaths   = { root .. "/.netpackages" },
         enableCodeAnalysis     = true,
@@ -79,6 +80,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
         enableCodeActions      = true,
         incrementalBuild       = true,
       },
+      setActiveWorkspace = true,
     }, function(err, result)
       if err then
         vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
