@@ -32,7 +32,8 @@ vim.api.nvim_create_autocmd("FileType", {
       name     = "al_language_server",
       cmd      = { lsp_bin },
       root_dir = root,
-      flags    = { debounce_text_changes = 300 },
+      -- No debounce: the AL server validates consecutive document versions and logs
+      -- "Missed a didChangeMessage" whenever a version is skipped (which debouncing causes).
       init_options = {
         workspacePath = root,
         alResourceConfigurationSettings = {
@@ -50,8 +51,12 @@ vim.api.nvim_create_autocmd("FileType", {
 
 -- The server sends al/activeProjectLoaded as a REQUEST (not notification) when it has
 -- finished loading the active project. Without a handler Neovim responds with an error
--- and the server stays in a broken state. Register a no-op handler to acknowledge it.
-vim.lsp.handlers["al/activeProjectLoaded"] = function() end
+-- and the server stays in a broken state. Respond with null and notify the user.
+vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
+  if not err then
+    vim.notify("AL: project loaded — LSP features ready", vim.log.levels.INFO)
+  end
+end
 
 -- After the AL language server attaches we need to:
 --  1. Send al/setActiveWorkspace — without this the server never loads the project/symbols.
@@ -85,7 +90,9 @@ vim.api.nvim_create_autocmd("LspAttach", {
       if err then
         vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
       elseif result and result.success == false then
-        vim.notify("AL: setActiveWorkspace returned success=false", vim.log.levels.WARN)
+        vim.notify("AL: setActiveWorkspace returned success=false: " .. vim.inspect(result), vim.log.levels.WARN)
+      else
+        vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.INFO)
       end
     end, args.buf)
 
