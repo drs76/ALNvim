@@ -19,29 +19,34 @@ for _, bin in ipairs({ lsp_bin, ext_path .. "/bin/linux/alc" }) do
   end
 end
 
-vim.lsp.config("al_language_server", {
-  cmd          = { lsp_bin },
-  filetypes    = { "al" },
-  root_markers = { "app.json" },
-  -- The AL server is sometimes slow to start; give it extra time.
-  flags        = { debounce_text_changes = 300 },
-  -- Called before each new server instance starts; root_dir is resolved by this point.
-  on_new_config = function(config, root_dir)
-    config.init_options = {
-      workspacePath = root_dir,
-      alResourceConfigurationSettings = {
-        packageCachePaths    = { root_dir .. "/.alpackages" },
-        assemblyProbingPaths = { root_dir .. "/.netpackages" },
-        enableCodeAnalysis   = true,
-        backgroundCodeAnalysis = "Project",
-        enableCodeActions    = true,
-        incrementalBuild     = true,
+-- vim.lsp.config/enable does not support on_new_config (nvim-lspconfig concept only),
+-- so init_options cannot be set dynamically that way. Use a FileType autocmd with
+-- vim.lsp.start instead, where root_dir is resolved before the client is created.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern  = "al",
+  group    = vim.api.nvim_create_augroup("ALNvimLsp", { clear = true }),
+  callback = function(args)
+    local root = vim.fs.root(args.buf, "app.json")
+    if not root then return end
+    vim.lsp.start({
+      name     = "al_language_server",
+      cmd      = { lsp_bin },
+      root_dir = root,
+      flags    = { debounce_text_changes = 300 },
+      init_options = {
+        workspacePath = root,
+        alResourceConfigurationSettings = {
+          packageCachePaths      = { root .. "/.alpackages" },
+          assemblyProbingPaths   = { root .. "/.netpackages" },
+          enableCodeAnalysis     = true,
+          backgroundCodeAnalysis = "Project",
+          enableCodeActions      = true,
+          incrementalBuild       = true,
+        },
       },
-    }
+    }, { bufnr = args.buf })
   end,
 })
-
-vim.lsp.enable("al_language_server")
 
 -- ── User commands ─────────────────────────────────────────────────────────────
 
