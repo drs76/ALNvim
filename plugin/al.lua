@@ -48,6 +48,11 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- The server sends al/activeProjectLoaded as a REQUEST (not notification) when it has
+-- finished loading the active project. Without a handler Neovim responds with an error
+-- and the server stays in a broken state. Register a no-op handler to acknowledge it.
+vim.lsp.handlers["al/activeProjectLoaded"] = function() end
+
 -- After the AL language server attaches we need to:
 --  1. Send al/setActiveWorkspace — without this the server never loads the project/symbols.
 --  2. Override gd — the server uses al/gotodefinition instead of textDocument/definition
