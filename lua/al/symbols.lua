@@ -44,10 +44,24 @@ function M.download(root)
     return
   end
 
-  local deps = app.dependencies or {}
-  if #deps == 0 then
-    vim.notify("AL: app.json has no dependencies to download", vim.log.levels.INFO)
-    return
+  -- Always include the implicit Microsoft base packages derived from app.json
+  -- "application" version, unless already listed as an explicit dependency.
+  local deps = {}
+  local base_pkgs = {
+    { publisher = "Microsoft", name = "Application",        version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "System Application", version = app.application or "0.0.0.0" },
+  }
+  for _, bp in ipairs(base_pkgs) do
+    local found = false
+    for _, d in ipairs(app.dependencies or {}) do
+      if d.publisher == bp.publisher and d.name == bp.name then
+        found = true; break
+      end
+    end
+    if not found then table.insert(deps, bp) end
+  end
+  for _, d in ipairs(app.dependencies or {}) do
+    table.insert(deps, d)
   end
 
   local pkgdir = root .. "/.alpackages"
