@@ -28,19 +28,19 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     local root = vim.fs.root(args.buf, "app.json")
     if not root then return end
-    -- Only include assemblyProbingPaths if .netpackages exists.
-    -- The VSCode extension omits this field when not configured; passing a
-    -- non-existent path causes the server to hang indefinitely on the IO probe.
-    local net_dir = root .. "/.netpackages"
-    local net_stat = vim.uv.fs_stat(net_dir)
+    -- assemblyProbingPaths must be a non-null array; omitting it crashes the server.
+    -- The default in the VSCode extension is ['./.netpackages'], but probing a
+    -- network-mounted path blocks indefinitely. Send an empty array — the server
+    -- skips .NET assembly probing, which is correct for Cloud-target projects.
+    -- Users who need on-prem .NET assembly probing can add paths via config.
     local res_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
+      assemblyProbingPaths   = {},
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
       enableCodeActions      = true,
       incrementalBuild       = true,
     }
-    if net_stat then res_cfg.assemblyProbingPaths = { net_dir } end
 
     vim.lsp.start({
       name     = "al_language_server",
@@ -84,16 +84,16 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local root = client.root_dir
     if not root then return end
 
-    -- Build resource config — only include assemblyProbingPaths if .netpackages exists.
-    local net_dir = root .. "/.netpackages"
+    -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
+    -- Use empty array — avoids hanging on network-mounted .netpackages directories.
     local ws_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
+      assemblyProbingPaths   = {},
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
       enableCodeActions      = true,
       incrementalBuild       = true,
     }
-    if vim.uv.fs_stat(net_dir) then ws_cfg.assemblyProbingPaths = { net_dir } end
 
     -- Tell the server which workspace is active and what its settings are.
     -- This is the trigger for the server to start indexing packages and source files.
