@@ -54,7 +54,15 @@ vim.api.nvim_create_autocmd("FileType", {
 -- and the server stays in a broken state. Respond with null and notify the user.
 vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
-    vim.notify("AL: project loaded — LSP features ready", vim.log.levels.INFO)
+    vim.notify("AL: project loaded — gd and K ready", vim.log.levels.WARN)
+  end
+end
+
+-- Show loading progress so the user knows the server is working.
+-- al/progressNotification is a server notification: { owner=string, percent=number, cancel=bool }
+vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
+  if result and result.percent then
+    vim.notify(string.format("AL: loading… %d%%", result.percent), vim.log.levels.INFO)
   end
 end
 
@@ -92,7 +100,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       elseif result and result.success == false then
         vim.notify("AL: setActiveWorkspace returned success=false: " .. vim.inspect(result), vim.log.levels.WARN)
       else
-        vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.INFO)
+        vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.WARN)
       end
     end, args.buf)
 
