@@ -3,9 +3,6 @@
 if vim.g.vscode or vim.g.alnvim_loaded then return end
 vim.g.alnvim_loaded = true
 
--- Temporary: enable full LSP debug logging so we can see al/setActiveWorkspace traffic.
-vim.lsp.set_log_level("debug")
-
 -- ── AL Language Server (Microsoft.Dynamics.Nav.EditorServices.Host) ──────────
 -- The binary communicates via standard LSP over stdio.
 -- It must be executable; we set that here because the VSCode extension ships
