@@ -14,8 +14,8 @@ local lsp_bin   = ext_path .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.
 -- Make both binaries executable (best-effort; errors are silent)
 for _, bin in ipairs({ lsp_bin, ext_path .. "/bin/linux/alc" }) do
   local stat = vim.uv.fs_stat(bin)
-  if stat and bit.band(stat.mode, 0o111) == 0 then
-    vim.uv.fs_chmod(bin, bit.bor(stat.mode, 0o111))
+  if stat and bit.band(stat.mode, 73) == 0 then
+    vim.uv.fs_chmod(bin, bit.bor(stat.mode, 73))
   end
 end
 
