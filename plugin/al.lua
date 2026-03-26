@@ -31,22 +31,27 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     local root = vim.fs.root(args.buf, "app.json")
     if not root then return end
+    -- Only include assemblyProbingPaths if .netpackages exists.
+    -- The VSCode extension omits this field when not configured; passing a
+    -- non-existent path causes the server to hang indefinitely on the IO probe.
+    local net_dir = root .. "/.netpackages"
+    local net_stat = vim.uv.fs_stat(net_dir)
+    local res_cfg = {
+      packageCachePaths      = { root .. "/.alpackages" },
+      enableCodeAnalysis     = true,
+      backgroundCodeAnalysis = "Project",
+      enableCodeActions      = true,
+      incrementalBuild       = true,
+    }
+    if net_stat then res_cfg.assemblyProbingPaths = { net_dir } end
+
     vim.lsp.start({
       name     = "al_language_server",
       cmd      = { lsp_bin },
       root_dir = root,
-      -- No debounce: the AL server validates consecutive document versions and logs
-      -- "Missed a didChangeMessage" whenever a version is skipped (which debouncing causes).
       init_options = {
         workspacePath = root,
-        alResourceConfigurationSettings = {
-          packageCachePaths      = { root .. "/.alpackages" },
-          assemblyProbingPaths   = { root .. "/.netpackages" },
-          enableCodeAnalysis     = true,
-          backgroundCodeAnalysis = "Project",
-          enableCodeActions      = true,
-          incrementalBuild       = true,
-        },
+        alResourceConfigurationSettings = res_cfg,
       },
     }, { bufnr = args.buf })
   end,
@@ -82,20 +87,24 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local root = client.root_dir
     if not root then return end
 
+    -- Build resource config — only include assemblyProbingPaths if .netpackages exists.
+    local net_dir = root .. "/.netpackages"
+    local ws_cfg = {
+      packageCachePaths      = { root .. "/.alpackages" },
+      enableCodeAnalysis     = true,
+      backgroundCodeAnalysis = "Project",
+      enableCodeActions      = true,
+      incrementalBuild       = true,
+    }
+    if vim.uv.fs_stat(net_dir) then ws_cfg.assemblyProbingPaths = { net_dir } end
+
     -- Tell the server which workspace is active and what its settings are.
     -- This is the trigger for the server to start indexing packages and source files.
     -- Structure mirrors what the VSCode AL extension sends: workspacePath at top level,
     -- settings nested under alResourceConfigurationSettings, setActiveWorkspace = true.
     client:request("al/setActiveWorkspace", {
       workspacePath = root,
-      alResourceConfigurationSettings = {
-        packageCachePaths      = { root .. "/.alpackages" },
-        assemblyProbingPaths   = { root .. "/.netpackages" },
-        enableCodeAnalysis     = true,
-        backgroundCodeAnalysis = "Project",
-        enableCodeActions      = true,
-        incrementalBuild       = true,
-      },
+      alResourceConfigurationSettings = ws_cfg,
       setActiveWorkspace = true,
     }, function(err, result)
       if err then
