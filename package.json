@@ -1,0 +1,13 @@
+{
+  "name": "alnvim",
+  "version": "1.0.0",
+  "description": "Business Central AL language support for Neovim",
+  "contributes": {
+    "snippets": [
+      {
+        "language": "al",
+        "path": "./snippets/al.json"
+      }
+    ]
+  }
+}
