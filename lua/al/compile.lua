@@ -2,12 +2,7 @@ local M = {}
 
 local EXT_PATH = require("al.ext").path or ""
 local ALC      = EXT_PATH .. "/bin/linux/alc"
-
--- Locate the AL project root by searching upward for app.json
-local function find_project_root()
-  local buf_path = vim.fn.expand("%:p")
-  return vim.fs.root(buf_path, { "app.json" })
-end
+local lsp      = require("al.lsp")
 
 -- Ensure alc is executable (the file is shipped without the exec bit set)
 local function ensure_executable(path)
@@ -60,7 +55,7 @@ end
 -- @param extra_args   optional table of additional /flag:value strings
 -- @param on_success   optional function() called after a clean build (no errors)
 function M.compile(project_dir, extra_args, on_success)
-  project_dir = project_dir or find_project_root()
+  project_dir = project_dir or lsp.get_root()
   if not project_dir then
     vim.notify("AL: Cannot find project root (no app.json found)", vim.log.levels.ERROR)
     return
@@ -96,7 +91,7 @@ end
 
 -- Open app.json for the current project
 function M.open_app_json()
-  local root = find_project_root()
+  local root = lsp.get_root()
   if not root then
     vim.notify("AL: No app.json found", vim.log.levels.ERROR)
     return
@@ -106,7 +101,7 @@ end
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()
-  local root = find_project_root()
+  local root = lsp.get_root()
   if not root then
     vim.notify("AL: No app.json found", vim.log.levels.ERROR)
     return
