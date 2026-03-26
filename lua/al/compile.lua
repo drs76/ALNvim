@@ -12,8 +12,8 @@ end
 -- Ensure alc is executable (the file is shipped without the exec bit set)
 local function ensure_executable(path)
   local stat = vim.uv.fs_stat(path)
-  if stat and bit.band(stat.mode, 0o111) == 0 then
-    vim.uv.fs_chmod(path, bit.bor(stat.mode, 0o111))
+  if stat and bit.band(stat.mode, 73) == 0 then
+    vim.uv.fs_chmod(path, bit.bor(stat.mode, 73))
   end
 end
 
