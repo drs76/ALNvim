@@ -68,7 +68,8 @@ function M.download(root)
   vim.fn.mkdir(pkgdir, "p")
 
   local base   = conn.base_url(cfg)
-  local tenant = cfg.tenant or "default"
+  -- Cloud launch.json uses primaryTenantDomain; on-prem uses tenant.
+  local tenant = cfg.primaryTenantDomain or cfg.tenant or "default"
   local auth   = conn.curl_auth(cfg)
 
   vim.notify(
@@ -84,16 +85,23 @@ function M.download(root)
       pkgdir, safe_name(dep.publisher), safe_name(dep.name), dep.version or "0.0.0.0")
     local label   = (dep.publisher or "") .. "_" .. (dep.name or "")
 
-    local cmd = { "curl", "-sL", "--fail" }
+    -- -sS: silent progress but show errors; -L: follow redirects; --fail: non-zero on HTTP error
+    local cmd = { "curl", "-sLS", "--fail" }
     vim.list_extend(cmd, auth)
     vim.list_extend(cmd, { "-o", outfile, url })
 
+    local err_buf = {}
     vim.fn.jobstart(cmd, {
+      on_stderr = function(_, data)
+        for _, line in ipairs(data) do
+          if line ~= "" then table.insert(err_buf, line) end
+        end
+      end,
       on_exit = vim.schedule_wrap(function(_, code)
         pending = pending - 1
         if code ~= 0 then
-          table.insert(failed, label)
-          -- Remove the empty / partial file that curl may have created
+          local detail = #err_buf > 0 and ("\n  " .. table.concat(err_buf, " ")) or ""
+          table.insert(failed, label .. "\n  URL: " .. url .. detail)
           pcall(vim.uv.fs_unlink, outfile)
         end
         if pending == 0 then
@@ -101,8 +109,7 @@ function M.download(root)
             vim.notify("AL: All symbol packages downloaded successfully", vim.log.levels.INFO)
           else
             vim.notify(
-              "AL: Failed to download: " .. table.concat(failed, ", ") ..
-              "\nCheck server URL, credentials, and that the package exists on that BC instance.",
+              "AL: Failed to download:\n" .. table.concat(failed, "\n"),
               vim.log.levels.WARN)
           end
         end

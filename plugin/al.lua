@@ -89,6 +89,10 @@ vim.api.nvim_create_user_command("ALReloadSnippets", function()
   require("al.snippets").reload()
 end, { desc = "Reload AL LuaSnip snippets" })
 
+vim.api.nvim_create_user_command("ALClearCredentials", function()
+  require("al.connection").clear_credentials()
+end, { desc = "Clear cached BC credentials (username/password or Entra token)" })
+
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")
   local root = lsp.get_root()

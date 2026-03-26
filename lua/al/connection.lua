@@ -4,6 +4,12 @@
 
 local M = {}
 
+-- In-memory credential cache: keyed by base_url .. "|" .. auth_type.
+-- UserPassword entries store { "-u", "user:pass" }.
+-- Entra manual-entry entries store the raw token string.
+-- Clear with M.clear_credentials() or :ALClearCredentials.
+local _cache = {}
+
 -- Strip JSONC-style single-line comments (// ...) while preserving URLs (http://).
 -- Does not handle /* */ block comments or // inside strings, but is sufficient
 -- for standard launch.json content.
@@ -57,42 +63,60 @@ function M.base_url(cfg)
   return server .. "/" .. instance
 end
 
--- Prompt for a credential, trying env-var then interactive prompt.
-local function get_cred(env_key, prompt_label)
-  local val = os.getenv(env_key)
-  if val and val ~= "" then return val end
-  return vim.fn.input(prompt_label .. ": ")
-end
-
-local function get_secret(env_key, prompt_label)
-  local val = os.getenv(env_key)
-  if val and val ~= "" then return val end
-  return vim.fn.inputsecret(prompt_label .. ": ")
+-- Clear the in-memory credential cache (all entries or a specific base URL).
+function M.clear_credentials()
+  _cache = {}
+  vim.notify("AL: Credential cache cleared", vim.log.levels.INFO)
 end
 
 -- Return a list of curl arguments that handle authentication.
 -- Credential resolution order:
---   1. launch.json  al_username / al_password  (non-standard, user-added)
---   2. env vars     AL_BC_USERNAME / AL_BC_PASSWORD
---   3. interactive  vim.fn.input / vim.fn.inputsecret
+--   UserPassword  : 1. launch.json al_username/al_password  2. env vars  3. prompt (cached per session)
+--   MicrosoftEntraID / AAD:
+--                   1. AL_BC_TOKEN env var
+--                   2. Azure CLI  `az account get-access-token` (handles its own refresh)
+--                   3. Manual prompt (cached per session)
 function M.curl_auth(cfg)
-  local auth = cfg.authentication or "Windows"
+  -- Cloud environments always use Entra ID even when the field is absent (matches VSCode behaviour)
+  local is_cloud = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
+  local auth = cfg.authentication or (is_cloud and "MicrosoftEntraID" or "Windows")
+  local key  = M.base_url(cfg) .. "|" .. auth
 
   if auth == "Windows" then
-    -- Use current user's Kerberos/NTLM ticket when possible
     return { "--ntlm", "--negotiate", "-u", ":" }
 
   elseif auth == "UserPassword" or auth == "NavUserPassword" then
-    local user = cfg.al_username or get_cred("AL_BC_USERNAME", "BC Username")
-    local pass = cfg.al_password or get_secret("AL_BC_PASSWORD", "BC Password")
-    return { "-u", user .. ":" .. pass }
+    if not _cache[key] then
+      local user = cfg.al_username
+        or (os.getenv("AL_BC_USERNAME") ~= "" and os.getenv("AL_BC_USERNAME"))
+        or vim.fn.input("BC Username: ")
+      local pass = cfg.al_password
+        or (os.getenv("AL_BC_PASSWORD") ~= "" and os.getenv("AL_BC_PASSWORD"))
+        or vim.fn.inputsecret("BC Password: ")
+      _cache[key] = { "-u", user .. ":" .. pass }
+    end
+    return _cache[key]
 
   elseif auth == "AAD" or auth == "MicrosoftEntraID" then
-    vim.notify(
-      "AL: AAD/Entra auth requires a bearer token. Set AL_BC_TOKEN env var.",
-      vim.log.levels.WARN)
-    local token = os.getenv("AL_BC_TOKEN") or vim.fn.inputsecret("Bearer token: ")
-    return { "-H", "Authorization: Bearer " .. token }
+    -- Env var always wins (not cached — caller controls it)
+    local token = os.getenv("AL_BC_TOKEN")
+    if token and token ~= "" then
+      return { "-H", "Authorization: Bearer " .. token }
+    end
+    -- Azure CLI: manages its own token cache and handles refresh transparently
+    local az = vim.trim(vim.fn.system(
+      "az account get-access-token" ..
+      " --resource https://api.businesscentral.dynamics.com" ..
+      " --query accessToken -o tsv 2>/dev/null"))
+    if vim.v.shell_error == 0 and az ~= "" then
+      return { "-H", "Authorization: Bearer " .. az }
+    end
+    -- Fall back to manual prompt, cached for the session
+    if not _cache[key] then
+      vim.notify("AL: Azure CLI not available or not logged in. Enter token manually.", vim.log.levels.WARN)
+      _cache[key] = vim.fn.inputsecret("Bearer token (Entra ID): ")
+    end
+    return { "-H", "Authorization: Bearer " .. _cache[key] }
   end
 
   return {}
