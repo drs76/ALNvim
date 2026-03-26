@@ -20,13 +20,25 @@ for _, bin in ipairs({ lsp_bin, ext_path .. "/bin/linux/alc" }) do
 end
 
 vim.lsp.config("al_language_server", {
-  cmd        = { lsp_bin },
-  filetypes  = { "al" },
-  -- Root is the directory that contains app.json
+  cmd          = { lsp_bin },
+  filetypes    = { "al" },
   root_markers = { "app.json" },
-  settings   = {},
   -- The AL server is sometimes slow to start; give it extra time.
-  flags      = { debounce_text_changes = 300 },
+  flags        = { debounce_text_changes = 300 },
+  -- Called before each new server instance starts; root_dir is resolved by this point.
+  on_new_config = function(config, root_dir)
+    config.init_options = {
+      workspacePath = root_dir,
+      alResourceConfigurationSettings = {
+        packageCachePaths    = { root_dir .. "/.alpackages" },
+        assemblyProbingPaths = { root_dir .. "/.netpackages" },
+        enableCodeAnalysis   = true,
+        backgroundCodeAnalysis = "Project",
+        enableCodeActions    = true,
+        incrementalBuild     = true,
+      },
+    }
+  end,
 })
 
 vim.lsp.enable("al_language_server")
