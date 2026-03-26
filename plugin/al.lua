@@ -66,6 +66,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     client:request("al/setActiveWorkspace", {
       currentWorkspaceFolderPath = root,
       settings = {
+        workspacePath          = root,
         packageCachePaths      = { root .. "/.alpackages" },
         assemblyProbingPaths   = { root .. "/.netpackages" },
         enableCodeAnalysis     = true,
