@@ -40,6 +40,8 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 
 Both `alc` and the LSP host are shipped without the exec bit. `plugin/al.lua` sets it at startup via `vim.uv.fs_chmod`.
 
+**LuaJIT gotcha**: Neovim uses LuaJIT (Lua 5.1), which does not support `0o` octal literals. Use decimal `73` instead of `0o111` for the execute-bit mask.
+
 ## LSP
 
 The AL language server speaks standard LSP over stdio. It is registered via:
@@ -92,6 +94,32 @@ Global LSP keymaps (`gd`, `gr`, `K`, `<leader>rn`, etc.) are set by the user's `
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
 | `:ALInfo` | Show project and extension info |
 
+## Project root detection (`lsp.get_root()`)
+
+All commands use `lsp.get_root()` (including `compile.lua` which no longer has its own `find_project_root()`). Resolution order:
+
+1. Search upward from the current buffer for `app.json` (fast path — works when editing an `.al` file)
+2. Scan downward from `vim.fn.getcwd()` for all `app.json` files
+3. If one found → use it; if multiple → prompt user to pick via `vim.fn.inputlist`
+
+This supports multi-project workspaces (e.g. App + Test app in one workspace folder).
+
+## Symbol downloads (`symbols.lua`)
+
+`:ALDownloadSymbols` always includes the implicit Microsoft base packages even when `app.json` has no explicit dependencies:
+- `Microsoft / Application` — version from `app.application`
+- `Microsoft / System Application` — version from `app.application`
+
+Explicit dependencies are appended after these, with duplicates skipped.
+
+## Pack update workflow
+
+`vim.pack.update()` may not pull new commits if the pack is on a detached HEAD. Manual update:
+```bash
+git -C ~/.local/share/nvim/site/pack/core/opt/ALNvim pull origin master
+```
+The pack remote points to `~/Documents/ALNvim` (local clone), not GitHub directly.
+
 ## AL project layout expected
 
 ```
@@ -122,6 +150,22 @@ All three feature modules hit the BC dev endpoint. On-prem base: `http[s]://<ser
 3. Interactive `vim.fn.input` / `vim.fn.inputsecret` prompt
 
 For AAD/Entra: `AL_BC_TOKEN` env var or interactive prompt.
+
+**Important**: `"authentication": "Windows"` uses NTLM/Negotiate (`--ntlm --negotiate -u :`) and will silently fail on Linux without a Kerberos ticket — no prompt is shown. Use `"UserPassword"` for on-prem or `"MicrosoftEntraID"` for cloud.
+
+Cloud `launch.json` example:
+```json
+{
+  "type": "al",
+  "request": "launch",
+  "name": "BC Cloud",
+  "environmentType": "Sandbox",
+  "environmentName": "your-env",
+  "primaryTenantDomain": "yourtenant.onmicrosoft.com",
+  "authentication": "MicrosoftEntraID"
+}
+```
+Bearer token via Azure CLI: `az account get-access-token --resource https://api.businesscentral.dynamics.com --query accessToken -o tsv`
 
 ## `compile.lua` on_success callback
 
