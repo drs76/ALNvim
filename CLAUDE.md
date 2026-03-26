@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, loaded via the Neovim 0.11+ built-in `vim.pack.add()` API. It integrates the AL language server shipped with the MS AL VSCode extension at `~/.vscode/extensions/ms-dynamics-smb.al-16.3.2065053`.
+ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, loaded via the Neovim 0.11+ built-in `vim.pack.add()` API. It integrates the AL language server shipped with the MS AL VSCode extension under `~/.vscode/extensions/`. The newest installed version is auto-detected at startup by `lua/al/ext.lua`.
 
 ## Structure
 
@@ -12,6 +12,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 |---|---|
 | `plugin/al.lua` | Auto-loaded entry point: registers LSP config, creates user commands |
 | `lua/al/init.lua` | `require('al').setup(opts)` – user-facing configuration |
+| `lua/al/ext.lua` | Auto-detects the newest MS AL VSCode extension directory (cached at startup) |
 | `lua/al/lsp.lua` | Helpers for finding project root and reading `app.json` |
 | `lua/al/connection.lua` | Shared BC connection utils: parse launch.json, build URLs, curl auth flags |
 | `lua/al/compile.lua` | Async `alc` compiler integration with quickfix output |
@@ -25,10 +26,12 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `snippets/al.json` | VSCode-format snippets (object templates + control flow) |
 | `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
 
-## AL Toolchain paths (hard-coded)
+## AL Toolchain paths
+
+`ext.lua` scans `~/.vscode/extensions/ms-dynamics-smb.al-*` and picks the highest version numerically. Binaries are relative to that directory:
 
 ```
-~/.vscode/extensions/ms-dynamics-smb.al-16.3.2065053/
+<ext_path>/
   bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host   ← LSP server (stdio)
   bin/linux/alc                                          ← AL compiler
   bin/linux/altool                                       ← AL tools helper
@@ -46,7 +49,7 @@ vim.lsp.config("al_language_server", { cmd = { lsp_bin }, filetypes = { "al" }, 
 vim.lsp.enable("al_language_server")
 ```
 
-If the server fails to attach, check `vim.lsp.get_clients()` and `:checkhealth lsp`. The server may need additional `initializationOptions` – inspect `~/.vscode/extensions/ms-dynamics-smb.al-16.3.2065053/dist/extension.js` (minified) for hints.
+If the server fails to attach, check `vim.lsp.get_clients()` and `:checkhealth lsp`. The server may need additional `initializationOptions` – inspect `<ext_path>/dist/extension.js` (minified) for hints.
 
 ## Compiling
 
@@ -78,7 +81,12 @@ Global LSP keymaps (`gd`, `gr`, `K`, `<leader>rn`, etc.) are set by the user's `
 | Command | Description |
 |---|---|
 | `:ALCompile [dir]` | Compile project with `alc` |
-| `:ALPublish [dir]` | Compile (future: deploy to BC) |
+| `:ALPublish [dir]` | Compile then publish `.app` to BC |
+| `:ALPublishOnly [dir]` | Publish existing `.app` to BC (skip compile) |
+| `:ALDownloadSymbols [dir]` | Download `.app` symbol packages from BC |
+| `:ALSnapshotStart` | Start a BC snapshot debugging session |
+| `:ALSnapshotFinish` | Download snapshot file and open it |
+| `:ALDebugSetup` | Configure nvim-dap for AL live attach |
 | `:ALOpenAppJson` | Edit project `app.json` |
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
@@ -90,6 +98,7 @@ Global LSP keymaps (`gd`, `gr`, `K`, `<leader>rn`, etc.) are set by the user's `
 <project>/
   app.json          ← manifest (publisher, name, version, dependencies)
   .alpackages/      ← downloaded symbol packages (.app files)
+  .snapshots/       ← snapshot debug files (git-ignored)
   .vscode/
     launch.json     ← BC server connection for publish/debug
   src/              ← AL source files (*.al)
