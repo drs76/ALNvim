@@ -434,11 +434,7 @@ The panel has two rendering paths:
 | `smd` on `$PATH` | ANSI-styled terminal buffer via `smd` (colours, headings, code blocks) |
 | `smd` absent | `nofile` buffer with `filetype=markdown` + `render-markdown.nvim` |
 
-**Install smd** (bash+sed markdown renderer, no dependencies beyond GNU sed):
-```bash
-curl -fsSL https://codeberg.org/raw/johann1764/smd/branch/main/smd \
-  -o ~/.local/bin/smd && chmod +x ~/.local/bin/smd
-```
+`smd` is optional. When absent the panel falls back to a `nofile` buffer with `filetype=markdown` (rendered by render-markdown.nvim if installed, otherwise plain text).
 
 When smd is active: each page navigation runs `smd <tmpfile>` via `vim.fn.jobstart`
 (no PTY — stdout is a pipe, so smd auto-selects `cat` rather than `less`).

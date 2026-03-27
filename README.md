@@ -167,16 +167,13 @@ topic picker with 35 curated AL topics.
 
 ### Rendering
 
+The panel auto-detects what is available:
+
 | Condition | Rendering |
 |---|---|
-| `smd` on `$PATH` | ANSI-styled terminal buffer — proper headings, code blocks, colours |
-| `smd` absent | `nofile` buffer with `filetype=markdown` rendered by render-markdown.nvim |
-
-Install `smd` (bash+sed markdown renderer, no dependencies beyond GNU sed):
-```bash
-curl -fsSL https://codeberg.org/raw/johann1764/smd/branch/main/smd \
-  -o ~/.local/bin/smd && chmod +x ~/.local/bin/smd
-```
+| [`smd`](https://codeberg.org/johann1764/smd) on `$PATH` | ANSI-styled terminal buffer — headings, code blocks, colours |
+| `smd` absent | `nofile` buffer with `filetype=markdown`; styled by render-markdown.nvim if installed |
+| Neither present | Plain markdown text |
 
 ### Panel keymaps
 
