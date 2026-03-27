@@ -61,6 +61,7 @@ vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
     vim.notify("AL: project loaded — gd and K ready", vim.log.levels.WARN)
   end
+  return vim.NIL  -- server-initiated request: must respond with null
 end
 
 -- Show loading progress so the user knows the server is working.
@@ -99,10 +100,38 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- This is the trigger for the server to start indexing packages and source files.
     -- Structure mirrors what the VSCode AL extension sends: workspacePath at top level,
     -- settings nested under alResourceConfigurationSettings, setActiveWorkspace = true.
+    -- Build expectedProjectReferenceDefinitions from app.json dependencies.
+    local lsp_mod = require("al.lsp")
+    local app_json = lsp_mod.read_app_json(root)
+    local proj_refs = {}
+    for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
+      if dep.id then
+        table.insert(proj_refs, {
+          appId     = dep.id,
+          name      = dep.name or "",
+          publisher = dep.publisher or "",
+          version   = dep.version or "0.0.0.0",
+        })
+      end
+    end
+
+    -- VSCode extension sends: { currentWorkspaceFolderPath: <WorkspaceFolder>, settings: { ... } }
+    -- Sending settings at the top level causes silent deserialization failure in the server.
+    local root_uri = "file://" .. root
     client:request("al/setActiveWorkspace", {
-      workspacePath = root,
-      alResourceConfigurationSettings = ws_cfg,
-      setActiveWorkspace = true,
+      currentWorkspaceFolderPath = {
+        uri   = root_uri,
+        name  = vim.fn.fnamemodify(root, ":t"),
+        index = 0,
+      },
+      settings = {
+        workspacePath                       = root,
+        alResourceConfigurationSettings     = ws_cfg,
+        setActiveWorkspace                  = true,
+        dependencyParentWorkspacePath       = vim.NIL,
+        expectedProjectReferenceDefinitions = proj_refs,
+        activeWorkspaceClosure              = {},
+      },
     }, function(err, result)
       if err then
         vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
@@ -114,15 +143,19 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end, args.buf)
 
     -- gd: use the server's custom al/gotodefinition instead of textDocument/definition.
-    vim.keymap.set("n", "gd", function()
-      local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-      client:request("al/gotodefinition", {
-        textDocumentPositionParams = params,
-      }, function(err, result)
-        if err or not result then return end
-        vim.lsp.util.jump_to_location(result, client.offset_encoding)
-      end, args.buf)
-    end, { buffer = args.buf, desc = "AL: Go to definition" })
+    -- vim.schedule defers until after all LspAttach handlers have run, so this
+    -- overrides the generic gd set by the user's init.lua LspAttach callback.
+    vim.schedule(function()
+      vim.keymap.set("n", "gd", function()
+        local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+        client:request("al/gotodefinition", {
+          textDocumentPositionParams = params,
+        }, function(err, result)
+          if err or not result then return end
+          vim.lsp.util.jump_to_location(result, client.offset_encoding)
+        end, args.buf)
+      end, { buffer = args.buf, desc = "AL: Go to definition" })
+    end)
   end,
 })
 
