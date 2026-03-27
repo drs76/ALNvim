@@ -45,13 +45,18 @@ function M.download(root)
   end
 
   -- Always include the implicit Microsoft base packages, unless already listed
-  -- as an explicit dependency. "System" uses the platform version; the other
-  -- two use the application version (mirrors VSCode AL extension behaviour).
+  -- as an explicit dependency. "System" uses the platform version; the rest
+  -- use the application version.
+  -- BC 21+ splits the old monolithic Application into:
+  --   System Application → System Application
+  --   Business Foundation → new in BC 22, required by Application/Base Application
+  --   Application (or Base Application on some tenants) → contains Customer, Vendor, etc.
   local deps = {}
   local base_pkgs = {
-    { publisher = "Microsoft", name = "System",             version = app.platform    or "0.0.0.0" },
-    { publisher = "Microsoft", name = "Application",        version = app.application or "0.0.0.0" },
-    { publisher = "Microsoft", name = "System Application", version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "System",              version = app.platform    or "0.0.0.0" },
+    { publisher = "Microsoft", name = "System Application",  version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "Business Foundation", version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "Application",         version = app.application or "0.0.0.0" },
   }
   for _, bp in ipairs(base_pkgs) do
     local found = false
