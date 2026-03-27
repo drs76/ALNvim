@@ -17,6 +17,7 @@ Provides:
 - Automatic file organiser — moves saved AL files to the correct `src/<type>/` folder on write
 - 40+ LuaSnip snippets (object templates, control flow, events, HTTP, JSON)
 - BC Dark colour scheme applied per-buffer for AL files
+- Text objects — `daf`/`vif` for procedures/triggers, `daF`/`viF` for begin/end blocks
 - Buffer-local keymaps and editor settings for AL files
 
 ---
@@ -753,6 +754,3 @@ Ensure `require("al").setup()` is called **after** LuaSnip is loaded. Run `:ALRe
 
 ---
 
-## Roadmap
-
-- **Treesitter grammar** — generate from `alsyntax.tmlanguage` for richer highlighting and text objects

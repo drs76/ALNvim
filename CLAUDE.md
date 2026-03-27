@@ -499,6 +499,22 @@ and testing. Displayed via `vim.ui.select`; selecting a topic fetches and replac
 
 YAML front matter (`--- … ---`) and `[!INCLUDE [...](…)]` directives are stripped before display.
 
+## AL Text Objects (`lua/al/textobj.lua`)
+
+Buffer-local, loaded from `ftplugin/al.lua`.
+
+| Keys | Mode | Selects |
+|---|---|---|
+| `af` / `if` | o, x | around / inside the procedure or trigger under cursor |
+| `aF` / `iF` | o, x | around / inside the nearest begin/end (or case/end) block |
+
+**`proc_bounds`** walks backward for a `procedure`/`trigger` line, then forward for the
+`end;` at the same indentation level. A separate forward pass finds the `begin` line at
+that same indent (after any `var` section) for the `if` variant.
+
+**`block_bounds`** tracks depth by counting `begin`/`case` (+1) and `end` (−1), walking
+backward to the owning `begin`/`case` then forward to its closing `end`.
+
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
 `:ALNewObject [dir]` / `<leader>an` walks through a `vim.ui.select` + `vim.ui.input` prompt

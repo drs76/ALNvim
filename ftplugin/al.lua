@@ -66,3 +66,9 @@ vim.keymap.set("n", "<leader>adl", "<cmd>ALLaunch<CR>",          vim.tbl_extend(
 vim.keymap.set("n", "<leader>ads", "<cmd>ALSnapshotStart<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Start snapshot debug session" }))
 vim.keymap.set("n", "<leader>adf", "<cmd>ALSnapshotFinish<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Finish snapshot and download" }))
 vim.keymap.set("n", "<leader>add", "<cmd>ALDebugSetup<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Configure nvim-dap for AL" }))
+-- Text objects
+local _to = require("al.textobj")
+vim.keymap.set({ "o", "x" }, "af", _to.around_proc,  { buffer = true, silent = true, desc = "AL: around procedure/trigger" })
+vim.keymap.set({ "o", "x" }, "if", _to.inside_proc,  { buffer = true, silent = true, desc = "AL: inside procedure/trigger" })
+vim.keymap.set({ "o", "x" }, "aF", _to.around_block, { buffer = true, silent = true, desc = "AL: around begin/end block" })
+vim.keymap.set({ "o", "x" }, "iF", _to.inside_block, { buffer = true, silent = true, desc = "AL: inside begin/end block" })
