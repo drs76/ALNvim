@@ -180,7 +180,50 @@ vim.api.nvim_create_autocmd("LspAttach", {
           textDocumentPositionParams = params,
         }, function(err, result)
           if err or not result then return end
-          vim.lsp.util.show_document(result, client.offset_encoding, { focus = true })
+          local uri   = result.uri or result.targetUri
+          local range = result.range or result.targetSelectionRange or result.targetRange
+          if not uri or not range then return end
+          local function jump_to(bufnr)
+            vim.api.nvim_set_current_buf(bufnr)
+            local line = math.min((range.start.line or 0) + 1,
+                                  vim.api.nvim_buf_line_count(bufnr))
+            pcall(vim.api.nvim_win_set_cursor, 0, { line, range.start.character or 0 })
+          end
+
+          if uri:match("^al%-preview://") then
+            -- Virtual document — ask the server for the source text.
+            client:request("al/previewDocument", { Uri = uri },
+              function(perr, presult)
+                if perr or not presult or not presult.content then return end
+                vim.schedule(function()
+                  -- Reuse an existing scratch buffer for this URI, or create one.
+                  local bname = "al-preview://" .. uri:match("al%-preview://(.+)$")
+                  local bufnr = vim.fn.bufnr(bname)
+                  if bufnr == -1 then
+                    bufnr = vim.api.nvim_create_buf(false, true)
+                    vim.api.nvim_buf_set_name(bufnr, bname)
+                    vim.bo[bufnr].filetype = "al"
+                    vim.bo[bufnr].buftype  = "nofile"
+                    vim.bo[bufnr].modifiable = false
+                  end
+                  vim.bo[bufnr].modifiable = true
+                  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false,
+                    vim.split(presult.content:gsub("\r\n", "\n"):gsub("\r", "\n"), "\n", { plain = true }))
+                  vim.bo[bufnr].modifiable = false
+                  jump_to(bufnr)
+                end)
+              end, args.buf)
+          else
+            vim.schedule(function()
+              local fname = vim.uri_to_fname(uri)
+              if vim.fn.filereadable(fname) == 0 then
+                vim.notify("AL gd: file not readable: " .. fname, vim.log.levels.WARN)
+                return
+              end
+              vim.cmd("edit " .. vim.fn.fnameescape(fname))
+              jump_to(0)
+            end)
+          end
         end, args.buf)
       end, { buffer = args.buf, desc = "AL: Go to definition" })
     end)

@@ -88,7 +88,8 @@ The AL server extends LSP with several custom methods. All are handled in `plugi
 | `al/setActiveWorkspace` | client → server | Trigger project/symbol indexing. Must be sent after attach. |
 | `al/activeProjectLoaded` | server → client | Server notifies when indexing is complete. This is a REQUEST, not a notification — client must respond. |
 | `al/progressNotification` | server → client | Loading progress (percent). Notification — no response needed. |
-| `al/gotodefinition` | client → server | Go to definition (server has `definitionProvider = false`). |
+| `al/gotodefinition` | client → server | Go to definition (server has `definitionProvider = false`). Returns `file://` or `al-preview://` URI. |
+| `al/previewDocument` | client → server | Fetch source text for an `al-preview://` virtual document. Payload: `{ Uri = uri }`. Response: `{ content = "..." }`. |
 
 ### `al/setActiveWorkspace` — critical payload format
 
@@ -136,26 +137,16 @@ end
 
 ### `gd` keymap override
 
-The server has `definitionProvider = false` — `textDocument/definition` returns nothing. `gd` must be overridden to use `al/gotodefinition`. Use `vim.schedule` to defer the keymap so it wins over the user's generic `LspAttach` handler:
+The server has `definitionProvider = false` — `textDocument/definition` returns nothing. `gd` must be overridden to use `al/gotodefinition`. Use `vim.schedule` to defer the keymap so it wins over the user's generic `LspAttach` handler.
 
-```lua
-vim.api.nvim_create_autocmd("LspAttach", {
-  callback = function(args)
-    local client = vim.lsp.get_client_by_id(args.data.client_id)
-    if not client or client.name ~= "al_language_server" then return end
-    vim.schedule(function()
-      vim.keymap.set("n", "gd", function()
-        local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-        client:request("al/gotodefinition", { textDocumentPositionParams = params },
-          function(err, result)
-            if err or not result then return end
-            vim.lsp.util.jump_to_location(result, client.offset_encoding)
-          end, args.buf)
-      end, { buffer = args.buf, desc = "AL: Go to definition" })
-    end)
-  end,
-})
-```
+**`al/gotodefinition` returns two types of location:**
+
+1. **`file://` URI** — a real file on disk (project source). Open with `vim.cmd("edit ...")`.
+2. **`al-preview://` URI** — a virtual document served by the language server (symbol stubs from `.app` packages). Must be fetched via `al/previewDocument { Uri = uri }` → `result.content`. Display in a read-only `nofile` scratch buffer with `filetype=al`. The content has Windows line endings (`\r\n`) — strip before splitting.
+
+**Do not use `vim.lsp.util.jump_to_location` or `vim.lsp.util.show_document`** — both are deprecated or fail with "cursor position outside buffer" when the target file is not yet open. Open the file manually then set cursor with `pcall(nvim_win_set_cursor, ...)`.
+
+**`al/previewDocument`** — payload: `{ Uri = "al-preview://..." }`, response: `{ content = "..." }`. The URI comes directly from the `al/gotodefinition` result. Scratch buffers are named after the URI so repeated `gd` calls reuse the same buffer.
 
 ### Pending requests
 
@@ -357,7 +348,7 @@ A per-buffer colorscheme applied automatically when an AL file is opened, restor
 | Strings | `#ce8349` (orange) |
 | Numbers / constants | `#2fafff` (blue) |
 
-**Implementation note:** `ftplugin/al.lua` saves `vim.g.colors_name` before applying `bc_dark`, then restores it in a one-shot `BufLeave`/`BufWinLeave` autocmd on the buffer. This is AL-only — other filetypes are unaffected.
+**Implementation note:** `ftplugin/al.lua` saves `vim.g.colors_name` before applying `bc_dark`, then uses a `BufLeave` autocmd to restore it and a `BufEnter` autocmd to re-apply it. Both are permanent (no `once=true`) so the theme toggles correctly across repeated focus changes — LSP hover floats, `gd` navigation to other files, split switching, etc. Do not use `BufWinLeave` (fires on float open/close, causing spurious restores) or `once=true` (breaks after the first focus change).
 
 **Syntax string regions use `oneline`** on `alString`, `alVerbatim`, and `alQuotedIdent` in `syntax/al.vim`. Without `oneline`, unclosed quote characters bleed highlight colour across the rest of the file.
 
