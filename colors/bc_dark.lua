@@ -56,9 +56,9 @@ hi(0, "Number",       { fg = "#efefef" })
 hi(0, "Float",        { fg = "#efefef" })
 hi(0, "Function",     { fg = "#efefef" })
 hi(0, "Identifier",   { fg = "#efefef" })
-hi(0, "Type",         { fg = "#efefef" })
-hi(0, "Structure",    { fg = "#efefef" })
-hi(0, "Typedef",      { fg = "#efefef" })
+hi(0, "Type",         { fg = "#f6fa16" })  -- keyword.other.builtintypes (Record, Integer, Text…)
+hi(0, "Structure",    { fg = "#f6fa16" })  -- keyword.other.applicationobject (codeunit, table, page…)
+hi(0, "Typedef",      { fg = "#f6fa16" })
 -- AL keywords, operators, object types, constants → #f6fa16 (yellow)
 -- covers: keyword.control, keyword.other, keyword.operators.al,
 --         keyword.other.applicationobject, constant.language.al
