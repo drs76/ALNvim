@@ -39,7 +39,7 @@ local function find_app_file(root, app_json)
   end
 end
 
-local function do_upload(base, tenant, schema, auth, app_file, cfg)
+local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
   local url = string.format("%s/dev/apps?tenant=%s&SchemaUpdateMode=%s",
     base, conn.urlencode(tenant), conn.urlencode(schema))
 
@@ -72,6 +72,7 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg)
             base, obj_type, obj_id, conn.urlencode(tenant))
           vim.fn.jobstart({ "xdg-open", url_bc })
         end
+        if on_success then on_success() end
       else
         local msg = table.concat(output, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
         vim.notify(
@@ -85,7 +86,8 @@ end
 -- Compile then publish.
 -- @param root         Optional project root override.
 -- @param skip_compile If true, skip compilation and upload whatever .app exists.
-function M.publish(root, skip_compile)
+-- @param on_success   Optional callback invoked after a successful upload.
+function M.publish(root, skip_compile, on_success)
   root = root or lsp.get_root()
   if not root then
     vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
@@ -115,7 +117,7 @@ function M.publish(root, skip_compile)
       vim.notify("AL: No .app file found. Run :ALCompile first.", vim.log.levels.ERROR)
       return
     end
-    do_upload(base, tenant, schema, auth, app_file, cfg)
+    do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
     return
   end
 
@@ -127,7 +129,7 @@ function M.publish(root, skip_compile)
         vim.notify("AL: Compile succeeded but no .app file found", vim.log.levels.ERROR)
         return
       end
-      do_upload(base, tenant, schema, auth, app_file, cfg)
+      do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
     end)
   end)
 end

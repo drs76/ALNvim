@@ -220,6 +220,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>ao` | `:ALOpenAppJson` |
 | `<leader>al` | `:ALOpenLaunchJson` |
 | `<leader>aq` | Open quickfix list |
+| `<F5>` / `<leader>adl` | `:ALLaunch` — compile, publish, attach debugger |
 | `<leader>ads` | `:ALSnapshotStart` |
 | `<leader>adf` | `:ALSnapshotFinish` |
 | `<leader>add` | `:ALDebugSetup` |
@@ -236,6 +237,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALPublish [dir]` | Compile then publish `.app` to BC |
 | `:ALPublishOnly [dir]` | Publish existing `.app` to BC (skip compile) |
 | `:ALDownloadSymbols [dir]` | Download `.app` symbol packages from BC |
+| `:ALLaunch [dir]` | Compile, publish then attach debugger (F5 equivalent) |
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
@@ -340,6 +342,6 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
 
 ## Adding future features
 
-- **DAP launch mode**: Map the `launch` request type (publish-and-debug). The adapter init options are not publicly documented; inspect the DAP exchange with `:DapLog`.
+- **DAP launch mode (done)**: `:ALLaunch` chains compile → publish → `dap.continue()` (attach). The undocumented DAP `launch` request type is not used — attach is sufficient for BC debugging.
 - **Treesitter grammar**: No community grammar exists yet. Generate from `alsyntax.tmlanguage` with `tree-sitter generate`.
 - **AL Explorer**: Telescope extension that greps for AL object declarations and presents them as a picker.

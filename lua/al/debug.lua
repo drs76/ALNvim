@@ -214,4 +214,36 @@ function M.setup_dap(root)
     vim.log.levels.INFO)
 end
 
+-- ── Launch (F5 equivalent) ────────────────────────────────────────────────────
+--
+-- Mirrors the VSCode F5 flow: compile → publish → attach debugger.
+-- Requires nvim-dap. Configures the AL adapter (same as :ALDebugSetup) then
+-- chains into publish so the debugger attaches as soon as the app is live.
+
+function M.launch(root)
+  local ok, dap = pcall(require, "dap")
+  if not ok then
+    vim.notify(
+      "AL: nvim-dap not installed.\n"
+      .. "Add { src = 'https://github.com/mfussenegger/nvim-dap' } to vim.pack.add",
+      vim.log.levels.WARN)
+    return
+  end
+
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Ensure the DAP adapter and configuration are up to date for this project.
+  M.setup_dap(root)
+
+  -- Compile → publish; on successful upload, attach the debugger.
+  require("al.publish").publish(root, false, function()
+    vim.notify("AL: Attaching debugger…", vim.log.levels.INFO)
+    dap.continue()
+  end)
+end
+
 return M

@@ -233,6 +233,14 @@ vim.api.nvim_create_user_command("ALDebugSetup", function()
   require("al.debug").setup_dap()
 end, { desc = "Configure nvim-dap for AL live attach debugging" })
 
+vim.api.nvim_create_user_command("ALLaunch", function(opts)
+  require("al.debug").launch(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs = "?",
+  complete = "dir",
+  desc  = "Compile, publish and attach debugger (F5 equivalent)",
+})
+
 vim.api.nvim_create_user_command("ALOpenAppJson", function()
   require("al.compile").open_app_json()
 end, { desc = "Open the project's app.json" })
