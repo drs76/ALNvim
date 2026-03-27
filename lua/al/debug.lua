@@ -13,6 +13,15 @@
 --      Command: :ALDebugSetup  then  :DapContinue
 
 local M    = {}
+
+-- The DAP adapter (16.x+) deserialises breakOnError / breakOnRecordWrite as
+-- strict booleans even though the VSCode schema accepts string enum values.
+-- "All" → true, anything else ("None", false, nil) → false.
+local function to_break_bool(v, default_true)
+  if v == nil then return default_true or false end
+  if type(v) == "boolean" then return v end
+  return v == "All" or v == "ExcludeTry" or v == "ExcludeTemporary"
+end
 local conn  = require("al.connection")
 local lsp   = require("al.lsp")
 
@@ -190,8 +199,8 @@ function M.setup_dap(root)
       serverInstance                = cfg.serverInstance or "BC",
       authentication                = cfg.authentication or "Windows",
       tenant                        = tenant,
-      breakOnError                  = cfg.breakOnError or "All",
-      breakOnRecordWrite            = cfg.breakOnRecordWrite or "None",
+      breakOnError                  = to_break_bool(cfg.breakOnError, true),
+      breakOnRecordWrite            = to_break_bool(cfg.breakOnRecordWrite, false),
       breakOnNext                   = cfg.breakOnNext or "WebClient",
       enableSqlInformationDebugger  = cfg.enableSqlInformationDebugger  ~= false,
       enableLongRunningSqlStatements = cfg.enableLongRunningSqlStatements ~= false,
@@ -206,7 +215,7 @@ function M.setup_dap(root)
       serverInstance = cfg.serverInstance or "BC",
       authentication = cfg.authentication or "Windows",
       tenant        = tenant,
-      breakOnError  = cfg.breakOnError or "All",
+      breakOnError  = to_break_bool(cfg.breakOnError, true),
       breakOnNext   = "WebServiceClient",
     },
   }
@@ -262,9 +271,9 @@ function M.launch(root)
     request            = "launch",
     name               = "AL: Launch",
     schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-    breakOnError       = cfg.breakOnError or "All",
+    breakOnError       = to_break_bool(cfg.breakOnError, true),
     breakOnNext        = cfg.breakOnNext or "WebClient",
-    breakOnRecordWrite = cfg.breakOnRecordWrite or "None",
+    breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
     enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
     enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
     longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
