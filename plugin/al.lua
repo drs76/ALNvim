@@ -42,6 +42,24 @@ vim.api.nvim_create_autocmd("FileType", {
       incrementalBuild       = true,
     }
 
+    -- The AL server sends completion item labels as { label = "..." } objects
+    -- instead of plain strings (non-standard). Normalize them before nvim-cmp
+    -- or any other consumer sees them, otherwise string.byte() crashes.
+    local orig_completion = vim.lsp.handlers["textDocument/completion"]
+    local function al_completion_handler(err, result, ctx, config)
+      if result then
+        local items = (type(result) == "table" and result.items) or result
+        if type(items) == "table" then
+          for _, item in ipairs(items) do
+            if type(item.label) == "table" then
+              item.label = item.label.label or ""
+            end
+          end
+        end
+      end
+      return orig_completion(err, result, ctx, config)
+    end
+
     vim.lsp.start({
       name     = "al_language_server",
       cmd      = { lsp_bin },
@@ -49,6 +67,9 @@ vim.api.nvim_create_autocmd("FileType", {
       init_options = {
         workspacePath = root,
         alResourceConfigurationSettings = res_cfg,
+      },
+      handlers = {
+        ["textDocument/completion"] = al_completion_handler,
       },
     }, { bufnr = args.buf })
   end,

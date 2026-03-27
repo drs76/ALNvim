@@ -156,6 +156,29 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
 `al/setActiveWorkspace` and `al/gotodefinition` always appear as "pending" in `client.requests` — the server responds via `window/logMessage` notifications rather than proper JSON-RPC responses. This is expected behaviour.
 
+### Non-standard completion item labels
+
+The AL server sends completion item `label` fields as objects `{ label = "begin" }` rather than plain strings as the LSP spec requires. This crashes nvim-cmp (`string.byte` gets a table). The fix is a `textDocument/completion` handler registered in `vim.lsp.start`'s `handlers` table that normalises the label before passing to the default handler:
+
+```lua
+local orig_completion = vim.lsp.handlers["textDocument/completion"]
+handlers = {
+  ["textDocument/completion"] = function(err, result, ctx, config)
+    if result then
+      local items = (type(result) == "table" and result.items) or result
+      if type(items) == "table" then
+        for _, item in ipairs(items) do
+          if type(item.label) == "table" then
+            item.label = item.label.label or ""
+          end
+        end
+      end
+    end
+    return orig_completion(err, result, ctx, config)
+  end,
+}
+```
+
 ## Compiling
 
 `:ALCompile [dir]` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` asynchronously and populates the quickfix list. The project root is the nearest directory containing `app.json`. Extra flags are passed via `config.alc_extra_args`.
