@@ -165,11 +165,13 @@ function M.setup_dap(root)
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
-  -- Register the adapter (stdio transport, same binary as the LSP)
+  -- Register the adapter (stdio transport, same binary as the LSP).
+  -- /startDebugging switches the binary from LSP mode to DAP mode.
+  -- /projectRoot tells the adapter which project to attach to.
   dap.adapters.al = {
     type    = "executable",
     command = host,
-    args    = {},
+    args    = { "/startDebugging", "/projectRoot:" .. root },
     options = {
       env = { DOTNET_ROOT = "/usr/share/dotnet" },
     },
@@ -249,7 +251,7 @@ function M.launch(root)
   dap.adapters.al = {
     type    = "executable",
     command = host,
-    args    = {},
+    args    = { "/startDebugging", "/projectRoot:" .. root },
     options = { env = { DOTNET_ROOT = "/usr/share/dotnet" } },
   }
 
