@@ -53,6 +53,13 @@ vim.keymap.set("n", "<leader>ao", "<cmd>ALOpenAppJson<CR>",      vim.tbl_extend(
 vim.keymap.set("n", "<leader>al", "<cmd>ALOpenLaunchJson<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open launch.json" }))
 vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
 vim.keymap.set("n", "<leader>ac", "<cmd>ALSelectCops<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Select active code cops" }))
+vim.keymap.set("n", "<leader>ad", function()
+  if pcall(require, "telescope.builtin") then
+    require("telescope.builtin").diagnostics({ bufnr = 0 })
+  else
+    vim.diagnostic.setloclist()
+  end
+end, vim.tbl_extend("force", opts, { desc = "AL: Diagnostics for current buffer" }))
 -- Explorer
 vim.keymap.set("n", "<leader>ah", "<cmd>ALHelp<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Toggle help panel (MS Learn)" }))
 vim.keymap.set("n", "<leader>aH", "<cmd>ALHelpTopics<CR>", vim.tbl_extend("force", opts, { desc = "AL: Help topic picker" }))
