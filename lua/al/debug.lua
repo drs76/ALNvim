@@ -216,9 +216,10 @@ end
 
 -- ── Launch (F5 equivalent) ────────────────────────────────────────────────────
 --
--- Mirrors the VSCode F5 flow: compile → publish → attach debugger.
--- Requires nvim-dap. Configures the AL adapter (same as :ALDebugSetup) then
--- chains into publish so the debugger attaches as soon as the app is live.
+-- Mirrors the VSCode F5 flow: compile → DAP launch request.
+-- The DAP adapter (EditorServices.Host) handles publishing to BC when it
+-- receives a "launch" request — VSCode never does a direct HTTP POST to
+-- /dev/apps. We compile with alc, then hand a launch config to dap.run().
 
 function M.launch(root)
   local ok, dap = pcall(require, "dap")
@@ -236,13 +237,61 @@ function M.launch(root)
     return
   end
 
-  -- Ensure the DAP adapter and configuration are up to date for this project.
-  M.setup_dap(root)
+  local cfg = conn.read_launch(root)
+  if not cfg then
+    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
+    return
+  end
 
-  -- Compile → publish; on successful upload, attach the debugger.
-  require("al.publish").publish(root, false, function()
-    vim.notify("AL: Attaching debugger…", vim.log.levels.INFO)
-    dap.continue()
+  local ext  = require("al").config.ext_path or require("al.ext").path
+  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+
+  dap.adapters.al = {
+    type    = "executable",
+    command = host,
+    args    = {},
+    options = { env = { DOTNET_ROOT = "/usr/share/dotnet" } },
+  }
+
+  -- Build the DAP launch configuration from launch.json fields.
+  -- request = "launch" tells the adapter to publish the .app then attach.
+  local launch_cfg = {
+    type               = "al",
+    request            = "launch",
+    name               = "AL: Launch",
+    schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+    breakOnError       = cfg.breakOnError or "All",
+    breakOnNext        = cfg.breakOnNext or "WebClient",
+    breakOnRecordWrite = cfg.breakOnRecordWrite or "None",
+    enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
+    enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
+    longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+    numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+    launchBrowser     = cfg.launchBrowser or false,
+    startupObjectType = cfg.startupObjectType or "Page",
+    startupObjectId   = cfg.startupObjectId or 22,
+  }
+
+  -- Cloud environments use environmentType/environmentName/tenant;
+  -- on-prem uses server/serverInstance.
+  if cfg.environmentType then
+    launch_cfg.environmentType     = cfg.environmentType
+    launch_cfg.environmentName     = cfg.environmentName
+    launch_cfg.tenant              = cfg.tenant
+    launch_cfg.primaryTenantDomain = cfg.primaryTenantDomain
+    launch_cfg.authentication      = cfg.authentication or "MicrosoftEntraID"
+  else
+    launch_cfg.server          = cfg.server
+    launch_cfg.serverInstance  = cfg.serverInstance
+    launch_cfg.tenant          = cfg.tenant or "default"
+    launch_cfg.authentication  = cfg.authentication or "Windows"
+  end
+
+  -- Compile first; on a clean build hand the launch config to the adapter.
+  -- The adapter publishes the .app and attaches — no separate HTTP upload needed.
+  require("al.compile").compile(root, nil, function()
+    vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
+    dap.run(launch_cfg)
   end)
 end
 

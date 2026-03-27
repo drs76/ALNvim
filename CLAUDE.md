@@ -342,6 +342,6 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
 
 ## Adding future features
 
-- **DAP launch mode (done)**: `:ALLaunch` chains compile → publish → `dap.continue()` (attach). The undocumented DAP `launch` request type is not used — attach is sufficient for BC debugging.
+- **DAP launch mode (done)**: `:ALLaunch` compiles with `alc` then calls `dap.run()` with `request = "launch"`. The adapter (EditorServices.Host) handles publishing to BC internally — VSCode never does a direct HTTP POST to `/dev/apps`. Direct HTTP publish (`application/octet-stream`) returns HTTP 415 for cloud environments because the cloud API does not expose that endpoint to external clients.
 - **Treesitter grammar**: No community grammar exists yet. Generate from `alsyntax.tmlanguage` with `tree-sitter generate`.
 - **AL Explorer**: Telescope extension that greps for AL object declarations and presents them as a picker.
