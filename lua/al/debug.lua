@@ -182,7 +182,13 @@ function M.setup_dap(root)
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },
     options = {
-      env = { DOTNET_ROOT = "/usr/share/dotnet" },
+      env = {
+        DOTNET_ROOT             = "/usr/share/dotnet",
+        DISPLAY                  = os.getenv("DISPLAY") or "",
+        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+      },
     },
   }
 
@@ -261,7 +267,16 @@ function M.launch(root)
     type    = "executable",
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = { env = { DOTNET_ROOT = "/usr/share/dotnet" } },
+    options = {
+      env = {
+        DOTNET_ROOT             = "/usr/share/dotnet",
+        -- Pass display env so the adapter's xdg-open can open a browser
+        DISPLAY                  = os.getenv("DISPLAY") or "",
+        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+      },
+    },
   }
 
   -- Build the DAP launch configuration from launch.json fields.
