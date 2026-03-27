@@ -93,6 +93,7 @@ hi(0, "DiagnosticError",          { fg = "#ea0408" })
 hi(0, "DiagnosticWarn",           { fg = "#f0c722" })
 hi(0, "DiagnosticInfo",           { fg = "#04b925" })
 hi(0, "DiagnosticHint",           { fg = "#555555" })
+hi(0, "DiagnosticUnnecessary",    { fg = "#ce8349" })  -- unused vars/params → orange
 hi(0, "DiagnosticUnderlineError", { undercurl = true, sp = "#ea0408" })
 hi(0, "DiagnosticUnderlineWarn",  { undercurl = true, sp = "#f0c722" })
 
