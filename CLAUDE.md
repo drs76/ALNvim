@@ -218,6 +218,7 @@ This supports multi-project workspaces (e.g. App + Test app in one workspace fol
 ## Symbol downloads (`symbols.lua`)
 
 `:ALDownloadSymbols` always includes the implicit Microsoft base packages even when `app.json` has no explicit dependencies:
+- `Microsoft / System` — version from `app.platform` (defines Label, Text, Integer, etc.)
 - `Microsoft / Application` — version from `app.application`
 - `Microsoft / System Application` — version from `app.application`
 

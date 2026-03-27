@@ -44,10 +44,12 @@ function M.download(root)
     return
   end
 
-  -- Always include the implicit Microsoft base packages derived from app.json
-  -- "application" version, unless already listed as an explicit dependency.
+  -- Always include the implicit Microsoft base packages, unless already listed
+  -- as an explicit dependency. "System" uses the platform version; the other
+  -- two use the application version (mirrors VSCode AL extension behaviour).
   local deps = {}
   local base_pkgs = {
+    { publisher = "Microsoft", name = "System",             version = app.platform    or "0.0.0.0" },
     { publisher = "Microsoft", name = "Application",        version = app.application or "0.0.0.0" },
     { publisher = "Microsoft", name = "System Application", version = app.application or "0.0.0.0" },
   }
