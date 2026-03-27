@@ -43,7 +43,10 @@ _G.ALCompleteObjectId = function(findstart, base)
   return require("al.ids").complete(findstart, base)
 end
 vim.bo.completefunc = "ALCompleteObjectId"
+-- <C-Space> sends NUL (0x00) in most Linux terminals → map both
 vim.keymap.set("i", "<C-Space>", "<C-x><C-u>",
+  { buffer = true, silent = true, desc = "AL: Next free object ID" })
+vim.keymap.set("i", "<Nul>", "<C-x><C-u>",
   { buffer = true, silent = true, desc = "AL: Next free object ID" })
 -- Debugging
 vim.keymap.set("n", "<F5>",        "<cmd>ALLaunch<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Compile, publish and attach debugger" }))
