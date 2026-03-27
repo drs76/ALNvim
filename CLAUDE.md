@@ -218,6 +218,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>al` | n | `:ALOpenLaunchJson` |
 | `<leader>aq` | n | Open quickfix list |
 | `<leader>ac` | n | `:ALSelectCops` — select active code cops |
+| `<leader>ad` | n | Buffer diagnostics list (Telescope or `vim.diagnostic.setloclist`) |
 | `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs as Markdown) |
 | `<leader>aH` | n | `:ALHelpTopics` — AL Help topic picker |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |

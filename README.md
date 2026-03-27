@@ -222,6 +222,32 @@ Query, XmlPort, Enum, EnumExtension, Interface, PermissionSet.
 
 ---
 
+## Code Cops
+
+`:ALSelectCops` (`<leader>ac`) opens a picker to choose which AL code analyzers run for
+the current project. Changes apply immediately — no LSP restart required.
+
+| Cop | Purpose |
+|---|---|
+| **CodeCop** | General AL coding guidelines |
+| **PerTenantExtensionCop** | Per-tenant extension rules |
+| **UICop** | UI / control add-in rules |
+| **AppSourceCop** | AppSource submission rules — strict, opt-in only |
+
+The default selection is CodeCop + PerTenantExtensionCop + UICop. AppSourceCop is off by
+default because it enforces AppSource-specific requirements (tooltips on all fields,
+event publisher rules, etc.) that are not relevant for internal or per-tenant extensions.
+
+The selection is saved to `.vscode/alnvim.json` in the project root and read on every
+LSP attach, so it persists across Neovim sessions.
+
+Diagnostics from the active cops appear inline in the buffer. Use:
+- `<leader>ad` — Telescope list of all diagnostics for the current buffer
+- `<leader>D` — floating detail for the diagnostic on the current line
+- `]d` / `[d` — jump to next / previous diagnostic
+
+---
+
 ## Compilation Workflow
 
 `:ALCompile` (or `<leader>ab`) runs the `alc` compiler asynchronously. Errors and warnings
@@ -436,11 +462,14 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 | `:ALReloadSnippets` | — | Reload snippets from `snippets/al.json` |
 | `:ALInfo` | — | Show extension path, LSP binary, project manifest |
 
-### Quickfix
+### Diagnostics
 
 | Command | Key | Description |
 |---|---|---|
 | — | `<leader>aq` | Open quickfix list (compiler errors/warnings) |
+| — | `<leader>ad` | Buffer diagnostics list (Telescope picker or location list) |
+| — | `<leader>D` | Diagnostic float for current line |
+| — | `]d` / `[d` | Jump to next / previous diagnostic |
 
 ---
 
