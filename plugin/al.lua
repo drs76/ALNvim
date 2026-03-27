@@ -257,6 +257,10 @@ vim.api.nvim_create_user_command("ALClearCredentials", function()
   require("al.connection").clear_credentials()
 end, { desc = "Clear cached BC credentials (username/password or Entra token)" })
 
+vim.api.nvim_create_user_command("ALNextId", function()
+  require("al.ids").show_next()
+end, { desc = "Show next free object ID for the AL object type on the current line" })
+
 vim.api.nvim_create_user_command("ALExplorer", function(opts)
   require("al.explorer").objects(opts.args ~= "" and opts.args or nil)
 end, {

@@ -38,6 +38,13 @@ vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend(
 -- Explorer
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))
+-- Object ID completion  (<C-Space> on a line starting with an AL object type)
+_G.ALCompleteObjectId = function(findstart, base)
+  return require("al.ids").complete(findstart, base)
+end
+vim.bo.completefunc = "ALCompleteObjectId"
+vim.keymap.set("i", "<C-Space>", "<C-x><C-u>",
+  { buffer = true, silent = true, desc = "AL: Next free object ID" })
 -- Debugging
 vim.keymap.set("n", "<F5>",        "<cmd>ALLaunch<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Compile, publish and attach debugger" }))
 vim.keymap.set("n", "<leader>adl", "<cmd>ALLaunch<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Compile, publish and attach debugger" }))
