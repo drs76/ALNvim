@@ -32,25 +32,94 @@ local function parse_output(lines)
   return qf
 end
 
-local function finish(qf, exit_code, on_success)
+-- Open a floating window for build output. Returns (buf, win).
+local function open_build_win(title)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+
+  local width  = math.max(80, math.floor(vim.o.columns * 0.8))
+  local height = math.max(10, math.floor(vim.o.lines   * 0.6))
+  local row    = math.floor((vim.o.lines   - height) / 2)
+  local col    = math.floor((vim.o.columns - width)  / 2)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative  = "editor",
+    width     = width,
+    height    = height,
+    row       = row,
+    col       = col,
+    style     = "minimal",
+    border    = "rounded",
+    title     = " " .. title .. " ",
+    title_pos = "center",
+  })
+
+  vim.wo[win].wrap       = false
+  vim.wo[win].cursorline = true
+  vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+
+  return buf, win
+end
+
+-- Append non-empty lines to a buffer and scroll to the bottom.
+local function buf_append(buf, lines)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local nonempty = vim.tbl_filter(function(l) return l ~= "" end, lines)
+  if #nonempty == 0 then return end
+  vim.api.nvim_buf_set_lines(buf, -1, -1, false, nonempty)
+  -- Scroll every window showing this buffer to the last line
+  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
+    local last = vim.api.nvim_buf_line_count(buf)
+    vim.api.nvim_win_set_cursor(w, { last, 0 })
+  end
+end
+
+-- Add simple highlight passes over the finished buffer.
+local function buf_highlight(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local ns = vim.api.nvim_create_namespace("al_build")
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for i, line in ipairs(lines) do
+    local hl
+    if line:match("%serror%s") or line:match("^error") then
+      hl = "DiagnosticError"
+    elseif line:match("%swarning%s") or line:match("^warning") then
+      hl = "DiagnosticWarn"
+    elseif line:match("Build succeeded") then
+      hl = "DiagnosticOk"
+    end
+    if hl then
+      vim.api.nvim_buf_add_highlight(buf, ns, hl, i - 1, 0, -1)
+    end
+  end
+end
+
+local function finish(buf, qf, exit_code, on_success)
   vim.schedule(function()
+    -- Summary line
+    local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
+    local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
+    local summary
+    if exit_code == 0 and #qf == 0 then
+      summary = "Build succeeded"
+    else
+      summary = string.format("%d error(s), %d warning(s)", #errors, #warnings)
+    end
+    buf_append(buf, { "", "── " .. summary .. " ──" })
+    buf_highlight(buf)
+
+    -- Populate quickfix (for jump-to-error with <leader>aq)
     vim.fn.setqflist(qf, "r")
-    if #qf > 0 then
-      vim.cmd("copen")
-      local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
-      local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
-      vim.notify(
-        string.format("AL: %d error(s), %d warning(s)", #errors, #warnings),
-        #errors > 0 and vim.log.levels.ERROR or vim.log.levels.WARN
-      )
-    elseif exit_code == 0 then
-      vim.notify("AL: Build succeeded", vim.log.levels.INFO)
+
+    if exit_code == 0 and #qf == 0 then
       if on_success then on_success() end
     end
   end)
 end
 
--- Run alc asynchronously and populate the quickfix list with results.
+-- Run alc asynchronously, stream output into a floating window,
+-- and populate the quickfix list with parsed errors/warnings.
 -- @param project_dir  optional override; defaults to the directory of app.json
 -- @param extra_args   optional table of additional /flag:value strings
 -- @param on_success   optional function() called after a clean build (no errors)
@@ -75,16 +144,22 @@ function M.compile(project_dir, extra_args, on_success)
     table.insert(cmd, arg)
   end
 
-  vim.notify("AL: Building " .. vim.fn.fnamemodify(project_dir, ":t") .. "…", vim.log.levels.INFO)
+  local proj_name = vim.fn.fnamemodify(project_dir, ":t")
+  local buf, _win = open_build_win("AL Build — " .. proj_name)
+  buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
 
   local output = {}
   vim.fn.jobstart(cmd, {
-    stdout_buffered = true,
-    stderr_buffered = true,
-    on_stdout = function(_, data) vim.list_extend(output, data) end,
-    on_stderr = function(_, data) vim.list_extend(output, data) end,
-    on_exit   = function(_, code)
-      finish(parse_output(output), code, on_success)
+    on_stdout = function(_, data)
+      vim.list_extend(output, data)
+      vim.schedule(function() buf_append(buf, data) end)
+    end,
+    on_stderr = function(_, data)
+      vim.list_extend(output, data)
+      vim.schedule(function() buf_append(buf, data) end)
+    end,
+    on_exit = function(_, code)
+      finish(buf, parse_output(output), code, on_success)
     end,
   })
 end
