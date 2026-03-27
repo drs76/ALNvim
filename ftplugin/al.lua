@@ -1,4 +1,19 @@
 -- Buffer-local settings for AL files
+
+-- Switch to BC Dark theme for AL buffers, restore previous theme on leave.
+local _prev_colors = vim.g.colors_name
+if _prev_colors ~= "bc_dark" then
+  vim.cmd("colorscheme bc_dark")
+end
+vim.api.nvim_create_autocmd({ "BufLeave", "BufWinLeave" }, {
+  buffer  = 0,
+  once    = true,
+  callback = function()
+    if _prev_colors and _prev_colors ~= "bc_dark" then
+      vim.cmd("colorscheme " .. _prev_colors)
+    end
+  end,
+})
 vim.bo.commentstring = "// %s"
 vim.bo.tabstop       = 4
 vim.bo.shiftwidth    = 4
