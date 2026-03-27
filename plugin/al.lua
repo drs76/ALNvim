@@ -294,8 +294,12 @@ vim.api.nvim_create_user_command("ALHelp", function(opts)
   require("al.help").toggle(url)
 end, {
   nargs = "?",
-  desc  = "Toggle AL Help panel (MS Learn AL docs in lynx)",
+  desc  = "Toggle AL Help panel (MS Learn AL docs as Markdown)",
 })
+
+vim.api.nvim_create_user_command("ALHelpTopics", function()
+  require("al.help").topics()
+end, { desc = "AL Help: pick a topic from the curated list" })
 
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")

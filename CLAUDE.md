@@ -225,7 +225,8 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>ao` | n | `:ALOpenAppJson` |
 | `<leader>al` | n | `:ALOpenLaunchJson` |
 | `<leader>aq` | n | Open quickfix list |
-| `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs in lynx) |
+| `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs as Markdown) |
+| `<leader>aH` | n | `:ALHelpTopics` — AL Help topic picker |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
@@ -260,7 +261,8 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
-| `:ALHelp [url]` | Toggle AL Help panel (MS Learn AL docs in lynx); optional URL argument |
+| `:ALHelp [url]` | Toggle AL Help panel (MS Learn AL docs as Markdown); optional URL/slug argument |
+| `:ALHelpTopics` | Open AL Help topic picker |
 | `:ALNewObject [dir]` | AL Object Wizard: interactively create a new AL object file |
 | `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
@@ -424,36 +426,48 @@ Up to 5 free IDs are shown per range so the user can choose a round number if pr
 
 ## AL Help panel (`lua/al/help.lua`)
 
-`:ALHelp [url]` / `<leader>ah` toggles a left-side vertical split (85 cols, fixed width) running
-`lynx` pointed at the MS Learn AL documentation.
+`:ALHelp [url]` / `<leader>ah` toggles a left-side vertical split (85 cols, fixed width) showing
+MS Learn AL documentation fetched as Markdown from the MicrosoftDocs GitHub repo.
+`:ALHelpTopics` / `<leader>aH` opens a topic picker without toggling the panel.
 
-**Default URL:** `https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/developer/devenv-programming-in-al`
+**Source:** `https://raw.githubusercontent.com/MicrosoftDocs/dynamics365smb-devitpro-pb/main/dev-itpro/developer/<slug>.md`
 
-An optional URL argument opens a different page: `:ALHelp https://...`
+Requires `curl` and an internet connection. No browser or JavaScript needed — content renders
+natively as `filetype=markdown`.
 
 ### Behaviour
 
-- **First open**: starts a `lynx` terminal process in a new buffer (`bufhidden = "hide"`)
-- **Close** (toggle off): closes the window but keeps the lynx process alive in the background
-- **Re-open**: attaches a new window to the existing buffer — browsing position is preserved
-- **lynx exits** (user presses `q`): buffer and state are cleaned up; next toggle starts fresh
+- **First open**: creates a `nofile` buffer, fetches the default page async via `curl`, displays it
+- **Close** (toggle off): closes the window; buffer and scroll position are preserved
+- **Re-open**: shows the existing buffer at the same position — no re-fetch
+- **`:ALHelp <url>`**: accepts a full MS Learn URL or a bare slug; extracts the slug automatically
 - Focus returns to the editing window automatically after the panel opens
 
-### Lynx navigation (when panel is focused)
+### Keymaps inside the panel
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` | Scroll / move between links |
-| `→` / `Enter` | Follow link |
-| `←` / `u` | Go back |
-| `g` | Go to URL |
-| `/` | Search on page |
-| `q` | Quit lynx (closes panel) |
+| `<CR>` | Follow relative markdown link (opens in panel) |
+| `u` / `<BS>` | Go back (history stack) |
+| `r` | Reload current page |
+| `t` | Open topic picker |
+| `q` | Close panel |
 
-### Dependency
+### Topic list
 
-Requires `lynx` (text-mode browser). On Debian/Ubuntu: `sudo apt install lynx`.
-The command notifies with an error if `lynx` is not found.
+35 curated topics covering language fundamentals, all object types, events, pages/UI, API/integration,
+and testing. Displayed via `vim.ui.select`; selecting a topic fetches and replaces the panel content.
+
+### URL resolution
+
+`to_slug()` accepts:
+- Full MS Learn URL — extracts the last path segment
+- Relative `.md` filename (from markdown links) — strips the extension
+- Bare `devenv-*` slug — used as-is
+
+### Content processing
+
+YAML front matter (`--- … ---`) and `[!INCLUDE [...](…)]` directives are stripped before display.
 
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
