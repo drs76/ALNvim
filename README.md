@@ -431,6 +431,7 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 |---|---|---|
 | `:ALOpenAppJson` | `<leader>ao` | Open `app.json` for current project |
 | `:ALOpenLaunchJson` | `<leader>al` | Open `.vscode/launch.json` |
+| `:ALSelectCops` | `<leader>ac` | Pick active code cops for this project |
 | `:ALClearCredentials` | — | Clear cached BC credentials |
 | `:ALReloadSnippets` | — | Reload snippets from `snippets/al.json` |
 | `:ALInfo` | — | Show extension path, LSP binary, project manifest |

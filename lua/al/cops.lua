@@ -1,0 +1,216 @@
+-- AL Code Cop selector — per-project cop configuration with live apply.
+-- Config is stored in <root>/.vscode/alnvim.json so it can be git-ignored
+-- or committed alongside .vscode/launch.json.
+local M = {}
+
+local COPS = {
+  { token = "${CodeCop}",               name = "CodeCop",               desc = "General AL coding guidelines" },
+  { token = "${PerTenantExtensionCop}", name = "PerTenantExtensionCop", desc = "Per-tenant extension rules" },
+  { token = "${UICop}",                 name = "UICop",                 desc = "UI / control add-in rules" },
+  { token = "${AppSourceCop}",          name = "AppSourceCop",          desc = "AppSource submission rules (strict)" },
+}
+
+-- Default: all cops except AppSourceCop, which is project-specific.
+local DEFAULT_COPS = { "${CodeCop}", "${PerTenantExtensionCop}", "${UICop}" }
+
+local function config_path(root)
+  return root .. "/.vscode/alnvim.json"
+end
+
+-- Read active cop tokens from per-project config, falling back to DEFAULT_COPS.
+function M.get_active(root)
+  local path = config_path(root)
+  local lines = vim.fn.readfile(path)
+  if not lines or #lines == 0 then return DEFAULT_COPS end
+  local ok, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+  if not ok or type(data) ~= "table" or not data.codeAnalyzers then
+    return DEFAULT_COPS
+  end
+  return data.codeAnalyzers
+end
+
+-- Persist cop selection for a project.
+function M.set_active(root, cops)
+  local path = config_path(root)
+  vim.fn.mkdir(root .. "/.vscode", "p")
+  -- Preserve any other keys already in alnvim.json
+  local data = {}
+  local lines = vim.fn.readfile(path)
+  if lines and #lines > 0 then
+    local ok, existing = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+    if ok and type(existing) == "table" then data = existing end
+  end
+  data.codeAnalyzers = cops
+  vim.fn.writefile({ vim.fn.json_encode(data) }, path)
+end
+
+-- Re-send al/setActiveWorkspace with updated cops so changes take effect
+-- immediately without restarting the LSP server.
+function M.apply(root, cops)
+  local clients = vim.lsp.get_clients({ name = "al_language_server" })
+  local client
+  for _, c in ipairs(clients) do
+    if c.config.root_dir == root then client = c; break end
+  end
+  if not client then
+    vim.notify("AL cops: no active LSP client for " .. root, vim.log.levels.WARN)
+    return
+  end
+
+  local app_json = require("al.lsp").read_app_json(root)
+  local proj_refs = {}
+  for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
+    if dep.id then
+      proj_refs[#proj_refs + 1] = {
+        appId     = dep.id,
+        name      = dep.name      or "",
+        publisher = dep.publisher or "",
+        version   = dep.version   or "0.0.0.0",
+      }
+    end
+  end
+
+  client:request("al/setActiveWorkspace", {
+    currentWorkspaceFolderPath = {
+      uri   = "file://" .. root,
+      name  = vim.fn.fnamemodify(root, ":t"),
+      index = 0,
+    },
+    settings = {
+      workspacePath = root,
+      alResourceConfigurationSettings = {
+        packageCachePaths      = { root .. "/.alpackages" },
+        assemblyProbingPaths   = {},
+        codeAnalyzers          = cops,
+        enableCodeAnalysis     = true,
+        backgroundCodeAnalysis = "Project",
+        enableCodeActions      = true,
+        incrementalBuild       = true,
+      },
+      setActiveWorkspace                  = true,
+      dependencyParentWorkspacePath       = vim.NIL,
+      expectedProjectReferenceDefinitions = proj_refs,
+      activeWorkspaceClosure              = {},
+    },
+  }, function() end, 0)
+
+  local names = vim.tbl_map(function(t)
+    return t:match("%{(.-)%}") or t
+  end, cops)
+  vim.notify("AL cops: " .. (#cops > 0 and table.concat(names, ", ") or "none"), vim.log.levels.INFO)
+end
+
+-- ── Pickers ────────────────────────────────────────────────────────────────
+
+local function apply_selection(root, selected_tokens)
+  M.set_active(root, selected_tokens)
+  M.apply(root, selected_tokens)
+end
+
+-- Telescope multi-select picker.
+local function telescope_picker(root, active_set)
+  local pickers      = require("telescope.pickers")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+
+  pickers.new({}, {
+    prompt_title = "AL Code Cops  (<Tab> toggle, <CR> apply)",
+    finder = finders.new_table({
+      results = COPS,
+      entry_maker = function(cop)
+        local mark = active_set[cop.token] and "[x]" or "[ ]"
+        return {
+          value   = cop.token,
+          display = mark .. "  " .. cop.name .. "  —  " .. cop.desc,
+          ordinal = cop.name,
+          -- pre-select active cops so they show as selected on open
+          _active = active_set[cop.token] or false,
+        }
+      end,
+    }),
+    sorter = conf.generic_sorter({}),
+    attach_mappings = function(prompt_bufnr, map)
+      -- Pre-select currently active cops
+      vim.schedule(function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        for i, cop in ipairs(COPS) do
+          if active_set[cop.token] then
+            picker:add_selection(picker.manager:get(i - 1))
+          end
+        end
+      end)
+
+      -- Apply on <CR>
+      actions.select_default:replace(function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local selections = picker:get_multi_selection()
+        -- If nothing multi-selected, treat the current entry as toggled
+        if #selections == 0 then
+          local entry = action_state.get_selected_entry()
+          if entry then selections = { entry } end
+        end
+        actions.close(prompt_bufnr)
+        local tokens = vim.tbl_map(function(s) return s.value end, selections)
+        apply_selection(root, tokens)
+      end)
+
+      map({ "i", "n" }, "<Tab>", actions.toggle_selection + actions.move_selection_next)
+      return true
+    end,
+  }):find()
+end
+
+-- Fallback: iterative vim.ui.select toggle (no Telescope required).
+local function simple_picker(root, active_set)
+  local state = vim.deepcopy(active_set)
+
+  local function show()
+    local items = {}
+    for _, cop in ipairs(COPS) do
+      items[#items + 1] = (state[cop.token] and "[x]  " or "[ ]  ") .. cop.name .. " — " .. cop.desc
+    end
+    items[#items + 1] = "─── Apply ───"
+    items[#items + 1] = "─── Cancel ───"
+
+    vim.ui.select(items, { prompt = "AL Code Cops (select to toggle):" }, function(choice, idx)
+      if not choice or idx == #items then return end  -- Cancel
+      if idx == #items - 1 then                       -- Apply
+        local tokens = {}
+        for _, cop in ipairs(COPS) do
+          if state[cop.token] then tokens[#tokens + 1] = cop.token end
+        end
+        apply_selection(root, tokens)
+        return
+      end
+      -- Toggle the selected cop and re-show
+      local cop = COPS[idx]
+      state[cop.token] = not state[cop.token]
+      show()
+    end)
+  end
+
+  show()
+end
+
+-- Public entry point: `:ALSelectCops`
+function M.picker()
+  local root = require("al.lsp").get_root()
+  if not root then
+    vim.notify("AL cops: no project root (app.json) found", vim.log.levels.WARN)
+    return
+  end
+
+  local active = M.get_active(root)
+  local active_set = {}
+  for _, t in ipairs(active) do active_set[t] = true end
+
+  if pcall(require, "telescope") then
+    telescope_picker(root, active_set)
+  else
+    simple_picker(root, active_set)
+  end
+end
+
+return M

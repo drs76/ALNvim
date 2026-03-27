@@ -36,6 +36,7 @@ vim.api.nvim_create_autocmd("FileType", {
     local res_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
       assemblyProbingPaths   = {},
+      codeAnalyzers          = require("al.cops").get_active(root),
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
       enableCodeActions      = true,
@@ -118,6 +119,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local ws_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
       assemblyProbingPaths   = {},
+      codeAnalyzers          = require("al.cops").get_active(root),
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
       enableCodeActions      = true,
@@ -361,3 +363,7 @@ vim.api.nvim_create_user_command("ALInfo", function()
   end
   print(table.concat(lines, "\n"))
 end, { desc = "Show ALNvim / project information" })
+
+vim.api.nvim_create_user_command("ALSelectCops", function()
+  require("al.cops").picker()
+end, { desc = "Select active AL Code Cops for this project" })

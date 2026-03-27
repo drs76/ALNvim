@@ -21,6 +21,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/debug.lua` | Snapshot debugging (BC API) + nvim-dap adapter config |
 | `lua/al/explorer.lua` | Telescope pickers: browse all AL objects (`M.objects`), procedures in file (`M.procedures`), live grep (`M.search`) |
 | `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
+| `lua/al/cops.lua` | Code Cop selector — per-project cop config, Telescope/fallback picker, live apply via `al/setActiveWorkspace` |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
 | `lua/al/help.lua` | AL Help panel — toggleable left split showing MS Learn AL docs via `smd` (ANSI) or render-markdown fallback |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
@@ -216,6 +217,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>ao` | n | `:ALOpenAppJson` |
 | `<leader>al` | n | `:ALOpenLaunchJson` |
 | `<leader>aq` | n | Open quickfix list |
+| `<leader>ac` | n | `:ALSelectCops` — select active code cops |
 | `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs as Markdown) |
 | `<leader>aH` | n | `:ALHelpTopics` — AL Help topic picker |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
@@ -259,6 +261,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
 | `:ALSearch [dir]` | Live grep across all AL files (project + symbol packages) |
 | `:ALNextId` | Show next free object ID for the type on the current line |
+| `:ALSelectCops` | Select active code cops for this project (Telescope or vim.ui.select) |
 | `:ALOpenAppJson` | Edit project `app.json` |
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
@@ -485,6 +488,34 @@ and testing. Displayed via `vim.ui.select`; selecting a topic fetches and replac
 ### Content processing
 
 YAML front matter (`--- … ---`) and `[!INCLUDE [...](…)]` directives are stripped before display.
+
+## Code Cop selector (`lua/al/cops.lua`)
+
+`:ALSelectCops` / `<leader>ac` — pick which of the four AL code analyzers are active for the current project.
+
+### The four cops
+
+| Token | Name | Notes |
+|---|---|---|
+| `${CodeCop}` | CodeCop | General AL coding guidelines — always useful |
+| `${PerTenantExtensionCop}` | PerTenantExtensionCop | Per-tenant extension rules |
+| `${UICop}` | UICop | UI / control add-in rules |
+| `${AppSourceCop}` | AppSourceCop | AppSource submission rules — strict, not needed for internal apps |
+
+Default (no saved config): CodeCop + PerTenantExtensionCop + UICop. AppSourceCop is opt-in.
+
+### Config persistence
+
+Selection is saved to `<root>/.vscode/alnvim.json` as `{ "codeAnalyzers": [...] }`. The file can be committed alongside `launch.json` or git-ignored. Other keys in the file are preserved on write.
+
+### Live apply
+
+After the user confirms, `cops.apply()` re-sends `al/setActiveWorkspace` with the updated `codeAnalyzers` list — changes take effect immediately without restarting the LSP server.
+
+### Picker variants
+
+- **Telescope present**: multi-select picker (`<Tab>` to toggle, `<CR>` to apply).
+- **No Telescope**: iterative `vim.ui.select` loop showing `[x]`/`[ ]` state with an Apply and Cancel option.
 
 ## AL Text Objects (`lua/al/textobj.lua`)
 
