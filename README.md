@@ -6,21 +6,41 @@ language server that ships with the [AL VSCode extension](https://marketplace.vi
 Provides:
 - Syntax highlighting derived from the official TextMate grammar
 - Full LSP integration (completions, go-to-definition, hover, diagnostics, rename…)
-- Async compilation with quickfix list via the `alc` compiler
+- Async compilation with floating output window + quickfix list via the `alc` compiler
+- One-step publish to Business Central (compile → POST `.app` to BC dev endpoint)
+- Symbol package download from BC dev endpoint (all base + explicit dependencies)
+- Snapshot debugging and live attach debugging via nvim-dap
+- AL Help panel — browse MS Learn AL docs inside Neovim, rendered by `smd` (ANSI) or render-markdown
+- AL Explorer — Telescope pickers for all AL objects across project + symbol packages, with live grep
+- AL Object Wizard — interactive new-object creation with ID suggestion, extends picker, file naming
+- Object ID completion — suggests next free IDs from `app.json` idRanges in insert mode
+- Automatic file organiser — moves saved AL files to the correct `src/<type>/` folder on write
 - 40+ LuaSnip snippets (object templates, control flow, events, HTTP, JSON)
+- BC Dark colour scheme applied per-buffer for AL files
 - Buffer-local keymaps and editor settings for AL files
 
 ---
 
 ## Requirements
 
+**Required:**
+
 | Requirement | Notes |
 |---|---|
 | Neovim ≥ 0.11 | Uses `vim.pack.add`, `vim.lsp.config`, `vim.uv` |
-| MS AL VSCode extension | `~/.vscode/extensions/ms-dynamics-smb.al-16.3.2065053` |
+| MS AL VSCode extension | `~/.vscode/extensions/ms-dynamics-smb.al-*` (auto-detected) |
 | [LuaSnip](https://github.com/L3MON4D3/LuaSnip) | For snippets |
 | [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) + [cmp_luasnip](https://github.com/saadparwaiz1/cmp_luasnip) | For completion |
 | .NET runtime at `/usr/share/dotnet` | The AL language server is a .NET binary |
+
+**Optional:**
+
+| Requirement | Feature |
+|---|---|
+| [`smd`](https://codeberg.org/johann1764/smd) | ANSI-rendered AL Help panel (falls back to render-markdown without it) |
+| [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) | AL Explorer, Procedure picker, Search |
+| [nvim-dap](https://github.com/mfussenegger/nvim-dap) | Live attach debugging |
+| [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) | AL Help fallback rendering when `smd` is absent |
 
 ---
 
@@ -135,6 +155,72 @@ sequenceDiagram
     NV->>NV: syntax/al.vim → syntax highlighting
     NV->>LS: LSP attaches → al_language_server starts
 ```
+
+---
+
+## AL Help Panel
+
+`:ALHelp` (`<leader>ah`) opens a 85-column left split showing MS Learn AL documentation
+fetched from the MicrosoftDocs GitHub repository. `:ALHelpTopics` (`<leader>aH`) opens a
+topic picker with 35 curated AL topics.
+
+### Rendering
+
+| Condition | Rendering |
+|---|---|
+| `smd` on `$PATH` | ANSI-styled terminal buffer — proper headings, code blocks, colours |
+| `smd` absent | `nofile` buffer with `filetype=markdown` rendered by render-markdown.nvim |
+
+Install `smd` (bash+sed markdown renderer, no dependencies beyond GNU sed):
+```bash
+curl -fsSL https://codeberg.org/raw/johann1764/smd/branch/main/smd \
+  -o ~/.local/bin/smd && chmod +x ~/.local/bin/smd
+```
+
+### Panel keymaps
+
+| Key | Action |
+|---|---|
+| `<CR>` | Follow link (navigates to linked page — links shown as `text (→devenv-slug)`) |
+| `u` / `<BS>` | Go back (history stack) |
+| `r` | Reload current page |
+| `t` | Open topic picker |
+| `q` | Close panel |
+
+`:ALHelp` accepts a full MS Learn URL or a bare `devenv-*` slug as an argument to jump
+directly to a page.
+
+---
+
+## AL Explorer
+
+Telescope-based pickers for navigating AL objects across the whole project and its
+downloaded symbol packages.
+
+| Command | Key | Description |
+|---|---|---|
+| `:ALExplorer` | `<leader>ae` | All AL objects: tables, pages, codeunits, enums… |
+| `:ALExplorerProcs` | `<leader>af` | Procedures and triggers in the current file |
+| `:ALSearch` | `<leader>ag` | Live grep across all AL files (project + symbols) |
+
+Inside `:ALExplorer`, press `<C-s>` to cycle sort order (type → id → publisher → name)
+and `<C-f>` to jump to live grep.
+
+---
+
+## AL Object Wizard
+
+`:ALNewObject` (`<leader>an`) walks through a series of prompts to create a new AL object
+file and open it for editing.
+
+Supports 12 object types: Table, TableExtension, Page, PageExtension, Codeunit, Report,
+Query, XmlPort, Enum, EnumExtension, Interface, PermissionSet.
+
+- Object IDs are pre-filled with the next free ID from `app.json` `idRanges`
+- Extension types offer a Telescope picker for the `extends` target
+- Files are placed in `src/<type>/` following CRS naming conventions
+- The **File Organiser** runs automatically on every `:w` — if an AL file is saved outside
+  its correct `src/<type>/` folder, it is moved there transparently
 
 ---
 
@@ -306,19 +392,56 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 
 ## User Commands Reference
 
+### Build & Publish
+
 | Command | Key | Description |
 |---|---|---|
-| `:ALCompile [dir]` | `<leader>ab` | Compile with `alc`; errors → quickfix |
+| `:ALCompile [dir]` | `<leader>ab` | Compile with `alc`; floating output + errors → quickfix |
 | `:ALPublish [dir]` | `<leader>ap` | Compile then publish `.app` to BC |
 | `:ALPublishOnly [dir]` | `<leader>aP` | Publish existing `.app` (skip compile) |
 | `:ALDownloadSymbols [dir]` | `<leader>as` | Download symbol packages from BC |
+
+### Navigation & Help
+
+| Command | Key | Description |
+|---|---|---|
+| `:ALHelp [url\|slug]` | `<leader>ah` | Toggle AL Help panel (MS Learn AL docs) |
+| `:ALHelpTopics` | `<leader>aH` | Open AL Help topic picker |
+| `:ALExplorer [dir]` | `<leader>ae` | Telescope: browse all AL objects (project + symbols) |
+| `:ALExplorerProcs` | `<leader>af` | Telescope: browse procedures in current file |
+| `:ALSearch [dir]` | `<leader>ag` | Live grep across all AL files |
+| `:ALNextId` | — | Show next free object ID for type on current line |
+
+### Object Creation
+
+| Command | Key | Description |
+|---|---|---|
+| `:ALNewObject [dir]` | `<leader>an` | Interactive wizard to create a new AL object file |
+
+### Debugging
+
+| Command | Key | Description |
+|---|---|---|
+| `:ALLaunch [dir]` | `<F5>` / `<leader>adl` | Compile, publish then attach debugger |
 | `:ALSnapshotStart` | `<leader>ads` | Start BC snapshot debugging session |
 | `:ALSnapshotFinish` | `<leader>adf` | Finish snapshot and download file |
 | `:ALDebugSetup` | `<leader>add` | Configure nvim-dap for AL live attach |
+
+### Project
+
+| Command | Key | Description |
+|---|---|---|
 | `:ALOpenAppJson` | `<leader>ao` | Open `app.json` for current project |
 | `:ALOpenLaunchJson` | `<leader>al` | Open `.vscode/launch.json` |
+| `:ALClearCredentials` | — | Clear cached BC credentials |
 | `:ALReloadSnippets` | — | Reload snippets from `snippets/al.json` |
 | `:ALInfo` | — | Show extension path, LSP binary, project manifest |
+
+### Quickfix
+
+| Command | Key | Description |
+|---|---|---|
+| — | `<leader>aq` | Open quickfix list (compiler errors/warnings) |
 
 ---
 
@@ -633,5 +756,3 @@ Ensure `require("al").setup()` is called **after** LuaSnip is loaded. Run `:ALRe
 ## Roadmap
 
 - **Treesitter grammar** — generate from `alsyntax.tmlanguage` for richer highlighting and text objects
-- **AL Explorer** — Telescope picker for AL objects (tables, pages, codeunits) across the workspace
-- **DAP launch mode** — publish-and-debug in one step once adapter initialization options are confirmed

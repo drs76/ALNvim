@@ -22,7 +22,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/explorer.lua` | Telescope pickers: browse all AL objects (`M.objects`), procedures in file (`M.procedures`), live grep (`M.search`) |
 | `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
-| `lua/al/help.lua` | AL Help panel — toggleable left split running `lynx` on MS Learn AL docs |
+| `lua/al/help.lua` | AL Help panel — toggleable left split showing MS Learn AL docs via `smd` (ANSI) or render-markdown fallback |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
@@ -432,14 +432,44 @@ MS Learn AL documentation fetched as Markdown from the MicrosoftDocs GitHub repo
 
 **Source:** `https://raw.githubusercontent.com/MicrosoftDocs/dynamics365smb-devitpro-pb/main/dev-itpro/developer/<slug>.md`
 
-Requires `curl` and an internet connection. No browser or JavaScript needed — content renders
-natively as `filetype=markdown`.
+Requires `curl` and an internet connection.
+
+### Rendering — smd (preferred) vs render-markdown fallback
+
+The panel has two rendering paths:
+
+| Condition | Rendering |
+|---|---|
+| `smd` on `$PATH` | ANSI-styled terminal buffer via `smd` (colours, headings, code blocks) |
+| `smd` absent | `nofile` buffer with `filetype=markdown` + `render-markdown.nvim` |
+
+**Install smd** (bash+sed markdown renderer, no dependencies beyond GNU sed):
+```bash
+curl -fsSL https://codeberg.org/raw/johann1764/smd/branch/main/smd \
+  -o ~/.local/bin/smd && chmod +x ~/.local/bin/smd
+```
+
+When smd is active: each page navigation runs `smd <tmpfile>` via `vim.fn.jobstart`
+(no PTY — stdout is a pipe, so smd auto-selects `cat` rather than `less`).
+The full ANSI output is collected via `stdout_buffered = true` then written to a
+`nvim_open_term` channel buffer. Since no job is attached to the channel the user
+always enters the buffer in Normal mode — no `<C-\><C-n>` required.
+
+**Link navigation (smd path):** Before writing to the temp file, `preprocess_links_for_smd`
+rewrites internal devenv links from `[text](devenv-foo.md)` to
+`[text (→devenv-foo)](devenv-foo.md)`. smd still styles the link (underline/colour) and
+hides the URL, but `(→devenv-foo)` survives in the rendered display text.
+`follow_link` "Try 0" matches `%(→(devenv%-[^)]+)%)` on the current terminal line and
+navigates directly — no fuzzy text matching needed.
+
+**Link navigation (nofile path):** "Try 1" parses `[text](url)` markdown syntax directly
+from the line (the raw markdown is displayed as-is via render-markdown).
 
 ### Behaviour
 
-- **First open**: creates a `nofile` buffer, fetches the default page async via `curl`, displays it
-- **Close** (toggle off): closes the window; buffer and scroll position are preserved
-- **Re-open**: shows the existing buffer at the same position — no re-fetch
+- **First open**: fetches the default page async via `curl`, displays it via smd or render-markdown
+- **Close** (toggle off): closes the window; buffer and history are preserved
+- **Re-open**: shows existing content; smd path creates a fresh terminal buffer per navigation
 - **`:ALHelp <url>`**: accepts a full MS Learn URL or a bare slug; extracts the slug automatically
 - Focus returns to the editing window automatically after the panel opens
 
@@ -447,7 +477,7 @@ natively as `filetype=markdown`.
 
 | Key | Action |
 |---|---|
-| `<CR>` | Follow relative markdown link (opens in panel) |
+| `<CR>` | Follow link — smd path: matches `(→devenv-slug)` in line; nofile path: parses `[text](url)` syntax |
 | `u` / `<BS>` | Go back (history stack) |
 | `r` | Reload current page |
 | `t` | Open topic picker |
