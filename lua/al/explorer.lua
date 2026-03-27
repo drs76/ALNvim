@@ -3,9 +3,8 @@
 -- M.objects(root)    – all AL object declarations across project + symbol packages
 -- M.procedures()     – procedures/triggers in the current file
 --
--- Symbol packages (.app files in .alpackages/) are zip archives containing
--- src/*.al stubs. They are extracted once to a version-stamped cache dir and
--- re-extracted only when the .app file is newer than the cache.
+-- Inside the objects picker:
+--   <C-s>  cycle sort mode: type → id → publisher → name
 
 local M   = {}
 local lsp = require("al.lsp")
@@ -25,12 +24,22 @@ local PROC_PAT =
   "^\\s*(procedure|trigger|local procedure|internal procedure|" ..
   "protected procedure|public procedure)\\s+[A-Za-z_]"
 
--- ── Symbol package cache ───────────────────────────────────────────────────────
+-- ── Helpers ───────────────────────────────────────────────────────────────────
 
--- Extract src/*.al from a .app symbol package into the cache.
--- Returns the cache dir (whether or not extraction happened) or nil on failure.
+-- Extract publisher from a .app filename.
+-- Format: "Publisher_Name_Major.Minor.Build.Rev.app"
+-- e.g.  "Continia Software_Continia Document Capture_10.0.1.55527.app" → "Continia Software"
+local function publisher_from_app(app_path)
+  local base = vim.fn.fnamemodify(app_path, ":t:r")
+  -- Strip trailing version segment  _N.N.N.N
+  local without_ver = base:gsub("_%d+%.%d+%.%d+%.%d+$", "")
+  -- Publisher is everything before the first underscore
+  return without_ver:match("^([^_]+)") or "Unknown"
+end
+
+-- ── Symbol package cache ──────────────────────────────────────────────────────
+
 local function ensure_extracted(app_path)
-  -- Sanitise key: remove spaces so the cache path never contains spaces
   local key   = vim.fn.fnamemodify(app_path, ":t:r"):gsub("%s+", "_")
   local dir   = CACHE .. "/" .. key
   local stamp = dir .. "/.ok"
@@ -38,7 +47,7 @@ local function ensure_extracted(app_path)
   local app_mtime   = (vim.uv.fs_stat(app_path) or {}).mtime
   local stamp_mtime = (vim.uv.fs_stat(stamp)    or {}).mtime
   if app_mtime and stamp_mtime and stamp_mtime.sec >= app_mtime.sec then
-    return dir  -- already up-to-date
+    return vim.fn.isdirectory(dir .. "/src") == 1 and dir or nil
   end
 
   vim.fn.mkdir(dir, "p")
@@ -46,12 +55,10 @@ local function ensure_extracted(app_path)
     "unzip -q -o %s 'src/*.al' 'src/*.AL' -d %s",
     vim.fn.shellescape(app_path), vim.fn.shellescape(dir)))
 
-  -- Don't rely on vim.v.shell_error (unreliable for unzip exit 1 warnings).
-  -- Check whether src/ was actually created instead.
+  -- Check whether src/ was actually created rather than relying on exit code
+  -- (unzip returns 1 as a warning when one glob matches nothing — not a failure)
   if vim.fn.isdirectory(dir .. "/src") == 0 then
-    -- Package has no AL source stubs (e.g. thin wrapper with only SymbolReference.json).
-    -- Write stamp anyway so we don't re-attempt on every open.
-    vim.fn.writefile({ "0" }, stamp)
+    vim.fn.writefile({ "0" }, stamp)  -- stamp to skip future retries
     return nil
   end
 
@@ -59,82 +66,79 @@ local function ensure_extracted(app_path)
   return dir
 end
 
--- ── Telescope helpers ─────────────────────────────────────────────────────────
+-- ── Entry builder ─────────────────────────────────────────────────────────────
 
-local function require_telescope()
-  local ok, _ = pcall(require, "telescope")
-  if not ok then
-    vim.notify("AL Explorer: telescope.nvim not installed", vim.log.levels.ERROR)
-    return false
-  end
-  return true
+local function make_entry(e)
+  return {
+    value    = e,
+    display  = e.display,
+    ordinal  = e.ordinal,
+    filename = e.filename,
+    lnum     = e.lnum,
+    col      = 1,
+  }
 end
 
-local function open_picker(opts)
-  local pickers      = require("telescope.pickers")
-  local finders      = require("telescope.finders")
-  local conf         = require("telescope.config").values
-  local actions      = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
+-- ── Sort ─────────────────────────────────────────────────────────────────────
 
-  pickers.new({}, {
-    prompt_title = opts.title,
-    finder = finders.new_table({
-      results     = opts.entries,
-      entry_maker = function(e)
-        return {
-          value    = e,
-          display  = e.display,
-          ordinal  = e.ordinal,
-          filename = e.filename,
-          lnum     = e.lnum,
-          col      = 1,
-        }
-      end,
-    }),
-    sorter    = conf.generic_sorter({}),
-    previewer = conf.grep_previewer({}),
-    attach_mappings = function(prompt_bufnr)
-      actions.select_default:replace(function()
-        local sel = action_state.get_selected_entry()
-        actions.close(prompt_bufnr)
-        if sel then
-          if vim.api.nvim_buf_get_name(0) ~= sel.filename then
-            vim.cmd("edit " .. vim.fn.fnameescape(sel.filename))
-          end
-          vim.api.nvim_win_set_cursor(0, { sel.lnum, 0 })
-          vim.cmd("normal! zz")
-        end
-      end)
-      return true
-    end,
-  }):find()
-end
+local SORT_MODES = { "type", "id", "publisher", "name" }
+
+local sort_fns = {
+  type = function(a, b)
+    if a.obj_type ~= b.obj_type then return a.obj_type < b.obj_type end
+    return a.obj_name < b.obj_name
+  end,
+  id = function(a, b)
+    return (a.obj_id or 0) < (b.obj_id or 0)
+  end,
+  publisher = function(a, b)
+    if a.publisher ~= b.publisher then return a.publisher < b.publisher end
+    return a.obj_name < b.obj_name
+  end,
+  name = function(a, b)
+    return a.obj_name < b.obj_name
+  end,
+}
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
--- Telescope picker: all AL object declarations in the project and its symbol packages.
 function M.objects(root)
   root = root or lsp.get_root()
   if not root then
     vim.notify("AL: No project root", vim.log.levels.ERROR)
     return
   end
-  if not require_telescope() then return end
+
+  local ok_tel, _ = pcall(require, "telescope")
+  if not ok_tel then
+    vim.notify("AL Explorer: telescope.nvim not installed", vim.log.levels.ERROR)
+    return
+  end
+
+  local pickers      = require("telescope.pickers")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
 
   -- Build search dirs: project root + extracted symbol caches
-  local search_dirs  = { root }
-  local sym_count    = 0
-  local pkg_dir      = root .. "/.alpackages"
-  local apps         = vim.fn.glob(pkg_dir .. "/*.app", false, true)
+  local search_dirs = { root }
+  local sym_map     = {}   -- dir → publisher (for symbol entries)
+  local sym_count   = 0
+  local apps        = vim.fn.glob(root .. "/.alpackages/*.app", false, true)
 
   for _, app in ipairs(apps) do
     local d = ensure_extracted(app)
     if d then
       table.insert(search_dirs, d)
-      sym_count = sym_count + 1
+      sym_map[d]  = publisher_from_app(app)
+      sym_count   = sym_count + 1
     end
   end
+
+  -- Project publisher from app.json
+  local app_json         = lsp.read_app_json(root)
+  local project_publisher = (app_json and app_json.publisher) or "Project"
 
   -- Run rg across all dirs
   local cmd = {
@@ -148,23 +152,38 @@ function M.objects(root)
   local entries = {}
 
   for _, line in ipairs(raw) do
-    -- rg output: /path/to/file.al:42:  codeunit 50100 "My Object"
     local file, lnum, text = line:match("^(.-)%:(%d+)%:(.+)$")
     if file and lnum then
       local typ, id, rest = text:match("^%s*([%a][%a%s]-[%a])%s+(%d+)%s*(.*)")
       if typ then
-        local name = (rest or ""):match('^"([^"]+)"') or (rest or ""):match("^'([^']+)'") or rest or ""
-        name = name:gsub("%s+$", "")
-        -- Label symbol cache paths for clarity
-        local is_sym  = file:find(CACHE, 1, true)
-        local src_tag = is_sym and "[sym] " or "[src] "
-        local fname   = vim.fn.fnamemodify(file, ":t")
+        local name = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'") or rest:gsub("%s+$","")
+        local obj_id = tonumber(id) or 0
+
+        -- Determine publisher: check if file is under any sym cache dir
+        local publisher = project_publisher
+        local is_sym    = false
+        for sym_dir, pub in pairs(sym_map) do
+          if file:sub(1, #sym_dir) == sym_dir then
+            publisher = pub
+            is_sym    = true
+            break
+          end
+        end
+
+        local src_tag  = is_sym and "[sym]" or "[src]"
+        local fname    = vim.fn.fnamemodify(file, ":t")
+        local typ_norm = typ:lower():gsub("%s+", "")
+
         table.insert(entries, {
-          filename = file,
-          lnum     = tonumber(lnum),
-          ordinal  = string.format("%s %s", typ:lower():gsub("%s+", ""), name:lower()),
-          display  = string.format("%s%-22s %6s  %-45s %s",
-            src_tag, typ:lower(), id, name, fname),
+          filename  = file,
+          lnum      = tonumber(lnum),
+          publisher = publisher,
+          obj_type  = typ_norm,
+          obj_id    = obj_id,
+          obj_name  = name,
+          ordinal   = string.format("%s %s %d %s", publisher:lower(), typ_norm, obj_id, name:lower()),
+          display   = string.format("%s %-20s %-18s %6d  %-45s %s",
+            src_tag, publisher, typ_norm, obj_id, name, fname),
         })
       end
     end
@@ -175,15 +194,60 @@ function M.objects(root)
     return
   end
 
-  open_picker({
-    title   = string.format("AL Objects (%d) — %d symbol pkg(s)", #entries, sym_count),
-    entries = entries,
-  })
+  -- Default sort: by object type then name
+  local sort_idx = 1
+  table.sort(entries, sort_fns.type)
+
+  local function make_finder()
+    return finders.new_table({ results = entries, entry_maker = make_entry })
+  end
+
+  pickers.new({}, {
+    prompt_title = string.format("AL Objects (%d) — %d symbol pkg(s)  [<C-s> sort]", #entries, sym_count),
+    finder       = make_finder(),
+    sorter       = conf.generic_sorter({}),
+    previewer    = conf.grep_previewer({}),
+    attach_mappings = function(prompt_bufnr, map)
+      actions.select_default:replace(function()
+        local sel = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        if sel then
+          if vim.api.nvim_buf_get_name(0) ~= sel.filename then
+            vim.cmd("edit " .. vim.fn.fnameescape(sel.filename))
+          end
+          vim.api.nvim_win_set_cursor(0, { sel.lnum, 0 })
+          vim.cmd("normal! zz")
+        end
+      end)
+
+      -- <C-s>: cycle sort mode and refresh picker
+      map({ "i", "n" }, "<C-s>", function()
+        sort_idx = (sort_idx % #SORT_MODES) + 1
+        local mode = SORT_MODES[sort_idx]
+        table.sort(entries, sort_fns[mode])
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        picker:refresh(make_finder(), { reset_prompt = false })
+        vim.notify("AL Explorer: sort by " .. mode, vim.log.levels.INFO)
+      end)
+
+      return true
+    end,
+  }):find()
 end
 
 -- Telescope picker: procedures and triggers in the current file.
 function M.procedures()
-  if not require_telescope() then return end
+  local ok_tel, _ = pcall(require, "telescope")
+  if not ok_tel then
+    vim.notify("AL Explorer: telescope.nvim not installed", vim.log.levels.ERROR)
+    return
+  end
+
+  local pickers      = require("telescope.pickers")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
 
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" then
@@ -192,13 +256,12 @@ function M.procedures()
   end
 
   local raw     = vim.fn.systemlist({ "rg", "--line-number", "--no-heading",
-                                      "--color=never", "-e", PROC_PAT, file })
+                                       "--color=never", "-e", PROC_PAT, file })
   local entries = {}
 
   for _, line in ipairs(raw) do
     local lnum, text = line:match("^(%d+)%:(.+)$")
     if lnum then
-      -- e.g.  "    procedure LoadPackages(FeedSetup: Record ...)"
       local kind, name = text:match("^%s*(.-)%s+([%w_]+)%(")
       if name then
         table.insert(entries, {
@@ -216,10 +279,23 @@ function M.procedures()
     return
   end
 
-  open_picker({
-    title   = "AL Procedures — " .. vim.fn.fnamemodify(file, ":t"),
-    entries = entries,
-  })
+  pickers.new({}, {
+    prompt_title = "AL Procedures — " .. vim.fn.fnamemodify(file, ":t"),
+    finder = finders.new_table({ results = entries, entry_maker = make_entry }),
+    sorter    = conf.generic_sorter({}),
+    previewer = conf.grep_previewer({}),
+    attach_mappings = function(prompt_bufnr)
+      actions.select_default:replace(function()
+        local sel = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        if sel then
+          vim.api.nvim_win_set_cursor(0, { sel.lnum, 0 })
+          vim.cmd("normal! zz")
+        end
+      end)
+      return true
+    end,
+  }):find()
 end
 
 return M
