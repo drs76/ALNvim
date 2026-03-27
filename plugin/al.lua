@@ -257,6 +257,18 @@ vim.api.nvim_create_user_command("ALClearCredentials", function()
   require("al.connection").clear_credentials()
 end, { desc = "Clear cached BC credentials (username/password or Entra token)" })
 
+vim.api.nvim_create_user_command("ALExplorer", function(opts)
+  require("al.explorer").objects(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "AL Explorer: browse all AL objects across project and symbol packages",
+})
+
+vim.api.nvim_create_user_command("ALExplorerProcs", function()
+  require("al.explorer").procedures()
+end, { desc = "AL Explorer: browse procedures/triggers in the current file" })
+
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")
   local root = lsp.get_root()
