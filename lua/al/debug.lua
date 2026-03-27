@@ -278,7 +278,7 @@ function M.launch(root)
     enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
     longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
     numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-    launchBrowser     = cfg.launchBrowser or false,
+    launchBrowser     = false,  -- handled by Lua after attach; adapter xdg-open fails on Linux
     startupObjectType = cfg.startupObjectType or "Page",
     startupObjectId   = cfg.startupObjectId or 22,
   }
@@ -303,6 +303,14 @@ function M.launch(root)
   require("al.compile").compile(root, nil, function()
     vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
     dap.run(launch_cfg)
+    if cfg.launchBrowser then
+      local base   = conn.base_url(cfg)
+      local tenant = cfg.tenant or "default"
+      local url_bc = string.format("%s/WebClient/?%s=%s&tenant=%s",
+        base, cfg.startupObjectType or "Page",
+        cfg.startupObjectId or 22, conn.urlencode(tenant))
+      vim.fn.jobstart({ "xdg-open", url_bc })
+    end
   end)
 end
 
