@@ -15,7 +15,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/ext.lua` | Auto-detects the newest MS AL VSCode extension directory (cached at startup) |
 | `lua/al/lsp.lua` | Helpers for finding project root and reading `app.json` |
 | `lua/al/connection.lua` | Shared BC connection utils: parse launch.json, build URLs, curl auth flags |
-| `lua/al/compile.lua` | Async `alc` compiler integration with quickfix output |
+| `lua/al/compile.lua` | Async `alc` compiler integration — floating output window + quickfix |
 | `lua/al/symbols.lua` | Download `.app` symbol packages from BC dev endpoint |
 | `lua/al/publish.lua` | Compile then POST `.app` to BC dev endpoint |
 | `lua/al/debug.lua` | Snapshot debugging (BC API) + nvim-dap adapter config |
@@ -194,7 +194,11 @@ The `_al_completion_patched` guard prevents double-wrapping when `LspAttach` fir
 
 ## Compiling
 
-`:ALCompile [dir]` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` asynchronously and populates the quickfix list. The project root is the nearest directory containing `app.json`. Extra flags are passed via `config.alc_extra_args`.
+`:ALCompile [dir]` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` asynchronously. The project root is the nearest directory containing `app.json`. Extra flags are passed via `config.alc_extra_args`.
+
+**Output window:** a centered floating window opens immediately showing the full alc command and streaming all raw compiler output live. On completion a summary line is appended. Errors are highlighted red (`DiagnosticError`), warnings yellow (`DiagnosticWarn`), success green (`DiagnosticOk`). Press `q` or `<Esc>` to close.
+
+**Quickfix list** is also populated with parsed errors/warnings for jump-to-error via `<leader>aq`.
 
 Error line format parsed from alc output:
 ```
@@ -313,7 +317,7 @@ Bearer token via Azure CLI: `az account get-access-token --resource https://api.
 
 ## `compile.lua` on_success callback
 
-`M.compile(root, extra_args, on_success)` — `on_success()` is called inside `vim.schedule` only when exit_code == 0 and the quickfix list is empty. `publish.lua` uses this to chain upload after a clean build.
+`M.compile(project_dir, extra_args, on_success)` — `on_success()` is called inside `vim.schedule` only when `exit_code == 0` and the quickfix list is empty. `publish.lua` uses this to chain upload after a clean build.
 
 ## Inspecting the AL extension protocol
 
