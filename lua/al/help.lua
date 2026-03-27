@@ -181,7 +181,7 @@ local function apply_win_opts(win)
   vim.wo[win].winfixwidth    = true
   vim.wo[win].wrap           = true
   vim.wo[win].linebreak      = true
-  vim.wo[win].conceallevel   = 2
+  vim.wo[win].conceallevel   = 3
   vim.api.nvim_win_set_width(win, 85)
 end
 
