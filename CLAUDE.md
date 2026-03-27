@@ -19,10 +19,13 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/symbols.lua` | Download `.app` symbol packages from BC dev endpoint |
 | `lua/al/publish.lua` | Compile then POST `.app` to BC dev endpoint |
 | `lua/al/debug.lua` | Snapshot debugging (BC API) + nvim-dap adapter config |
+| `lua/al/explorer.lua` | Telescope pickers: browse all AL objects (`M.objects`), procedures in file (`M.procedures`), live grep (`M.search`) |
+| `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges` |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
 | `syntax/al.vim` | Vim syntax highlighting derived from `alsyntax.tmlanguage` |
+| `colors/bc_dark.lua` | BC Dark colorscheme (applied per-buffer for AL files, restored on BufLeave) |
 | `snippets/al.json` | VSCode-format snippets (object templates + control flow) |
 | `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
 
@@ -211,21 +214,33 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 
 ## Keymaps (AL buffers only)
 
+| Key | Mode | Action |
+|---|---|---|
+| `<leader>ab` | n | `:ALCompile` |
+| `<leader>ap` | n | `:ALPublish` |
+| `<leader>aP` | n | `:ALPublishOnly` |
+| `<leader>as` | n | `:ALDownloadSymbols` |
+| `<leader>ao` | n | `:ALOpenAppJson` |
+| `<leader>al` | n | `:ALOpenLaunchJson` |
+| `<leader>aq` | n | Open quickfix list |
+| `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
+| `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
+| `<leader>ag` | n | `:ALSearch` — live grep across all AL files |
+| `<C-Space>` / `<Nul>` | i | Trigger object ID completion (`<C-x><C-u>`) |
+| `<F5>` / `<leader>adl` | n | `:ALLaunch` — compile, publish, attach debugger |
+| `<leader>ads` | n | `:ALSnapshotStart` |
+| `<leader>adf` | n | `:ALSnapshotFinish` |
+| `<leader>add` | n | `:ALDebugSetup` |
+| `gd` | n | AL go to definition (via `al/gotodefinition`) |
+| `<C-o>` | n | Navigate back from `gd` (standard Neovim jumplist) |
+
+**Inside `:ALExplorer` picker:**
+
 | Key | Action |
 |---|---|
-| `<leader>ab` | `:ALCompile` |
-| `<leader>ap` | `:ALPublish` |
-| `<leader>aP` | `:ALPublishOnly` |
-| `<leader>as` | `:ALDownloadSymbols` |
-| `<leader>ao` | `:ALOpenAppJson` |
-| `<leader>al` | `:ALOpenLaunchJson` |
-| `<leader>aq` | Open quickfix list |
-| `<F5>` / `<leader>adl` | `:ALLaunch` — compile, publish, attach debugger |
-| `<leader>ads` | `:ALSnapshotStart` |
-| `<leader>adf` | `:ALSnapshotFinish` |
-| `<leader>add` | `:ALDebugSetup` |
-| `gd` | AL go to definition (via `al/gotodefinition`) |
-| `<C-o>` | Navigate back from `gd` (standard Neovim jumplist) |
+| `<C-s>` | Cycle sort mode: type → id → publisher → name |
+| `<C-f>` | Jump to live grep (`:ALSearch`) |
+| `<CR>` | Open file at object declaration |
 
 Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.lua` via the `LspAttach` autocmd and apply to AL buffers too.
 
@@ -241,6 +256,10 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
+| `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
+| `:ALExplorerProcs` | Browse procedures/triggers in the current file |
+| `:ALSearch [dir]` | Live grep across all AL files (project + symbol packages) |
+| `:ALNextId` | Show next free object ID for the type on the current line |
 | `:ALOpenAppJson` | Edit project `app.json` |
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
@@ -317,6 +336,86 @@ Cloud `launch.json` example:
 ```
 Bearer token via Azure CLI: `az account get-access-token --resource https://api.businesscentral.dynamics.com --query accessToken -o tsv`
 
+## BC Dark colorscheme (`colors/bc_dark.lua`)
+
+A per-buffer colorscheme applied automatically when an AL file is opened, restored to the previous colorscheme on `BufLeave`. Matches the user's VSCode TextMate colour settings:
+
+| Element | Colour |
+|---|---|
+| Background | `#010704` |
+| Foreground | `#efefef` |
+| Comments | `#04b925` (green) |
+| AL keywords / object types / built-in types | `#f6fa16` (yellow) — `Type`, `Structure` groups |
+| Strings | `#ce8349` (orange) |
+| Numbers / constants | `#2fafff` (blue) |
+
+**Implementation note:** `ftplugin/al.lua` saves `vim.g.colors_name` before applying `bc_dark`, then restores it in a one-shot `BufLeave`/`BufWinLeave` autocmd on the buffer. This is AL-only — other filetypes are unaffected.
+
+**Syntax string regions use `oneline`** on `alString`, `alVerbatim`, and `alQuotedIdent` in `syntax/al.vim`. Without `oneline`, unclosed quote characters bleed highlight colour across the rest of the file.
+
+## AL Explorer (`lua/al/explorer.lua`)
+
+Telescope pickers for navigating AL objects across the whole project and its symbol packages.
+
+### Object picker (`M.objects`)
+
+Runs `rg` with the AL object declaration pattern across:
+1. The project root (source files)
+2. Every extracted symbol package cache under `~/.cache/nvim/alnvim/symbols/`
+
+Each entry shows: `[src]`/`[sym]` tag, publisher, object type, numeric ID, object name, filename.
+
+Sort modes cycled with `<C-s>`: **type** (default) → **id** → **publisher** → **name**.
+
+### Symbol package extraction (`ensure_extracted`)
+
+`.app` files in `.alpackages/` are zip archives containing `src/*.al` stubs. `ensure_extracted` unpacks them to a cache dir keyed on the sanitised app filename (spaces → underscores). A `.ok` stamp file records the extraction time; re-extraction is skipped if the stamp is newer than the `.app` file.
+
+**Important:** `unzip` exits with code 1 as a warning when one glob pattern matches nothing (not a failure). Use `vim.fn.isdirectory(dir .. "/src")` to check success — do not rely on `vim.v.shell_error`.
+
+Publisher is extracted from the `.app` filename format `Publisher_Name_Major.Minor.Build.Rev.app` by stripping the trailing version segment then taking everything before the first underscore.
+
+### Procedures picker (`M.procedures`)
+
+Runs `rg` on the current buffer file only, matching `procedure`/`trigger` declarations. Jumps within the same buffer.
+
+### Search (`M.search`)
+
+Uses `telescope.builtin.live_grep` with `search_dirs` set to the same project + symbol package dirs used by the object picker. Filters to `*.al`/`*.AL` files.
+
+## Object ID completion (`lua/al/ids.lua`)
+
+Suggests the next free object ID(s) from `app.json`'s `idRanges` when creating a new AL object.
+
+### Trigger
+
+In insert mode, on a line starting with an AL object type keyword followed by a space (e.g. `codeunit `), press `<C-Space>` (mapped to `<C-x><C-u>` / `completefunc`). A popup appears with the next available IDs per range.
+
+**Linux terminal note:** Most terminals send `0x00` (NUL) for Ctrl+Space. Both `<C-Space>` and `<Nul>` are mapped to `<C-x><C-u>` in `ftplugin/al.lua`.
+
+### completefunc bridge
+
+`completefunc` requires a Vimscript-callable global name. A named global `_G.ALCompleteObjectId` bridges to `require("al.ids").complete`. Using `v:lua` syntax is avoided as it can be rejected on some Neovim versions.
+
+### Object types with IDs
+
+`table`, `tableextension`, `page`, `pageextension`, `pagecustomization`, `codeunit`, `report`, `reportextension`, `query`, `xmlport`, `enum`, `enumextension`, `permissionset`, `permissionsetextension`, `profile`, `controladdin`. Types without numeric IDs (`interface`, `entitlement`, etc.) do not trigger the popup.
+
+### Completion item format
+
+```
+word: "50042"
+abbr: "50042"
+menu: "[50000-50149 · 42 used]"
+info:  "42 of 150 IDs used in range 50000-50149"
+```
+
+Up to 5 free IDs are shown per range so the user can choose a round number if preferred. `get_used_ids` scans the project with `rg -i` to find all IDs already assigned to that object type.
+
+### Normal-mode helper
+
+`:ALNextId` calls `M.show_next()` which notifies the next 3 free IDs for the object type on the current line (no insert mode required).
+
 ## `compile.lua` on_success callback
 
 `M.compile(project_dir, extra_args, on_success)` — `on_success()` is called inside `vim.schedule` only when `exit_code == 0` and the quickfix list is empty. `publish.lua` uses this to chain upload after a clean build.
@@ -350,12 +449,20 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
     type    = "executable",
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },  -- REQUIRED
-    options = { env = { DOTNET_ROOT = "/usr/share/dotnet" } },
+    options = {
+      env = {
+        DOTNET_ROOT             = "/usr/share/dotnet",
+        DISPLAY                  = os.getenv("DISPLAY") or "",
+        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+      },
+    },
   }
   ```
-  Without `/startDebugging` the binary starts in LSP mode and hangs waiting for an LSP `initialize` request. Without `/projectRoot` the adapter cannot locate the project.
+  Without `/startDebugging` the binary starts in LSP mode and hangs waiting for an LSP `initialize` request. Without `/projectRoot` the adapter cannot locate the project. Display env vars are forwarded so the adapter subprocess can invoke `xdg-open` if needed.
 
-  **breakOnError / breakOnRecordWrite must be booleans** (adapter 16.x+): The C# deserialiser is strict — sending the string `"All"` causes `Could not convert string to boolean`. Map: `"All"` → `true`, `"None"` → `false`.
+  **breakOnError / breakOnRecordWrite must be booleans** (adapter 16.x+): The C# deserialiser is strict — sending the string `"All"` causes `Could not convert string to boolean`. `debug.lua` converts via `to_break_bool()`: `"All"`, `"ExcludeTry"`, `"ExcludeTemporary"` → `true`; `"None"` / `nil` → `false`.
 
   **launchBrowser**: Force `launchBrowser = false` in the DAP config — the adapter's `xdg-open` call fails on Linux. If `launch.json` has `launchBrowser = true`, open the URL from Lua using `conn.webclient_url(cfg)` after `dap.run()`.
 
@@ -363,4 +470,3 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
   - Cloud: `https://businesscentral.dynamics.com/<tenant>/<env>`
   - On-prem: `http[s]://<server>/<serverInstance>/WebClient/?<ObjType>=<ObjId>&tenant=<tenant>`
 - **Treesitter grammar**: No community grammar exists yet. Generate from `alsyntax.tmlanguage` with `tree-sitter generate`.
-- **AL Explorer**: Telescope extension that greps for AL object declarations and presents them as a picker.
