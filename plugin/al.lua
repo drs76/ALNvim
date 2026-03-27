@@ -273,6 +273,14 @@ vim.api.nvim_create_user_command("ALExplorerProcs", function()
   require("al.explorer").procedures()
 end, { desc = "AL Explorer: browse procedures/triggers in the current file" })
 
+vim.api.nvim_create_user_command("ALSearch", function(opts)
+  require("al.explorer").search(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "AL Explorer: live grep across all AL files (project + symbol packages)",
+})
+
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")
   local root = lsp.get_root()

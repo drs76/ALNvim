@@ -2,9 +2,11 @@
 --
 -- M.objects(root)    – all AL object declarations across project + symbol packages
 -- M.procedures()     – procedures/triggers in the current file
+-- M.search(root)     – live grep across all AL files (project + symbol packages)
 --
 -- Inside the objects picker:
 --   <C-s>  cycle sort mode: type → id → publisher → name
+--   <C-f>  jump to live grep across all AL files
 
 local M   = {}
 local lsp = require("al.lsp")
@@ -100,6 +102,25 @@ local sort_fns = {
   end,
 }
 
+-- ── Shared: build search dirs from project root + symbol caches ───────────────
+
+-- Returns: search_dirs (list), sym_map (dir→publisher), sym_count (int)
+local function build_search_dirs(root)
+  local search_dirs = { root }
+  local sym_map     = {}
+  local sym_count   = 0
+  local apps        = vim.fn.glob(root .. "/.alpackages/*.app", false, true)
+  for _, app in ipairs(apps) do
+    local d = ensure_extracted(app)
+    if d then
+      table.insert(search_dirs, d)
+      sym_map[d]  = publisher_from_app(app)
+      sym_count   = sym_count + 1
+    end
+  end
+  return search_dirs, sym_map, sym_count
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.objects(root)
@@ -122,19 +143,7 @@ function M.objects(root)
   local action_state = require("telescope.actions.state")
 
   -- Build search dirs: project root + extracted symbol caches
-  local search_dirs = { root }
-  local sym_map     = {}   -- dir → publisher (for symbol entries)
-  local sym_count   = 0
-  local apps        = vim.fn.glob(root .. "/.alpackages/*.app", false, true)
-
-  for _, app in ipairs(apps) do
-    local d = ensure_extracted(app)
-    if d then
-      table.insert(search_dirs, d)
-      sym_map[d]  = publisher_from_app(app)
-      sym_count   = sym_count + 1
-    end
-  end
+  local search_dirs, sym_map, sym_count = build_search_dirs(root)
 
   -- Project publisher from app.json
   local app_json         = lsp.read_app_json(root)
@@ -230,6 +239,12 @@ function M.objects(root)
         vim.notify("AL Explorer: sort by " .. mode, vim.log.levels.INFO)
       end)
 
+      -- <C-f>: jump to live grep across all AL files (search within objects)
+      map({ "i", "n" }, "<C-f>", function()
+        actions.close(prompt_bufnr)
+        M.search(root)
+      end)
+
       return true
     end,
   }):find()
@@ -296,6 +311,31 @@ function M.procedures()
       return true
     end,
   }):find()
+end
+
+-- Telescope live-grep across all AL files (project + symbol packages).
+function M.search(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root", vim.log.levels.ERROR)
+    return
+  end
+
+  local ok_tel, _ = pcall(require, "telescope")
+  if not ok_tel then
+    vim.notify("AL Explorer: telescope.nvim not installed", vim.log.levels.ERROR)
+    return
+  end
+
+  local builtin = require("telescope.builtin")
+  local search_dirs = build_search_dirs(root)
+
+  builtin.live_grep({
+    prompt_title  = "AL Search",
+    search_dirs   = search_dirs,
+    glob_pattern  = { "*.al", "*.AL" },
+    additional_args = { "--smart-case" },
+  })
 end
 
 return M

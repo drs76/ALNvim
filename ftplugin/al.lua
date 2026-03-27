@@ -38,6 +38,7 @@ vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend(
 -- Explorer
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))
+vim.keymap.set("n", "<leader>ag", "<cmd>ALSearch<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Explorer — live grep all AL files" }))
 -- Object ID completion  (<C-Space> on a line starting with an AL object type)
 _G.ALCompleteObjectId = function(findstart, base)
   return require("al.ids").complete(findstart, base)
