@@ -1,28 +1,10 @@
 -- Buffer-local settings for AL files
 
--- Switch to BC Dark theme for AL buffers, restore previous theme on leave.
--- Uses BufEnter/BufLeave (without once=true) so the theme toggles correctly
--- across repeated focus changes, including LSP hover floats.
-local _prev_colors = vim.g.colors_name
-if _prev_colors ~= "bc_dark" then
+-- Apply bc_dark when this AL buffer is first loaded.
+-- Ongoing window-focus switching is handled by the global WinEnter autocmd in plugin/al.lua.
+if vim.g.colors_name ~= "bc_dark" then
   vim.cmd("colorscheme bc_dark")
 end
-vim.api.nvim_create_autocmd("BufEnter", {
-  buffer = 0,
-  callback = function()
-    if vim.g.colors_name ~= "bc_dark" then
-      vim.cmd("colorscheme bc_dark")
-    end
-  end,
-})
-vim.api.nvim_create_autocmd("BufLeave", {
-  buffer = 0,
-  callback = function()
-    if _prev_colors and _prev_colors ~= "bc_dark" then
-      vim.cmd("colorscheme " .. _prev_colors)
-    end
-  end,
-})
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
 vim.api.nvim_create_autocmd("BufWritePost", {
   buffer   = 0,

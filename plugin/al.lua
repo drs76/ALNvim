@@ -3,6 +3,38 @@
 if vim.g.vscode or vim.g.alnvim_loaded then return end
 vim.g.alnvim_loaded = true
 
+-- Save the user's colorscheme once at plugin load, before any AL file triggers bc_dark.
+if not vim.g._al_user_colorscheme then
+  vim.g._al_user_colorscheme = vim.g.colors_name or "default"
+end
+
+-- Global WinEnter: apply bc_dark when focusing an AL window; restore the user's scheme
+-- when focusing a normal (non-AL) file buffer.  Special buffers — neo-tree, quickfix,
+-- help, terminal, etc. (buftype ~= "") — are intentionally ignored so the theme does
+-- not flash when toggling side panels while editing AL code.
+vim.api.nvim_create_autocmd("WinEnter", {
+  group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true }),
+  callback = function()
+    local buf = vim.api.nvim_get_current_buf()
+    local ft  = vim.bo[buf].filetype
+    local bt  = vim.bo[buf].buftype
+    if ft == "al" then
+      if vim.g.colors_name ~= "bc_dark" then
+        vim.cmd("colorscheme bc_dark")
+      end
+    elseif bt == "" and ft ~= "" then
+      -- Real file buffer that is not AL: restore user theme.
+      if vim.g.colors_name == "bc_dark" then
+        local restore = vim.g._al_user_colorscheme or "default"
+        if restore ~= "bc_dark" then
+          vim.cmd("colorscheme " .. restore)
+        end
+      end
+    end
+    -- bt ~= "": special buffer — keep whatever scheme is current.
+  end,
+})
+
 -- ── AL Language Server (Microsoft.Dynamics.Nav.EditorServices.Host) ──────────
 -- The binary communicates via standard LSP over stdio.
 -- It must be executable; we set that here because the VSCode extension ships
