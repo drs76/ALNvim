@@ -284,6 +284,55 @@ local TEMPLATES = {
   permissionset  = tpl_permissionset,
 }
 
+-- ── Object list helpers ───────────────────────────────────────────────────────
+
+-- Return sorted list of object names of the given AL type across project + symbols.
+local function get_objects_of_type(root, obj_type)
+  local search_dirs = require("al.explorer").build_search_dirs(root)
+  -- rg -i for case-insensitive match (AL keywords can be any case)
+  local pat = string.format("^\\s*%s\\s+\\d+", obj_type)
+  local cmd = {
+    "rg", "--no-heading", "--no-filename", "--color=never", "-i",
+    "--glob", "*.al", "--glob", "*.AL",
+    "-e", pat,
+  }
+  vim.list_extend(cmd, search_dirs)
+  local raw   = vim.fn.systemlist(cmd)
+  local seen  = {}
+  local names = {}
+  -- Match: optional whitespace, keyword (any case), whitespace, digits, whitespace, rest
+  local extract = "^%s*[%a]+%s+%d+%s*(.*)"
+  for _, line in ipairs(raw) do
+    local rest = line:match(extract)
+    if rest then
+      local name = rest:match('^"([^"]+)"')
+                or rest:match("^'([^']+)'")
+                or rest:gsub("%s*;?%s*$", ""):gsub("%s+$", "")
+      if name and name ~= "" and not seen[name] then
+        seen[name] = true
+        table.insert(names, name)
+      end
+    end
+  end
+  table.sort(names, function(a, b) return a:lower() < b:lower() end)
+  return names
+end
+
+-- Show a vim.ui.select picker for objects of the given type, then call cb(name) or cb(nil).
+local function pick_object(root, obj_type, prompt, cb)
+  local list = get_objects_of_type(root, obj_type)
+  if #list == 0 then
+    vim.notify("AL Wizard: no " .. obj_type .. " objects found — enter name manually", vim.log.levels.WARN)
+    vim.ui.input({ prompt = prompt }, function(val)
+      cb(val == nil and nil or (val ~= "" and val or nil))
+    end)
+    return
+  end
+  vim.ui.select(list, { prompt = prompt }, function(choice)
+    cb(choice)  -- nil when cancelled
+  end)
+end
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function sanitise_name(name)
@@ -331,9 +380,9 @@ extra_prompts.table = function(data, cb)
 end
 
 extra_prompts.tableextension = function(data, cb)
-  vim.ui.input({ prompt = "Extends table: " }, function(val)
-    if val == nil then cb(nil); return end
-    data.extends = val
+  pick_object(data.root, "table", "Extends table:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
     cb(data)
   end)
 end
@@ -351,9 +400,9 @@ extra_prompts.page = function(data, cb)
 end
 
 extra_prompts.pageextension = function(data, cb)
-  vim.ui.input({ prompt = "Extends page: " }, function(val)
-    if val == nil then cb(nil); return end
-    data.extends = val
+  pick_object(data.root, "page", "Extends page:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
     cb(data)
   end)
 end
@@ -383,9 +432,9 @@ extra_prompts.enum = function(data, cb)
 end
 
 extra_prompts.enumextension = function(data, cb)
-  vim.ui.input({ prompt = "Extends enum: " }, function(val)
-    if val == nil then cb(nil); return end
-    data.extends = val
+  pick_object(data.root, "enum", "Extends enum:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
     cb(data)
   end)
 end
@@ -393,7 +442,7 @@ end
 -- ── Wizard runner ─────────────────────────────────────────────────────────────
 
 local function run_wizard(root, info)
-  local data = {}
+  local data = { root = root }
 
   local function finish()
     local content = TEMPLATES[info.key](data)

@@ -121,6 +121,9 @@ local function build_search_dirs(root)
   return search_dirs, sym_map, sym_count
 end
 
+-- Expose so wizard.lua can reuse the same search-dir logic.
+M.build_search_dirs = build_search_dirs
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.objects(root)
