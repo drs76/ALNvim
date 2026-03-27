@@ -46,9 +46,14 @@ local function ensure_extracted(app_path)
     "unzip -q -o %s 'src/*.al' 'src/*.AL' -d %s",
     vim.fn.shellescape(app_path), vim.fn.shellescape(dir)))
 
-  -- unzip exit 0 = success, exit 1 = warning (one glob matched nothing) — both OK.
-  -- Only treat exit >= 2 as a real failure.
-  if vim.v.shell_error >= 2 then return nil end
+  -- Don't rely on vim.v.shell_error (unreliable for unzip exit 1 warnings).
+  -- Check whether src/ was actually created instead.
+  if vim.fn.isdirectory(dir .. "/src") == 0 then
+    -- Package has no AL source stubs (e.g. thin wrapper with only SymbolReference.json).
+    -- Write stamp anyway so we don't re-attempt on every open.
+    vim.fn.writefile({ "0" }, stamp)
+    return nil
+  end
 
   vim.fn.writefile({ tostring(os.time()) }, stamp)
   return dir
