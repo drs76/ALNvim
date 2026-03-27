@@ -313,6 +313,9 @@ function M.launch(root)
     launch_cfg.authentication  = cfg.authentication or "Windows"
   end
 
+  -- Also register as the default DapContinue configuration so re-attaching works.
+  dap.configurations.al = { launch_cfg }
+
   -- Compile first; on a clean build hand the launch config to the adapter.
   -- The adapter publishes the .app and attaches — no separate HTTP upload needed.
   require("al.compile").compile(root, nil, function()
