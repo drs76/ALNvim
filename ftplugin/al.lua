@@ -14,6 +14,14 @@ vim.api.nvim_create_autocmd({ "BufLeave", "BufWinLeave" }, {
     end
   end,
 })
+-- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
+vim.api.nvim_create_autocmd("BufWritePost", {
+  buffer   = 0,
+  callback = function()
+    require("al.wizard").organise_file(vim.api.nvim_get_current_buf())
+  end,
+})
+
 vim.bo.commentstring = "// %s"
 vim.bo.tabstop       = 4
 vim.bo.shiftwidth    = 4

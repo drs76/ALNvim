@@ -340,7 +340,8 @@ local function sanitise_name(name)
 end
 
 local function build_path(root, info, id, name)
-  local dir   = root .. "/src"
+  -- Place directly into src/<obj_type>/ so the organiser has nothing to do.
+  local dir   = root .. "/src/" .. info.key
   local sname = sanitise_name(name)
   local fname
   if info.has_id then
@@ -509,6 +510,68 @@ local function run_wizard(root, info)
   else
     prompt_name()
   end
+end
+
+-- ── File organiser ────────────────────────────────────────────────────────────
+
+-- All AL object type keywords that warrant their own src/ subfolder.
+local ORG_TYPES = {
+  table=1, tableextension=1, page=1, pageextension=1, pagecustomization=1,
+  codeunit=1, report=1, reportextension=1, query=1, xmlport=1,
+  enum=1, enumextension=1, interface=1, permissionset=1, permissionsetextension=1,
+  profile=1, profileextension=1, controladdin=1,
+}
+
+local function detect_obj_type(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 50, false)
+  for _, line in ipairs(lines) do
+    -- Types with numeric IDs: keyword <number>
+    local typ = line:match("^%s*([%a]+)%s+%d+")
+    if typ and ORG_TYPES[typ:lower()] then return typ:lower() end
+    -- Interface has no numeric ID: interface "Name"
+    if line:lower():match('^%s*interface%s+["\']') then return "interface" end
+  end
+  return nil
+end
+
+-- Called from BufWritePost. Moves the saved file into src/<obj_type>/ if it
+-- isn't already there, then updates the buffer to point at the new path.
+function M.organise_file(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  if path == "" then return end
+
+  local root = lsp.get_root(bufnr)
+  if not root then return end
+
+  -- Only act on files that are inside the project tree.
+  if path:sub(1, #root) ~= root then return end
+
+  -- Relative path from project root (strip leading slash)
+  local rel = path:sub(#root + 2)
+
+  -- Already in src/<type>/…  →  nothing to do.
+  if rel:match("^src/[^/]+/.+") then return end
+
+  local obj_type = detect_obj_type(bufnr)
+  if not obj_type then return end
+
+  local fname      = vim.fn.fnamemodify(path, ":t")
+  local target_dir = root .. "/src/" .. obj_type
+  local target     = target_dir .. "/" .. fname
+
+  if target == path then return end
+
+  vim.fn.mkdir(target_dir, "p")
+
+  if vim.fn.rename(path, target) ~= 0 then
+    vim.notify("AL: could not move file to " .. target, vim.log.levels.ERROR)
+    return
+  end
+
+  vim.api.nvim_buf_set_name(bufnr, target)
+  vim.bo[bufnr].modified = false
+  vim.notify("AL: organised → " .. vim.fn.fnamemodify(target, ":~:."), vim.log.levels.INFO)
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
