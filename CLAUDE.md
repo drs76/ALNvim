@@ -22,6 +22,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/explorer.lua` | Telescope pickers: browse all AL objects (`M.objects`), procedures in file (`M.procedures`), live grep (`M.search`) |
 | `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
+| `lua/al/help.lua` | AL Help panel — toggleable left split running `lynx` on MS Learn AL docs |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
@@ -224,6 +225,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>ao` | n | `:ALOpenAppJson` |
 | `<leader>al` | n | `:ALOpenLaunchJson` |
 | `<leader>aq` | n | Open quickfix list |
+| `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs in lynx) |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
@@ -258,6 +260,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
+| `:ALHelp [url]` | Toggle AL Help panel (MS Learn AL docs in lynx); optional URL argument |
 | `:ALNewObject [dir]` | AL Object Wizard: interactively create a new AL object file |
 | `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
@@ -418,6 +421,39 @@ Up to 5 free IDs are shown per range so the user can choose a round number if pr
 ### Normal-mode helper
 
 `:ALNextId` calls `M.show_next()` which notifies the next 3 free IDs for the object type on the current line (no insert mode required).
+
+## AL Help panel (`lua/al/help.lua`)
+
+`:ALHelp [url]` / `<leader>ah` toggles a left-side vertical split (85 cols, fixed width) running
+`lynx` pointed at the MS Learn AL documentation.
+
+**Default URL:** `https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/developer/devenv-programming-in-al`
+
+An optional URL argument opens a different page: `:ALHelp https://...`
+
+### Behaviour
+
+- **First open**: starts a `lynx` terminal process in a new buffer (`bufhidden = "hide"`)
+- **Close** (toggle off): closes the window but keeps the lynx process alive in the background
+- **Re-open**: attaches a new window to the existing buffer — browsing position is preserved
+- **lynx exits** (user presses `q`): buffer and state are cleaned up; next toggle starts fresh
+- Focus returns to the editing window automatically after the panel opens
+
+### Lynx navigation (when panel is focused)
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Scroll / move between links |
+| `→` / `Enter` | Follow link |
+| `←` / `u` | Go back |
+| `g` | Go to URL |
+| `/` | Search on page |
+| `q` | Quit lynx (closes panel) |
+
+### Dependency
+
+Requires `lynx` (text-mode browser). On Debian/Ubuntu: `sudo apt install lynx`.
+The command notifies with an error if `lynx` is not found.
 
 ## AL Object Wizard (`lua/al/wizard.lua`)
 

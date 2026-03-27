@@ -289,6 +289,14 @@ end, {
   desc     = "AL Explorer: live grep across all AL files (project + symbol packages)",
 })
 
+vim.api.nvim_create_user_command("ALHelp", function(opts)
+  local url = opts.args ~= "" and opts.args or nil
+  require("al.help").toggle(url)
+end, {
+  nargs = "?",
+  desc  = "Toggle AL Help panel (MS Learn AL docs in lynx)",
+})
+
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")
   local root = lsp.get_root()
