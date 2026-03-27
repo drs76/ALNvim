@@ -78,12 +78,7 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
       if status >= 200 and status < 300 then
         vim.notify("AL: Published successfully", vim.log.levels.INFO)
         if cfg and cfg.launchBrowser then
-          local obj_id   = cfg.startupObjectId or 22
-          local obj_type = cfg.startupObjectType or "Page"
-          local url_bc   = string.format(
-            "%s/WebClient/?%s=%s&tenant=%s",
-            base, obj_type, obj_id, conn.urlencode(tenant))
-          vim.fn.jobstart({ "xdg-open", url_bc })
+          vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })
         end
         if on_success then on_success() end
       else

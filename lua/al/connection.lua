@@ -63,6 +63,24 @@ function M.base_url(cfg)
   return server .. "/" .. instance
 end
 
+-- Return the BC WebClient URL for a launch configuration.
+--   Cloud    → https://businesscentral.dynamics.com/<tenant>/<env>
+--   On-prem  → http[s]://<server>/<serverInstance>/WebClient/?<ObjType>=<ObjId>&tenant=<tenant>
+function M.webclient_url(cfg)
+  if cfg.environmentType == "Sandbox" or cfg.environmentType == "Production" then
+    local tenant = M.urlencode(cfg.primaryTenantDomain or cfg.tenant or "")
+    local env    = M.urlencode(cfg.environmentName or "sandbox")
+    return string.format("https://businesscentral.dynamics.com/%s/%s", tenant, env)
+  end
+  local server   = (cfg.server or "http://localhost"):gsub("/*$", "")
+  local instance = cfg.serverInstance or "BC"
+  local tenant   = cfg.tenant or "default"
+  local obj_type = cfg.startupObjectType or "Page"
+  local obj_id   = cfg.startupObjectId or 22
+  return string.format("%s/%s/WebClient/?%s=%s&tenant=%s",
+    server, instance, obj_type, obj_id, M.urlencode(tenant))
+end
+
 -- Clear the in-memory credential cache (all entries or a specific base URL).
 function M.clear_credentials()
   _cache = {}

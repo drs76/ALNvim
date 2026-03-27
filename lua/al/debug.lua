@@ -304,12 +304,7 @@ function M.launch(root)
     vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
     dap.run(launch_cfg)
     if cfg.launchBrowser then
-      local base   = conn.base_url(cfg)
-      local tenant = cfg.tenant or "default"
-      local url_bc = string.format("%s/WebClient/?%s=%s&tenant=%s",
-        base, cfg.startupObjectType or "Page",
-        cfg.startupObjectId or 22, conn.urlencode(tenant))
-      vim.fn.jobstart({ "xdg-open", url_bc })
+      vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })
     end
   end)
 end
