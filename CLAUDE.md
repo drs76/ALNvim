@@ -429,15 +429,15 @@ sequence to create a new AL object file, then opens it.
 | Type | ID | Extra prompts |
 |---|---|---|
 | Table | yes | DataClassification (select from 7 options) |
-| TableExtension | yes | `extends` table name |
-| Page | yes | PageType (select from 13 options), SourceTable |
-| PageExtension | yes | `extends` page name |
+| TableExtension | yes | `extends`: picker of all tables (project + symbols) |
+| Page | yes | PageType (select from 13 options), SourceTable (input) |
+| PageExtension | yes | `extends`: picker of all pages (project + symbols) |
 | Codeunit | yes | — |
-| Report | yes | SourceTable |
-| Query | yes | SourceTable |
+| Report | yes | SourceTable (input) |
+| Query | yes | SourceTable (input) |
 | XmlPort | yes | — |
-| Enum | yes | Extensible (true/false) |
-| EnumExtension | yes | `extends` enum name |
+| Enum | yes | Extensible (true/false select) |
+| EnumExtension | yes | `extends`: picker of all enums (project + symbols) |
 | Interface | **no** | — |
 | PermissionSet | yes | — |
 
@@ -447,21 +447,56 @@ sequence to create a new AL object file, then opens it.
 2. `vim.ui.input` for ID (pre-filled via `ids.M.next_id(root, type)` — skipped for Interface)
 3. `vim.ui.input` for object name
 4. Type-specific extra prompts (chained callbacks)
-5. File written, opened in editor
+5. File written to `<root>/src/<obj_type>/`, opened in editor
 
 Cancellation at any step (Esc / nil return) aborts cleanly with a WARN notify.
 
+### Extends picker (extension types)
+
+For TableExtension, PageExtension and EnumExtension the `extends` prompt uses
+`vim.ui.select` populated by scanning the project + extracted symbol packages via
+`explorer.M.build_search_dirs`. Falls back to a free-text input if no objects are found.
+
 ### File naming (CRS convention)
 
-`<root>/src/<id>.<SanitisedName>.<FileType>.al` e.g. `50100.My_Table.Table.al`.
-Interface omits the ID: `My_Interface.Interface.al`.
-The `src/` directory is created if absent. If the file already exists, an overwrite
+`<root>/src/<obj_type>/<id>.<SanitisedName>.<FileType>.al` e.g. `src/table/50100.My_Table.Table.al`.
+Interface omits the ID: `src/interface/My_Interface.Interface.al`.
+The target directory is created if absent. If the file already exists, an overwrite
 confirmation is shown via `vim.ui.select`.
 
 ### ID suggestion
 
 Uses `ids.M.next_id(root, obj_type)` which is a thin wrapper around the existing local helpers
 `get_ranges` / `get_used_ids` / `free_ids` in `ids.lua`.
+
+## AL File Organiser (`wizard.M.organise_file`)
+
+A `BufWritePost` autocmd in `ftplugin/al.lua` automatically moves any saved AL file into
+`<root>/src/<obj_type>/` if it isn't already there.
+
+### Trigger
+
+Fires on every `:w` of an AL buffer. Skips silently if:
+- The file is not inside a project root (no `app.json` found)
+- The file is already under `src/<type>/…` (correct location)
+- The object type cannot be determined from the file content
+
+### Detection
+
+Reads the first 50 buffer lines looking for the AL object type keyword:
+- Types with IDs: matches `^\s*<keyword>\s+\d+` (table, page, codeunit, etc.)
+- Interface: matches `^\s*interface\s+["']` (no numeric ID)
+
+### Move
+
+Uses `vim.fn.rename` (atomic on the same filesystem) to move the file, then
+`vim.api.nvim_buf_set_name` to update the buffer path in place. No buffer reload
+required — the user continues editing at the new path transparently.
+
+**Supported type folders:** `table`, `tableextension`, `page`, `pageextension`,
+`pagecustomization`, `codeunit`, `report`, `reportextension`, `query`, `xmlport`,
+`enum`, `enumextension`, `interface`, `permissionset`, `permissionsetextension`,
+`profile`, `profileextension`, `controladdin`.
 
 ## `compile.lua` on_success callback
 
