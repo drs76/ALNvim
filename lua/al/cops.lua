@@ -20,10 +20,10 @@ end
 -- Read active cop tokens from per-project config, falling back to DEFAULT_COPS.
 function M.get_active(root)
   local path = config_path(root)
-  local lines = vim.fn.readfile(path)
-  if not lines or #lines == 0 then return DEFAULT_COPS end
-  local ok, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
-  if not ok or type(data) ~= "table" or not data.codeAnalyzers then
+  local ok, lines = pcall(vim.fn.readfile, path)
+  if not ok or not lines or #lines == 0 then return DEFAULT_COPS end
+  local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+  if not ok2 or type(data) ~= "table" or not data.codeAnalyzers then
     return DEFAULT_COPS
   end
   return data.codeAnalyzers
@@ -35,10 +35,10 @@ function M.set_active(root, cops)
   vim.fn.mkdir(root .. "/.vscode", "p")
   -- Preserve any other keys already in alnvim.json
   local data = {}
-  local lines = vim.fn.readfile(path)
-  if lines and #lines > 0 then
-    local ok, existing = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
-    if ok and type(existing) == "table" then data = existing end
+  local ok, lines = pcall(vim.fn.readfile, path)
+  if ok and lines and #lines > 0 then
+    local ok2, existing = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+    if ok2 and type(existing) == "table" then data = existing end
   end
   data.codeAnalyzers = cops
   vim.fn.writefile({ vim.fn.json_encode(data) }, path)
