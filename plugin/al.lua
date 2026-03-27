@@ -42,24 +42,6 @@ vim.api.nvim_create_autocmd("FileType", {
       incrementalBuild       = true,
     }
 
-    -- The AL server sends completion item labels as { label = "..." } objects
-    -- instead of plain strings (non-standard). Normalize them before nvim-cmp
-    -- or any other consumer sees them, otherwise string.byte() crashes.
-    local orig_completion = vim.lsp.handlers["textDocument/completion"]
-    local function al_completion_handler(err, result, ctx, config)
-      if result then
-        local items = (type(result) == "table" and result.items) or result
-        if type(items) == "table" then
-          for _, item in ipairs(items) do
-            if type(item.label) == "table" then
-              item.label = item.label.label or ""
-            end
-          end
-        end
-      end
-      return orig_completion(err, result, ctx, config)
-    end
-
     vim.lsp.start({
       name     = "al_language_server",
       cmd      = { lsp_bin },
@@ -67,9 +49,6 @@ vim.api.nvim_create_autocmd("FileType", {
       init_options = {
         workspacePath = root,
         alResourceConfigurationSettings = res_cfg,
-      },
-      handlers = {
-        ["textDocument/completion"] = al_completion_handler,
       },
     }, { bufnr = args.buf })
   end,
@@ -105,6 +84,34 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     local root = client.root_dir
     if not root then return end
+
+    -- The AL server sends completion labels as { label = "..." } objects instead of strings.
+    -- nvim-cmp calls client:request("textDocument/completion", ..., its_own_callback), so the
+    -- response bypasses vim.lsp.handlers entirely and arrives straight into its callback.
+    -- Patch client.request once to wrap any completion callback and normalise labels first.
+    if not client._al_completion_patched then
+      client._al_completion_patched = true
+      local _orig = client.request
+      client.request = function(self, method, params, callback, bufnr_)
+        if method == "textDocument/completion" and type(callback) == "function" then
+          local _cb = callback
+          callback = function(err, result, ...)
+            if not err and result then
+              local items = (type(result) == "table" and result.items) or result
+              if type(items) == "table" then
+                for _, item in ipairs(items) do
+                  if type(item.label) == "table" then
+                    item.label = item.label.label or ""
+                  end
+                end
+              end
+            end
+            return _cb(err, result, ...)
+          end
+        end
+        return _orig(self, method, params, callback, bufnr_)
+      end
+    end
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
     -- Use empty array — avoids hanging on network-mounted .netpackages directories.

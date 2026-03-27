@@ -158,26 +158,39 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
 ### Non-standard completion item labels
 
-The AL server sends completion item `label` fields as objects `{ label = "begin" }` rather than plain strings as the LSP spec requires. This crashes nvim-cmp (`string.byte` gets a table). The fix is a `textDocument/completion` handler registered in `vim.lsp.start`'s `handlers` table that normalises the label before passing to the default handler:
+The AL server sends completion item `label` fields as objects `{ label = "begin" }` rather than plain strings as the LSP spec requires. This crashes nvim-cmp in two ways: `string.byte` gets a table (`matcher.lua`), and `strdisplaywidth` gets a dict (`entry.lua`).
+
+**Important:** `vim.lsp.handlers["textDocument/completion"]` and the `handlers` table in `vim.lsp.start` do NOT intercept this — nvim-cmp calls `client:request("textDocument/completion", ..., its_own_callback)` and the response goes directly to that callback, bypassing all handler tables.
+
+The fix is to monkey-patch `client.request` in the `LspAttach` handler so the completion callback is always wrapped to normalise labels:
 
 ```lua
-local orig_completion = vim.lsp.handlers["textDocument/completion"]
-handlers = {
-  ["textDocument/completion"] = function(err, result, ctx, config)
-    if result then
-      local items = (type(result) == "table" and result.items) or result
-      if type(items) == "table" then
-        for _, item in ipairs(items) do
-          if type(item.label) == "table" then
-            item.label = item.label.label or ""
+if not client._al_completion_patched then
+  client._al_completion_patched = true
+  local _orig = client.request
+  client.request = function(self, method, params, callback, bufnr_)
+    if method == "textDocument/completion" and type(callback) == "function" then
+      local _cb = callback
+      callback = function(err, result, ...)
+        if not err and result then
+          local items = (type(result) == "table" and result.items) or result
+          if type(items) == "table" then
+            for _, item in ipairs(items) do
+              if type(item.label) == "table" then
+                item.label = item.label.label or ""
+              end
+            end
           end
         end
+        return _cb(err, result, ...)
       end
     end
-    return orig_completion(err, result, ctx, config)
-  end,
-}
+    return _orig(self, method, params, callback, bufnr_)
+  end
+end
 ```
+
+The `_al_completion_patched` guard prevents double-wrapping when `LspAttach` fires once per buffer.
 
 ## Compiling
 
