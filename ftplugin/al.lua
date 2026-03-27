@@ -36,6 +36,7 @@ vim.keymap.set("n", "<leader>ao", "<cmd>ALOpenAppJson<CR>",      vim.tbl_extend(
 vim.keymap.set("n", "<leader>al", "<cmd>ALOpenLaunchJson<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open launch.json" }))
 vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
 -- Explorer
+vim.keymap.set("n", "<leader>an", "<cmd>ALNewObject<CR>",     vim.tbl_extend("force", opts, { desc = "AL: New object wizard" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))
 vim.keymap.set("n", "<leader>ag", "<cmd>ALSearch<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Explorer — live grep all AL files" }))

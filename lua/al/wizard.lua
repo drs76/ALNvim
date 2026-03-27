@@ -1,0 +1,489 @@
+-- AL Object Wizard: interactive prompt flow to create a new AL object file.
+--
+-- M.new_object([root])  →  :ALNewObject
+--   1. Pick object type (12 supported)
+--   2. Enter object ID (pre-filled with next free ID from idRanges)
+--   3. Enter object name
+--   4. Type-specific extra prompts (DataClassification, PageType, extends, …)
+--   5. Generate boilerplate, write to <root>/src/<id>.<Name>.<Type>.al, open it.
+
+local M   = {}
+local lsp = require("al.lsp")
+local ids = require("al.ids")
+
+-- ── Object type registry ───────────────────────────────────────────────────────
+
+-- Each entry: { label, key, has_id, file_type }
+-- file_type is used for the filename suffix and for id-scan in ids.lua
+local TYPES = {
+  { label = "Table",                key = "table",               has_id = true,  file_type = "Table" },
+  { label = "Table Extension",      key = "tableextension",      has_id = true,  file_type = "TableExt" },
+  { label = "Page",                 key = "page",                has_id = true,  file_type = "Page" },
+  { label = "Page Extension",       key = "pageextension",       has_id = true,  file_type = "PageExt" },
+  { label = "Codeunit",             key = "codeunit",            has_id = true,  file_type = "Codeunit" },
+  { label = "Report",               key = "report",              has_id = true,  file_type = "Report" },
+  { label = "Query",                key = "query",               has_id = true,  file_type = "Query" },
+  { label = "XmlPort",              key = "xmlport",             has_id = true,  file_type = "XmlPort" },
+  { label = "Enum",                 key = "enum",                has_id = true,  file_type = "Enum" },
+  { label = "Enum Extension",       key = "enumextension",       has_id = true,  file_type = "EnumExt" },
+  { label = "Interface",            key = "interface",           has_id = false, file_type = "Interface" },
+  { label = "Permission Set",       key = "permissionset",       has_id = true,  file_type = "PermissionSet" },
+}
+
+local DATA_CLASSIFICATIONS = {
+  "ToBeClassified",
+  "CustomerContent",
+  "AccountData",
+  "EndUserIdentifiableInformation",
+  "EndUserPseudonymousIdentifiers",
+  "OrganizationIdentifiableInformation",
+  "SystemMetadata",
+}
+
+local PAGE_TYPES = {
+  "Card", "List", "CardPart", "ListPart", "Document",
+  "Worksheet", "ListPlus", "RoleCenter", "HeadlinePart",
+  "ConfirmationDialog", "NavigatePage", "StandardDialog", "API",
+}
+
+-- ── Templates ─────────────────────────────────────────────────────────────────
+
+local function tpl_table(d)
+  local dc = d.data_class or "ToBeClassified"
+  return string.format([[table %d "%s"
+{
+    Caption = '%s';
+    DataClassification = %s;
+
+    fields
+    {
+        field(1; "Code"; Code[20])
+        {
+            Caption = 'Code';
+            DataClassification = %s;
+        }
+    }
+
+    keys
+    {
+        key(PK; "Code")
+        {
+            Clustered = true;
+        }
+    }
+}
+]], d.id, d.name, d.name, dc, dc)
+end
+
+local function tpl_tableextension(d)
+  return string.format([[tableextension %d "%s" extends "%s"
+{
+    fields
+    {
+    }
+}
+]], d.id, d.name, d.extends or "")
+end
+
+local function tpl_page(d)
+  local src = d.source_table and ('"' .. d.source_table .. '"') or '""'
+  local pt  = d.page_type or "Card"
+  return string.format([[page %d "%s"
+{
+    Caption = '%s';
+    PageType = %s;
+    SourceTable = %s;
+    UsageCategory = None;
+    ApplicationArea = All;
+
+    layout
+    {
+        area(Content)
+        {
+            group(General)
+            {
+                Caption = 'General';
+            }
+        }
+    }
+
+    actions
+    {
+        area(Processing)
+        {
+        }
+    }
+}
+]], d.id, d.name, d.name, pt, src)
+end
+
+local function tpl_pageextension(d)
+  return string.format([[pageextension %d "%s" extends "%s"
+{
+    layout
+    {
+        addlast(General)
+        {
+        }
+    }
+
+    actions
+    {
+        addlast(Processing)
+        {
+        }
+    }
+}
+]], d.id, d.name, d.extends or "")
+end
+
+local function tpl_codeunit(d)
+  return string.format([[codeunit %d "%s"
+{
+    trigger OnRun()
+    begin
+    end;
+}
+]], d.id, d.name)
+end
+
+local function tpl_report(d)
+  local src = d.source_table or "SourceTable"
+  return string.format([[report %d "%s"
+{
+    Caption = '%s';
+    UsageCategory = ReportsAndAnalysis;
+    ApplicationArea = All;
+
+    dataset
+    {
+        dataitem(DataItemName; "%s")
+        {
+        }
+    }
+
+    requestpage
+    {
+        layout
+        {
+        }
+
+        actions
+        {
+        }
+    }
+}
+]], d.id, d.name, d.name, src)
+end
+
+local function tpl_query(d)
+  local src = d.source_table or "SourceTable"
+  return string.format([[query %d "%s"
+{
+    Caption = '%s';
+    QueryType = Normal;
+
+    elements
+    {
+        dataitem(DataItemName; "%s")
+        {
+        }
+    }
+}
+]], d.id, d.name, d.name, src)
+end
+
+local function tpl_xmlport(d)
+  return string.format([[xmlport %d "%s"
+{
+    Caption = '%s';
+    Direction = Both;
+
+    schema
+    {
+        textelement(RootNodeName)
+        {
+            tableelement(TableRow; "SourceTable")
+            {
+            }
+        }
+    }
+
+    requestpage
+    {
+        layout
+        {
+        }
+
+        actions
+        {
+        }
+    }
+}
+]], d.id, d.name, d.name)
+end
+
+local function tpl_enum(d)
+  local ext = (d.extensible == false) and "false" or "true"
+  return string.format([[enum %d "%s"
+{
+    Extensible = %s;
+    Caption = '%s';
+
+    value(0; " ")
+    {
+        Caption = ' ';
+    }
+}
+]], d.id, d.name, ext, d.name)
+end
+
+local function tpl_enumextension(d)
+  return string.format([[enumextension %d "%s" extends "%s"
+{
+    value(%d; "NewValue")
+    {
+        Caption = 'New Value';
+    }
+}
+]], d.id, d.name, d.extends or "", d.id)
+end
+
+local function tpl_interface(d)
+  return string.format([[interface "%s"
+{
+    procedure MyProcedure(): Boolean;
+}
+]], d.name)
+end
+
+local function tpl_permissionset(d)
+  return string.format([[permissionset %d "%s"
+{
+    Caption = '%s';
+    Assignable = true;
+
+    Permissions =
+        ;
+}
+]], d.id, d.name, d.name)
+end
+
+local TEMPLATES = {
+  table          = tpl_table,
+  tableextension = tpl_tableextension,
+  page           = tpl_page,
+  pageextension  = tpl_pageextension,
+  codeunit       = tpl_codeunit,
+  report         = tpl_report,
+  query          = tpl_query,
+  xmlport        = tpl_xmlport,
+  enum           = tpl_enum,
+  enumextension  = tpl_enumextension,
+  interface      = tpl_interface,
+  permissionset  = tpl_permissionset,
+}
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function sanitise_name(name)
+  return name:gsub("%s+", "_"):gsub("[^%w_%-]", "")
+end
+
+local function build_path(root, info, id, name)
+  local dir   = root .. "/src"
+  local sname = sanitise_name(name)
+  local fname
+  if info.has_id then
+    fname = string.format("%d.%s.%s.al", id, sname, info.file_type)
+  else
+    fname = string.format("%s.%s.al", sname, info.file_type)
+  end
+  return dir, dir .. "/" .. fname
+end
+
+local function write_and_open(path, content)
+  local lines = vim.split(content, "\n", { plain = true })
+  -- Remove trailing blank line added by format strings
+  if lines[#lines] == "" then table.remove(lines) end
+  local ok, err = pcall(vim.fn.writefile, lines, path)
+  if not ok then
+    vim.notify("AL Wizard: could not write file: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+  vim.cmd("edit " .. vim.fn.fnameescape(path))
+  vim.notify("AL Wizard: created " .. vim.fn.fnamemodify(path, ":~:."), vim.log.levels.INFO)
+end
+
+-- ── Type-specific extra prompts ───────────────────────────────────────────────
+
+-- Each handler calls cb(data) when done, or cb(nil) to abort.
+local extra_prompts = {}
+
+extra_prompts.table = function(data, cb)
+  vim.ui.select(DATA_CLASSIFICATIONS, {
+    prompt = "Data Classification:",
+  }, function(choice)
+    if not choice then cb(nil); return end
+    data.data_class = choice
+    cb(data)
+  end)
+end
+
+extra_prompts.tableextension = function(data, cb)
+  vim.ui.input({ prompt = "Extends table: " }, function(val)
+    if val == nil then cb(nil); return end
+    data.extends = val
+    cb(data)
+  end)
+end
+
+extra_prompts.page = function(data, cb)
+  vim.ui.select(PAGE_TYPES, { prompt = "Page Type:" }, function(pt)
+    if not pt then cb(nil); return end
+    data.page_type = pt
+    vim.ui.input({ prompt = "Source Table (leave blank for none): " }, function(src)
+      if src == nil then cb(nil); return end
+      data.source_table = src ~= "" and src or nil
+      cb(data)
+    end)
+  end)
+end
+
+extra_prompts.pageextension = function(data, cb)
+  vim.ui.input({ prompt = "Extends page: " }, function(val)
+    if val == nil then cb(nil); return end
+    data.extends = val
+    cb(data)
+  end)
+end
+
+extra_prompts.report = function(data, cb)
+  vim.ui.input({ prompt = "Source Table: " }, function(val)
+    if val == nil then cb(nil); return end
+    data.source_table = val ~= "" and val or "SourceTable"
+    cb(data)
+  end)
+end
+
+extra_prompts.query = function(data, cb)
+  vim.ui.input({ prompt = "Source Table: " }, function(val)
+    if val == nil then cb(nil); return end
+    data.source_table = val ~= "" and val or "SourceTable"
+    cb(data)
+  end)
+end
+
+extra_prompts.enum = function(data, cb)
+  vim.ui.select({ "true", "false" }, { prompt = "Extensible:" }, function(choice)
+    if not choice then cb(nil); return end
+    data.extensible = (choice == "true")
+    cb(data)
+  end)
+end
+
+extra_prompts.enumextension = function(data, cb)
+  vim.ui.input({ prompt = "Extends enum: " }, function(val)
+    if val == nil then cb(nil); return end
+    data.extends = val
+    cb(data)
+  end)
+end
+
+-- ── Wizard runner ─────────────────────────────────────────────────────────────
+
+local function run_wizard(root, info)
+  local data = {}
+
+  local function finish()
+    local content = TEMPLATES[info.key](data)
+    local dir, path = build_path(root, info, data.id, data.name)
+    vim.fn.mkdir(dir, "p")
+
+    if vim.fn.filereadable(path) == 1 then
+      vim.ui.select({ "Yes", "No" }, {
+        prompt = vim.fn.fnamemodify(path, ":~:.") .. " already exists. Overwrite?",
+      }, function(choice)
+        if choice == "Yes" then
+          write_and_open(path, content)
+        else
+          vim.notify("AL Wizard: cancelled", vim.log.levels.INFO)
+        end
+      end)
+    else
+      write_and_open(path, content)
+    end
+  end
+
+  local function prompt_extras()
+    local handler = extra_prompts[info.key]
+    if handler then
+      handler(data, function(result)
+        if not result then
+          vim.notify("AL Wizard: cancelled", vim.log.levels.INFO)
+          return
+        end
+        finish()
+      end)
+    else
+      finish()
+    end
+  end
+
+  local function prompt_name()
+    vim.ui.input({ prompt = info.label .. " name: " }, function(name)
+      if not name or name == "" then
+        vim.notify("AL Wizard: cancelled", vim.log.levels.INFO)
+        return
+      end
+      data.name = name
+      prompt_extras()
+    end)
+  end
+
+  if info.has_id then
+    local suggested = ids.next_id(root, info.key)
+    local default   = suggested and tostring(suggested) or ""
+    vim.ui.input({ prompt = "Object ID: ", default = default }, function(val)
+      if not val or val == "" then
+        vim.notify("AL Wizard: cancelled", vim.log.levels.INFO)
+        return
+      end
+      local n = tonumber(val)
+      if not n then
+        vim.notify("AL Wizard: invalid ID", vim.log.levels.ERROR)
+        return
+      end
+      data.id = n
+      prompt_name()
+    end)
+  else
+    prompt_name()
+  end
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
+
+function M.new_object(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL Wizard: no project root found", vim.log.levels.ERROR)
+    return
+  end
+
+  local labels = {}
+  for _, t in ipairs(TYPES) do
+    table.insert(labels, t.label)
+  end
+
+  vim.ui.select(labels, { prompt = "AL Object Type:" }, function(choice)
+    if not choice then return end
+    local info
+    for _, t in ipairs(TYPES) do
+      if t.label == choice then info = t; break end
+    end
+    if info then run_wizard(root, info) end
+  end)
+end
+
+return M

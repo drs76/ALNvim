@@ -273,6 +273,14 @@ vim.api.nvim_create_user_command("ALExplorerProcs", function()
   require("al.explorer").procedures()
 end, { desc = "AL Explorer: browse procedures/triggers in the current file" })
 
+vim.api.nvim_create_user_command("ALNewObject", function(opts)
+  require("al.wizard").new_object(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "AL Object Wizard: create a new AL object file",
+})
+
 vim.api.nvim_create_user_command("ALSearch", function(opts)
   require("al.explorer").search(opts.args ~= "" and opts.args or nil)
 end, {

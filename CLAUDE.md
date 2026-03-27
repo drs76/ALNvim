@@ -20,7 +20,8 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/publish.lua` | Compile then POST `.app` to BC dev endpoint |
 | `lua/al/debug.lua` | Snapshot debugging (BC API) + nvim-dap adapter config |
 | `lua/al/explorer.lua` | Telescope pickers: browse all AL objects (`M.objects`), procedures in file (`M.procedures`), live grep (`M.search`) |
-| `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges` |
+| `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
+| `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
@@ -223,6 +224,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>ao` | n | `:ALOpenAppJson` |
 | `<leader>al` | n | `:ALOpenLaunchJson` |
 | `<leader>aq` | n | Open quickfix list |
+| `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
 | `<leader>ag` | n | `:ALSearch` — live grep across all AL files |
@@ -256,6 +258,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
+| `:ALNewObject [dir]` | AL Object Wizard: interactively create a new AL object file |
 | `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
 | `:ALSearch [dir]` | Live grep across all AL files (project + symbol packages) |
@@ -415,6 +418,50 @@ Up to 5 free IDs are shown per range so the user can choose a round number if pr
 ### Normal-mode helper
 
 `:ALNextId` calls `M.show_next()` which notifies the next 3 free IDs for the object type on the current line (no insert mode required).
+
+## AL Object Wizard (`lua/al/wizard.lua`)
+
+`:ALNewObject [dir]` / `<leader>an` walks through a `vim.ui.select` + `vim.ui.input` prompt
+sequence to create a new AL object file, then opens it.
+
+### Supported types (12)
+
+| Type | ID | Extra prompts |
+|---|---|---|
+| Table | yes | DataClassification (select from 7 options) |
+| TableExtension | yes | `extends` table name |
+| Page | yes | PageType (select from 13 options), SourceTable |
+| PageExtension | yes | `extends` page name |
+| Codeunit | yes | — |
+| Report | yes | SourceTable |
+| Query | yes | SourceTable |
+| XmlPort | yes | — |
+| Enum | yes | Extensible (true/false) |
+| EnumExtension | yes | `extends` enum name |
+| Interface | **no** | — |
+| PermissionSet | yes | — |
+
+### Prompt flow
+
+1. `vim.ui.select` — pick object type
+2. `vim.ui.input` for ID (pre-filled via `ids.M.next_id(root, type)` — skipped for Interface)
+3. `vim.ui.input` for object name
+4. Type-specific extra prompts (chained callbacks)
+5. File written, opened in editor
+
+Cancellation at any step (Esc / nil return) aborts cleanly with a WARN notify.
+
+### File naming (CRS convention)
+
+`<root>/src/<id>.<SanitisedName>.<FileType>.al` e.g. `50100.My_Table.Table.al`.
+Interface omits the ID: `My_Interface.Interface.al`.
+The `src/` directory is created if absent. If the file already exists, an overwrite
+confirmation is shown via `vim.ui.select`.
+
+### ID suggestion
+
+Uses `ids.M.next_id(root, obj_type)` which is a thin wrapper around the existing local helpers
+`get_ranges` / `get_used_ids` / `free_ids` in `ids.lua`.
 
 ## `compile.lua` on_success callback
 

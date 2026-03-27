@@ -146,6 +146,17 @@ function M.complete(findstart, base)
   end
 end
 
+-- ── Public ID helper (used by wizard.lua) ─────────────────────────────────────
+
+-- Return the first free ID for obj_type in this project, or nil.
+function M.next_id(root, obj_type)
+  local ranges = get_ranges(root)
+  if #ranges == 0 then return nil end
+  local used    = get_used_ids(root, obj_type)
+  local matches = free_ids(ranges, used, 1, "")
+  return matches[1] and matches[1].id or nil
+end
+
 -- ── Normal-mode helper (:ALNextId) ────────────────────────────────────────────
 
 function M.show_next()
