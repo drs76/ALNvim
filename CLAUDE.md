@@ -343,5 +343,24 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
 ## Adding future features
 
 - **DAP launch mode (done)**: `:ALLaunch` compiles with `alc` then calls `dap.run()` with `request = "launch"`. The adapter (EditorServices.Host) handles publishing to BC internally — VSCode never does a direct HTTP POST to `/dev/apps`. Direct HTTP publish (`application/octet-stream`) returns HTTP 415 for cloud environments because the cloud API does not expose that endpoint to external clients.
+
+  **Critical adapter startup args** (from `extension.js` `DebugAdapterExecutable`):
+  ```lua
+  dap.adapters.al = {
+    type    = "executable",
+    command = host,
+    args    = { "/startDebugging", "/projectRoot:" .. root },  -- REQUIRED
+    options = { env = { DOTNET_ROOT = "/usr/share/dotnet" } },
+  }
+  ```
+  Without `/startDebugging` the binary starts in LSP mode and hangs waiting for an LSP `initialize` request. Without `/projectRoot` the adapter cannot locate the project.
+
+  **breakOnError / breakOnRecordWrite must be booleans** (adapter 16.x+): The C# deserialiser is strict — sending the string `"All"` causes `Could not convert string to boolean`. Map: `"All"` → `true`, `"None"` → `false`.
+
+  **launchBrowser**: Force `launchBrowser = false` in the DAP config — the adapter's `xdg-open` call fails on Linux. If `launch.json` has `launchBrowser = true`, open the URL from Lua using `conn.webclient_url(cfg)` after `dap.run()`.
+
+  **WebClient URL**: `conn.webclient_url(cfg)` returns the correct URL for both cloud and on-prem:
+  - Cloud: `https://businesscentral.dynamics.com/<tenant>/<env>`
+  - On-prem: `http[s]://<server>/<serverInstance>/WebClient/?<ObjType>=<ObjId>&tenant=<tenant>`
 - **Treesitter grammar**: No community grammar exists yet. Generate from `alsyntax.tmlanguage` with `tree-sitter generate`.
 - **AL Explorer**: Telescope extension that greps for AL object declarations and presents them as a picker.
