@@ -180,7 +180,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
           textDocumentPositionParams = params,
         }, function(err, result)
           if err or not result then return end
-          vim.lsp.util.jump_to_location(result, client.offset_encoding)
+          vim.lsp.util.show_document(result, client.offset_encoding, { focus = true })
         end, args.buf)
       end, { buffer = args.buf, desc = "AL: Go to definition" })
     end)
