@@ -30,7 +30,8 @@ local PROC_PAT =
 -- Extract src/*.al from a .app symbol package into the cache.
 -- Returns the cache dir (whether or not extraction happened) or nil on failure.
 local function ensure_extracted(app_path)
-  local key   = vim.fn.fnamemodify(app_path, ":t:r")
+  -- Sanitise key: remove spaces so the cache path never contains spaces
+  local key   = vim.fn.fnamemodify(app_path, ":t:r"):gsub("%s+", "_")
   local dir   = CACHE .. "/" .. key
   local stamp = dir .. "/.ok"
 
@@ -45,7 +46,9 @@ local function ensure_extracted(app_path)
     "unzip -q -o %s 'src/*.al' 'src/*.AL' -d %s",
     vim.fn.shellescape(app_path), vim.fn.shellescape(dir)))
 
-  if vim.v.shell_error ~= 0 then return nil end
+  -- unzip exit 0 = success, exit 1 = warning (one glob matched nothing) — both OK.
+  -- Only treat exit >= 2 as a real failure.
+  if vim.v.shell_error >= 2 then return nil end
 
   vim.fn.writefile({ tostring(os.time()) }, stamp)
   return dir
@@ -168,7 +171,7 @@ function M.objects(root)
   end
 
   open_picker({
-    title   = string.format("AL Objects — %d project + %d symbol pkg(s)", #apps == 0 and 0 or #entries, sym_count),
+    title   = string.format("AL Objects (%d) — %d symbol pkg(s)", #entries, sym_count),
     entries = entries,
   })
 end
