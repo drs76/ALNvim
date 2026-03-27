@@ -13,11 +13,11 @@ syntax region  alComment      start="/\*" end="\*/"
 syntax match   alPreproc      "^\s*#\w.*$"
 
 " ── Strings ───────────────────────────────────────────────────────────────────
-syntax region  alString       start="'"  end="'"  skip="''"   contains=alStringEscape
-syntax match   alStringEscape "''"                             contained
-syntax region  alVerbatim     start="@'" end="'"  skip="''"
+syntax region  alString       start="'"  end="'"  skip="''"  oneline  contains=alStringEscape
+syntax match   alStringEscape "''"                                      contained
+syntax region  alVerbatim     start="@'" end="'"  skip="''"  oneline
 " Quoted identifiers  e.g.  "My Field"
-syntax region  alQuotedIdent  start='"'  end='"'
+syntax region  alQuotedIdent  start='"'  end='"'  oneline
 
 " ── Numbers ───────────────────────────────────────────────────────────────────
 syntax match   alNumber       "\b\(\(0[xX][0-9a-fA-F]*\)\|\(\([0-9]\+\.\?[0-9]*\)\|\(\.[0-9]\+\)\)\([eE][+-]\?[0-9]\+\)\?\)[LlUuFf]*\b"
