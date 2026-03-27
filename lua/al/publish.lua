@@ -43,10 +43,13 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
   local url = string.format("%s/dev/apps?tenant=%s&SchemaUpdateMode=%s",
     base, conn.urlencode(tenant), conn.urlencode(schema))
 
+  -- Drop --fail so the BC error response body is captured; use -w to append the
+  -- HTTP status as a sentinel line we can parse regardless of exit code.
   local cmd = {
-    "curl", "-sL", "--fail", "-X", "POST",
+    "curl", "-sL", "-X", "POST",
     "-H", "Content-Type: application/octet-stream",
     "--data-binary", "@" .. app_file,
+    "-w", "\n__STATUS__%{http_code}",
   }
   vim.list_extend(cmd, auth)
   table.insert(cmd, url)
@@ -61,8 +64,18 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
     stderr_buffered = true,
     on_stdout = function(_, data) vim.list_extend(output, data) end,
     on_stderr = function(_, data) vim.list_extend(output, data) end,
-    on_exit = vim.schedule_wrap(function(_, code)
-      if code == 0 then
+    on_exit = vim.schedule_wrap(function(_, _code)
+      -- Extract HTTP status from sentinel line; strip it from body.
+      local raw = table.concat(output, "\n")
+      local body, http_status = raw:match("^(.-)\n__STATUS__(%d+)%s*$")
+      if not http_status then
+        body        = raw
+        http_status = "0"
+      end
+      local status = tonumber(http_status) or 0
+      body = body:gsub("^%s+", ""):gsub("%s+$", "")
+
+      if status >= 200 and status < 300 then
         vim.notify("AL: Published successfully", vim.log.levels.INFO)
         if cfg and cfg.launchBrowser then
           local obj_id   = cfg.startupObjectId or 22
@@ -74,9 +87,9 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
         end
         if on_success then on_success() end
       else
-        local msg = table.concat(output, "\n"):gsub("^%s+", ""):gsub("%s+$", "")
         vim.notify(
-          "AL: Publish failed (exit " .. code .. ")" .. (msg ~= "" and ("\n" .. msg) or ""),
+          string.format("AL: Publish failed (HTTP %s)%s",
+            http_status, body ~= "" and ("\n" .. body) or ""),
           vim.log.levels.ERROR)
       end
     end),
