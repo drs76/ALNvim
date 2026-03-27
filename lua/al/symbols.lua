@@ -52,10 +52,15 @@ function M.download(root)
   --   Business Foundation → new in BC 22, required by Application/Base Application
   --   Application (or Base Application on some tenants) → contains Customer, Vendor, etc.
   local deps = {}
+  -- Full BC 22+ implicit dependency chain (bottom to top):
+  --   System → System Application → Business Foundation → Base Application → Application
+  -- "Application" is the country/localization layer; "Base Application" is where
+  -- Customer, Vendor, and other core tables are defined.
   local base_pkgs = {
     { publisher = "Microsoft", name = "System",              version = app.platform    or "0.0.0.0" },
     { publisher = "Microsoft", name = "System Application",  version = app.application or "0.0.0.0" },
     { publisher = "Microsoft", name = "Business Foundation", version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "Base Application",    version = app.application or "0.0.0.0" },
     { publisher = "Microsoft", name = "Application",         version = app.application or "0.0.0.0" },
   }
   for _, bp in ipairs(base_pkgs) do

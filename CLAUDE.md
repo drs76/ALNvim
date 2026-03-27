@@ -256,10 +256,11 @@ This supports multi-project workspaces (e.g. App + Test app in one workspace fol
 `:ALDownloadSymbols` always includes the implicit Microsoft base packages even when `app.json` has no explicit dependencies:
 - `Microsoft / System` — version from `app.platform` (defines Label, Text, Integer, etc.)
 - `Microsoft / System Application` — version from `app.application`
-- `Microsoft / Business Foundation` — version from `app.application` (BC 22+; required by Application)
-- `Microsoft / Application` — version from `app.application` (contains Customer, Vendor, etc.)
+- `Microsoft / Business Foundation` — version from `app.application` (BC 22+)
+- `Microsoft / Base Application` — version from `app.application` (**contains Customer, Vendor, etc.**)
+- `Microsoft / Application` — version from `app.application` (country/localization layer on top of Base Application)
 
-**Note:** `Application` depends on `Business Foundation`. Without `Business Foundation` in the package cache the server cannot load `Application` and base types like `Customer` are unresolved.
+**Full BC 22+ chain:** `System` → `System Application` → `Business Foundation` → `Base Application` → `Application`. Each package depends on the one below it. All must be present or the AL server cannot resolve types.
 
 Explicit dependencies are appended after these, with duplicates skipped.
 
