@@ -176,22 +176,11 @@ function M.setup_dap(root)
 
   install_xdg_open_stub()
 
-  -- Register the adapter (stdio transport, same binary as the LSP).
-  -- /startDebugging switches the binary from LSP mode to DAP mode.
-  -- /projectRoot tells the adapter which project to attach to.
+  -- Register the adapter — no options.env so uv.spawn inherits Neovim's env.
   dap.adapters.al = {
     type    = "executable",
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env = {
-        DOTNET_ROOT             = "/usr/share/dotnet",
-        DISPLAY                  = os.getenv("DISPLAY") or "",
-        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
-        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
-        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
-      },
-    },
   }
 
   local base   = conn.base_url(cfg)
@@ -347,21 +336,16 @@ function M.launch(root)
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
   -- Adapter registration shared by both paths.
+  -- No options.env: let uv.spawn inherit Neovim's full environment so the
+  -- adapter gets our setenv-patched PATH (with the xdg-open stub dir) and
+  -- DISPLAY.  Passing a Lua dict as options.env causes luv to hand libuv an
+  -- empty string array, giving the adapter NO environment at all.
   local function register_adapter()
     install_xdg_open_stub()
     dap.adapters.al = {
       type    = "executable",
       command = host,
       args    = { "/startDebugging", "/projectRoot:" .. root },
-      options = {
-        env = {
-          DOTNET_ROOT             = "/usr/share/dotnet",
-          DISPLAY                  = os.getenv("DISPLAY") or "",
-          WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
-          DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
-          XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
-        },
-      },
     }
   end
 
