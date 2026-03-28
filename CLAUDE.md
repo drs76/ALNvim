@@ -24,6 +24,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/cops.lua` | Code Cop selector — per-project cop config, Telescope/fallback picker, live apply via `al/setActiveWorkspace` |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
 | `lua/al/help.lua` | AL Help panel — toggleable left split showing MS Learn AL docs via `smd` (ANSI) or render-markdown fallback |
+| `lua/al/platform.lua` | OS detection and all platform-specific operations (binary paths, chmod, browser open, zip extraction) |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
@@ -32,21 +33,45 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `snippets/al.json` | VSCode-format snippets (object templates + control flow) |
 | `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
 
+## Windows compatibility
+
+ALNvim supports Linux, macOS, and Windows (native Neovim — not WSL). All OS-specific operations go through `lua/al/platform.lua`. Do not add new platform conditionals anywhere else.
+
+| Operation | Linux/macOS | Windows |
+|---|---|---|
+| Binary directory | `bin/linux/` or `bin/darwin/` | `bin/win32/` |
+| Binary suffix | _(none)_ | `.exe` |
+| Execute bit | `vim.uv.fs_chmod(path, 73)` | no-op |
+| Open URL | `xdg-open` / `open` | `cmd /c start "" <url>` |
+| Extract ZIP | `unzip` | `tar.exe` (built into Win10+) |
+| Recursive copy | `cp -r` | `xcopy /s /e /i /q` |
+| Glob AL files | `platform.glob_al_files()` | same (no `find`) |
+| Stderr suppress | `2>/dev/null` | `2>nul` |
+| DAP adapter env | minimal string-array (SIGABRT prevention) | `nil` (inherit) |
+| DAP xdg stub | created in cache dir | not needed |
+
+**External tool requirements on Windows:** `curl` is built into Windows 10+ (`System32\curl.exe`). `tar.exe` is built into Windows 10+. `ripgrep` (`rg`) must be installed by the user on all platforms. `az` (Azure CLI) is optional, for Entra auth.
+
 ## AL Toolchain paths
 
-`ext.lua` scans `~/.vscode/extensions/ms-dynamics-smb.al-*` and picks the highest version numerically. Binaries are relative to that directory:
+`ext.lua` scans `~/.vscode/extensions/ms-dynamics-smb.al-*` and picks the highest version numerically. Binaries are relative to that directory and differ by OS — the extension ships all three platforms in a single install:
 
 **Glob pitfall:** use `vim.fn.glob(vim.fn.expand("~") .. "/.vscode/extensions/ms-dynamics-smb.al-*", false, true)` — NOT `vim.fn.glob(vim.fn.expand("~/.vscode/extensions/ms-dynamics-smb.al-*"), ...)`. `vim.fn.expand` with a wildcard does its own glob expansion before the result is passed to `vim.fn.glob`, causing double-expansion that silently returns nothing even when the directory exists. Expand only `~`, then pass the full `*` pattern to `vim.fn.glob`.
 
 ```
 <ext_path>/
-  bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host   ← LSP server (stdio)
-  bin/linux/alc                                          ← AL compiler
-  bin/linux/altool                                       ← AL tools helper
-  bin/linux/aldoc                                        ← AL documentation generator
+  bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host   ← Linux LSP server
+  bin/linux/alc                                          ← Linux AL compiler
+  bin/win32/Microsoft.Dynamics.Nav.EditorServices.Host.exe  ← Windows LSP server
+  bin/win32/alc.exe                                      ← Windows AL compiler
+  bin/darwin/Microsoft.Dynamics.Nav.EditorServices.Host  ← macOS LSP server
+  bin/darwin/alc                                         ← macOS AL compiler
+  bin/Analyzers/Microsoft.Dynamics.Nav.CodeCop.dll       ← shared (all OSes)
 ```
 
-Both `alc` and the LSP host are shipped without the exec bit. `plugin/al.lua` sets it at startup via `vim.uv.fs_chmod`.
+`platform.bin_subdir()` returns `"linux"`, `"win32"`, or `"darwin"` for the current OS. All binary path construction goes through `require("al.platform")` — never hardcode `bin/linux/`.
+
+On Linux and macOS the binaries ship without the execute bit set. `platform.ensure_executable()` sets it via `vim.uv.fs_chmod` (decimal `73` = octal `0o111`). On Windows this is a no-op — executability is determined by the `.exe` extension.
 
 **LuaJIT gotcha**: Neovim uses LuaJIT (Lua 5.1), which does not support `0o` octal literals. Use decimal `73` instead of `0o111` for the execute-bit mask.
 
@@ -398,6 +423,8 @@ Sort modes cycled with `<C-s>`: **type** (default) → **id** → **publisher** 
 
 `.app` files in `.alpackages/` are zip archives containing `src/*.al` stubs. `ensure_extracted` unpacks them to a cache dir keyed on the sanitised app filename (spaces → underscores). A `.ok` stamp file records the extraction time; re-extraction is skipped if the stamp is newer than the `.app` file.
 
+**Extraction:** `platform.extract_zip(src, dst, glob)` handles the platform difference — `unzip` on Linux/macOS, `tar.exe` (built into Windows 10+) on Windows. `tar` always extracts fully (glob pattern is ignored), but the `src/` subdirectory will still be present for any `.app` that contains AL sources.
+
 **Important:** `unzip` exits with code 1 as a warning when one glob pattern matches nothing (not a failure). Use `vim.fn.isdirectory(dir .. "/src")` to check success — do not rely on `vim.v.shell_error`.
 
 Publisher is extracted from the `.app` filename format `Publisher_Name_Major.Minor.Build.Rev.app` by stripping the trailing version segment then taking everything before the first underscore.
@@ -545,14 +572,14 @@ After the user confirms, `cops.apply()` re-sends `al/setActiveWorkspace` with th
 ## AL Extension Installer (`lua/al/install.lua`)
 
 `:ALInstallExtension` downloads the latest MS AL VSCode extension from the VS Code marketplace
-without requiring VS Code to be installed. Requires `curl` and `unzip`.
+without requiring VS Code to be installed. Requires `curl` (built into Windows 10+, standard on Linux/macOS) and either `unzip` (Linux/macOS) or `tar.exe` (Windows 10+).
 
 **Flow:**
 1. POST to the VS Code gallery `extensionquery` API to get the latest version number
 2. Download the VSIX via `curl --fail --silent --show-error` to a cache path; logs file size on completion
 3. Verify ZIP magic bytes (`PK`) — catches HTML/JSON error responses saved as `.vsix`
-4. `unzip` everything into a temp dir, move `extension/` to `~/.vscode/extensions/ms-dynamics-smb.al-{version}/`
-5. Set exec bit (decimal 73 = `0o111`) on `alc`, `altool`, `aldoc`, `Microsoft.Dynamics.Nav.EditorServices.Host`
+4. Extract via `platform.extract_zip()` into a temp dir, move `extension/` to `~/.vscode/extensions/ms-dynamics-smb.al-{version}/`
+5. Call `platform.ensure_executable()` on `alc`, `altool`, `aldoc`, `Microsoft.Dynamics.Nav.EditorServices.Host` for the current OS's `bin/<subdir>/` — no-op on Windows
 6. Call `require("al.ext").reload()` to update the cached path so AL features work immediately
 7. Trigger `doautocmd FileType al` for any already-open AL buffers so the LSP starts without reopening files
 
@@ -634,10 +661,10 @@ query, and xmlport objects and generates the `Permissions` block automatically.
 - All other types produce `<type> "Name" = X`
 - Existing file can be overwritten via a confirmation prompt
 
-**Implementation:** uses `find` for directory traversal (not `rg` or `vim.fn.glob`) and `io.open`
-for file reading — both work reliably on CIFS/SMB network mounts where `rg` fails silently and
-`vim.fn.glob("**")` may return nothing. Handles both quoted (`"Name"`) and unquoted (`Name`)
-AL object identifiers.
+**Implementation:** uses `platform.glob_al_files(root)` (wraps `vim.fn.glob`) and `io.open`
+for file reading. `find` was previously used on Linux for CIFS/SMB reliability but is not
+available on Windows; `vim.fn.glob` works on both local and Windows network shares.
+Handles both quoted (`"Name"`) and unquoted (`Name`) AL object identifiers.
 
 ### ID suggestion
 
@@ -717,11 +744,13 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)
     },
   }
   ```
-  Without `/startDebugging` the binary starts in LSP mode and hangs waiting for an LSP `initialize` request. Without `/projectRoot` the adapter cannot locate the project. Display env vars are forwarded so the adapter subprocess can invoke `xdg-open` if needed.
+  Without `/startDebugging` the binary starts in LSP mode and hangs waiting for an LSP `initialize` request. Without `/projectRoot` the adapter cannot locate the project.
+
+  **Adapter environment:** On Linux, `platform.adapter_env()` passes a minimal string-array env with a no-op `xdg-open` stub at the front of `PATH` — prevents SIGABRT caused by `NVIM`/`LD_*` vars in Neovim's environment. On Windows, `platform.adapter_env()` returns `nil` (inherit parent env) — no SIGABRT risk exists there.
 
   **breakOnError / breakOnRecordWrite must be booleans** (adapter 16.x+): The C# deserialiser is strict — sending the string `"All"` causes `Could not convert string to boolean`. `debug.lua` converts via `to_break_bool()`: `"All"`, `"ExcludeTry"`, `"ExcludeTemporary"` → `true`; `"None"` / `nil` → `false`.
 
-  **launchBrowser**: Force `launchBrowser = false` in the DAP config — the adapter's `xdg-open` call fails on Linux. If `launch.json` has `launchBrowser = true`, open the URL from Lua using `conn.webclient_url(cfg)` after `dap.run()`.
+  **launchBrowser**: Force `launchBrowser = false` in the DAP config and in the patched `launch.json` — the adapter's built-in browser open fails on Linux and is unnecessary on Windows. Browser opening is handled entirely from Lua via `platform.open_url()`: `xdg-open` on Linux, `cmd /c start ""` on Windows, `open` on macOS. For cloud sessions the real URL (with debug context) is delivered by the `al/openUri` DAP event after auth completes.
 
   **WebClient URL**: `conn.webclient_url(cfg)` returns the correct URL for both cloud and on-prem:
   - Cloud: `https://businesscentral.dynamics.com/<tenant>/<env>`
