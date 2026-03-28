@@ -403,14 +403,13 @@ function M.launch(root)
   end
 
   local function open_browser()
-    if not cfg.launchBrowser then return end
     local url = conn.webclient_url(cfg)
-    vim.notify("AL: Opening BC web client — " .. url, vim.log.levels.INFO)
-    local _, err = vim.fn.jobstart({ "xdg-open", url }, { detach = true })
-    if err and err ~= 0 then
-      vim.notify("AL: Could not open browser (" .. tostring(err) .. ") — open manually:\n" .. url,
-        vim.log.levels.WARN)
+    if cfg.launchBrowser then
+      -- Use sh -c so the URL launches in background and doesn't block.
+      vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(url) })
     end
+    -- Always notify so the user can open the URL manually if the browser doesn't focus.
+    vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
   end
 
   -- ── On-prem: compile → HTTP publish → DAP "attach" ───────────────────────
