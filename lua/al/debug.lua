@@ -231,6 +231,61 @@ function M.setup_dap(root)
     vim.log.levels.INFO)
 end
 
+-- ── launch.json patching ─────────────────────────────────────────────────────
+--
+-- The v18 adapter reads .vscode/launch.json directly via /projectRoot: before
+-- processing DAP arguments. It deserialises breakOnError strictly as bool
+-- ("All" string → exception), and it tries xdg-open when launchBrowser is true.
+-- We patch the file in-place before launching and restore it afterwards.
+
+local function patch_launch_json(root)
+  local path = root .. "/.vscode/launch.json"
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local original = f:read("*a")
+  f:close()
+
+  local patched = original
+  -- breakOnError / breakOnRecordWrite: "All"|"ExcludeTry"|"ExcludeTemporary" → true, "None" → false
+  for _, field in ipairs({ "breakOnError", "breakOnRecordWrite" }) do
+    local esc = field:gsub("([^%w])", "%%%1")
+    patched = patched:gsub('"' .. esc .. '"%s*:%s*"All"',             '"' .. field .. '": true')
+    patched = patched:gsub('"' .. esc .. '"%s*:%s*"ExcludeTry"',      '"' .. field .. '": true')
+    patched = patched:gsub('"' .. esc .. '"%s*:%s*"ExcludeTemporary"','"' .. field .. '": true')
+    patched = patched:gsub('"' .. esc .. '"%s*:%s*"None"',            '"' .. field .. '": false')
+  end
+  -- launchBrowser: adapter xdg-open fails on Linux; we open the URL from Lua
+  patched = patched:gsub('"launchBrowser"%s*:%s*true', '"launchBrowser": false')
+
+  if patched == original then return nil end  -- nothing to patch
+
+  -- Write backup alongside the original
+  local bak = path .. ".alnvim.bak"
+  local fb = io.open(bak, "w")
+  if not fb then return nil end
+  fb:write(original)
+  fb:close()
+
+  local fw = io.open(path, "w")
+  if not fw then os.remove(bak) return nil end
+  fw:write(patched)
+  fw:close()
+
+  return bak
+end
+
+local function restore_launch_json(root, bak)
+  if not bak then return end
+  local path = root .. "/.vscode/launch.json"
+  local f = io.open(bak, "r")
+  if not f then return end
+  local content = f:read("*a")
+  f:close()
+  local fw = io.open(path, "w")
+  if fw then fw:write(content) fw:close() end
+  os.remove(bak)
+end
+
 -- ── Launch (F5 equivalent) ────────────────────────────────────────────────────
 --
 -- Mirrors the VSCode F5 flow: compile → DAP launch request.
@@ -320,7 +375,24 @@ function M.launch(root)
   -- The adapter publishes the .app and attaches — no separate HTTP upload needed.
   require("al.compile").compile(root, nil, function()
     vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
+
+    -- Patch launch.json before the adapter reads it (v18 is strict about bool fields).
+    local bak = patch_launch_json(root)
+    if bak then
+      -- Restore once the DAP session ends (terminated or exited).
+      local restored = false
+      local function restore()
+        if not restored then
+          restored = true
+          restore_launch_json(root, bak)
+        end
+      end
+      dap.listeners.once.event_terminated["alnvim_restore_launch"] = restore
+      dap.listeners.once.event_exited["alnvim_restore_launch"]     = restore
+    end
+
     dap.run(launch_cfg)
+
     if cfg.launchBrowser then
       vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })
     end
