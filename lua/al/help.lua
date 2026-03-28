@@ -50,8 +50,8 @@ local TOPICS = {
   { "Testing AL Code",                    "devenv-testing-application" },
   { "Test Codeunits and Methods",         "devenv-test-codeunits-and-test-methods" },
   -- ── Guidelines ─────────────────────────────────────────────────────────────
-  { "AL Code Guidelines",                 "devenv-al-code-guidelines" },
-  { "Best Practices for AL",              "devenv-best-practices" },
+  { "AL Guidelines (alguidelines.dev)",   "https://alguidelines.dev/" },
+  { "AL Code Guidelines (MS Learn)",      "devenv-al-code-guidelines" },
   { "Security Guidelines",               "devenv-security-guidelines" },
   { "AppSource Submission Checklist",     "devenv-checklist-submission-app" },
   { "Technical Validation FAQ",           "devenv-checklist-submission-faq" },
@@ -89,16 +89,17 @@ function M.topics()
     if not choice then return end
     for _, t in ipairs(TOPICS) do
       if t[1] == choice then
-        require("al.platform").open_url(LEARN_PREFIX .. t[2])
+        local url = t[2]:match("^https?://") and t[2] or (LEARN_PREFIX .. t[2])
+        require("al.platform").open_url(url)
         return
       end
     end
   end)
 end
 
--- Open the AL code guidelines page directly.
+-- Open the AL Guidelines site directly.
 function M.guidelines()
-  require("al.platform").open_url(LEARN_PREFIX .. "devenv-al-code-guidelines")
+  require("al.platform").open_url("https://alguidelines.dev/")
 end
 
 -- Kept for backwards compat (plugin/al.lua calls M.toggle).
