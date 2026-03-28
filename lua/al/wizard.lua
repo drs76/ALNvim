@@ -877,11 +877,13 @@ local _organising = false
 function M.organise_file(bufnr)
   if _organising then return end
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local path = vim.api.nvim_buf_get_name(bufnr)
+  -- Normalise to forward slashes so prefix comparison works on Windows
+  -- (nvim_buf_get_name may return backslashes; lsp.get_root uses vim.fs).
+  local path = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
   if path == "" then return end
 
-  local root = lsp.get_root(bufnr)
-  if not root then return end
+  local root = vim.fs.normalize(lsp.get_root(bufnr) or "")
+  if root == "" then return end
 
   if path:sub(1, #root) ~= root then return end
 
