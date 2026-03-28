@@ -383,16 +383,17 @@ end
 local PERM_KEYWORDS = { "table", "page", "codeunit", "report", "query", "xmlport" }
 
 local function scan_project_objects(root)
-  local src_dir = vim.fn.isdirectory(root .. "/src") == 1 and (root .. "/src") or root
   local entries = {}
 
   for _, kw in ipairs(PERM_KEYWORDS) do
     local pat = string.format("^\\s*%s\\s+\\d+", kw)
-    local raw = vim.fn.systemlist({
+    local cmd = {
       "rg", "--no-heading", "--no-filename", "--color=never", "-i",
       "--glob", "*.al", "--glob", "*.AL",
-      "-e", pat, src_dir,
-    })
+      "-e", pat,
+    }
+    table.insert(cmd, root)
+    local raw = vim.fn.systemlist(cmd)
     for _, line in ipairs(raw) do
       local rest = line:match("^%s*[%a]+%s+%d+%s*(.*)")
       if rest then
