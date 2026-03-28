@@ -171,19 +171,26 @@ function M.setup_dap(root)
     return
   end
 
-  local ext      = require("al").config.ext_path or require("al.ext").path
-  local host     = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
-  local stub_dir = make_xdg_open_stub()
+  local ext  = require("al").config.ext_path or require("al.ext").path
+  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+
+  install_xdg_open_stub()
 
   -- Register the adapter (stdio transport, same binary as the LSP).
-  -- Launch via sh so stub_dir is prepended to PATH (see make_xdg_open_stub).
+  -- /startDebugging switches the binary from LSP mode to DAP mode.
+  -- /projectRoot tells the adapter which project to attach to.
   dap.adapters.al = {
     type    = "executable",
-    command = "/bin/sh",
-    args    = {
-      "-c",
-      string.format("PATH=%s:$PATH DOTNET_ROOT=/usr/share/dotnet exec %s /startDebugging /projectRoot:%s",
-        stub_dir, host, root),
+    command = host,
+    args    = { "/startDebugging", "/projectRoot:" .. root },
+    options = {
+      env = {
+        DOTNET_ROOT             = "/usr/share/dotnet",
+        DISPLAY                  = os.getenv("DISPLAY") or "",
+        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+      },
     },
   }
 
@@ -288,23 +295,30 @@ end
 -- receives a "launch" request — VSCode never does a direct HTTP POST to
 -- /dev/apps. We compile with alc, then hand a launch config to dap.run().
 
--- Create a no-op xdg-open stub so the adapter's browser-open call succeeds
--- silently instead of crashing and aborting the debug session.
--- Returns the directory containing the stub (to prepend to PATH).
-local function make_xdg_open_stub()
+-- Create a no-op xdg-open stub and prepend its directory to Neovim's own PATH
+-- so all child processes (including the DAP adapter and its children) inherit
+-- it and find our stub before the system xdg-open.
+-- Called once; subsequent calls skip the write and the PATH prepend if already done.
+local _xdg_stub_installed = false
+local function install_xdg_open_stub()
+  if _xdg_stub_installed then return end
   local dir  = vim.fn.stdpath("cache") .. "/alnvim"
   local stub = dir .. "/xdg-open"
   vim.fn.mkdir(dir, "p")
-  -- Only (re)write if missing
   if vim.fn.filereadable(stub) == 0 then
     local f = io.open(stub, "w")
     if f then
-      f:write("#!/bin/sh\n# no-op stub created by ALNvim — adapter browser-open is handled by Lua\nexit 0\n")
+      f:write("#!/bin/sh\n# no-op stub — ALNvim handles browser open from Lua\nexit 0\n")
       f:close()
       vim.uv.fs_chmod(stub, 493)   -- 0755 decimal
     end
   end
-  return dir
+  -- Prepend to Neovim's process PATH so the adapter inherits it.
+  local current_path = os.getenv("PATH") or ""
+  if not current_path:find(dir .. ":", 1, true) then
+    vim.fn.setenv("PATH", dir .. ":" .. current_path)
+  end
+  _xdg_stub_installed = true
 end
 
 function M.launch(root)
@@ -329,20 +343,25 @@ function M.launch(root)
     return
   end
 
-  local ext      = require("al").config.ext_path or require("al.ext").path
-  local host     = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
-  local stub_dir = make_xdg_open_stub()
+  local ext  = require("al").config.ext_path or require("al.ext").path
+  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
-  -- Launch adapter via sh so we can prepend stub_dir to PATH before exec.
-  -- This guarantees our no-op xdg-open is found first by the adapter AND all
-  -- its child processes, regardless of how nvim-dap handles options.env.
+  -- Prepend our no-op xdg-open stub to Neovim's PATH so the adapter and all
+  -- its child processes see it before the system xdg-open.
+  install_xdg_open_stub()
+
   dap.adapters.al = {
     type    = "executable",
-    command = "/bin/sh",
-    args    = {
-      "-c",
-      string.format("PATH=%s:$PATH DOTNET_ROOT=/usr/share/dotnet exec %s /startDebugging /projectRoot:%s",
-        stub_dir, host, root),
+    command = host,
+    args    = { "/startDebugging", "/projectRoot:" .. root },
+    options = {
+      env = {
+        DOTNET_ROOT             = "/usr/share/dotnet",
+        DISPLAY                  = os.getenv("DISPLAY") or "",
+        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+      },
     },
   }
 
