@@ -13,6 +13,12 @@ M.defaults = {
   -- Set to an absolute path, e.g. "/home/user/Documents/AL/codeanalyzer.json"
   ruleset_path = nil,
 
+  -- Global fallback for the object name affix (suffix or prefix) used by
+  -- CRS naming conventions. Prefer setting CRS.ObjectNameSuffix in
+  -- .vscode/settings.json — that is read automatically and takes priority.
+  -- e.g. object_name_suffix = "PTE"
+  object_name_suffix = nil,
+
   -- Relative path inside the project root where symbol packages are cached
   packagecachepath = ".alpackages",
 

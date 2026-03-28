@@ -376,16 +376,87 @@ local function sanitise_name(name)
   return name:gsub("%s+", "_"):gsub("[^%w_%-]", "")
 end
 
-local function build_path(root, info, id, name)
-  -- Place directly into src/<obj_type>/ so the organiser has nothing to do.
-  local dir   = root .. "/src/" .. info.key
-  local sname = sanitise_name(name)
-  local fname
-  if info.has_id then
-    fname = string.format("%d.%s.%s.al", id, sname, info.file_type)
-  else
-    fname = string.format("%s.%s.al", sname, info.file_type)
+-- Read CRS.ObjectNameSuffix from .vscode/settings.json, walking upward from
+-- root. Falls back to require("al").config.object_name_suffix.
+local function read_crs_suffix(root)
+  local path = root
+  for _ = 1, 4 do
+    local f = io.open(path .. "/.vscode/settings.json", "r")
+    if f then
+      local content = f:read("*a")
+      f:close()
+      local ok, settings = pcall(vim.fn.json_decode, content)
+      if ok and type(settings) == "table" then
+        local s = settings["CRS.ObjectNameSuffix"]
+        if type(s) == "string" and s ~= "" then return s end
+      end
+    end
+    local parent = vim.fn.fnamemodify(path, ":h")
+    if parent == path then break end
+    path = parent
   end
+  return require("al").config.object_name_suffix
+end
+
+-- Strip an affix from the end or start of a name (case-insensitive).
+-- "DavesCd PTE" / "PTE" → "DavesCd";  "PTEDavesCd" / "PTE" → "DavesCd"
+local function strip_affix(name, affix)
+  if not affix or affix == "" then return name end
+  local nl, al = name:lower(), affix:lower()
+  if nl:sub(-#al) == al then          -- suffix
+    return vim.trim(name:sub(1, -#al - 1))
+  end
+  if nl:sub(1, #al) == al then        -- prefix
+    return vim.trim(name:sub(#al + 1))
+  end
+  return name
+end
+
+-- Return true when name already carries the affix (as suffix or prefix).
+local function has_affix(name, affix)
+  if not affix or affix == "" then return true end
+  local nl, al = name:lower(), affix:lower()
+  return nl:sub(-#al) == al or nl:sub(1, #al) == al
+end
+
+-- Return (zero-based line index, raw line text, object name) for the first
+-- AL object declaration found in the buffer.
+local function find_obj_decl(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 50, false)
+  for i, line in ipairs(lines) do
+    -- With ID: keyword <num> "Name"  or  keyword <num> Name
+    local name = line:match('^%s*%a+%s+%d+%s+"([^"]+)"')
+              or line:match("^%s*%a+%s+%d+%s+'([^']+)'")
+              or line:match('^%s*%a+%s+%d+%s+([^%s{"\'][^{]*)')
+    -- Interface (no ID): interface "Name"
+    if not name then
+      name = line:match('^%s*interface%s+"([^"]+)"')
+          or line:match("^%s*interface%s+'([^']+)'")
+          or line:match('^%s*interface%s+([^%s{"\']+)')
+    end
+    if name then return i - 1, line, vim.trim(name) end
+  end
+end
+
+-- PascalCase file-type suffix per object type key (matches TYPES table).
+local FILE_TYPE_MAP = {
+  table="Table", tableextension="TableExt", page="Page",
+  pageextension="PageExt", pagecustomization="PageCust",
+  codeunit="Codeunit", report="Report", reportextension="ReportExt",
+  query="Query", xmlport="XmlPort", enum="Enum", enumextension="EnumExt",
+  interface="Interface", permissionset="PermissionSet",
+  permissionsetextension="PermissionSetExt", profile="Profile",
+  profileextension="ProfileExt", controladdin="ControlAddin",
+}
+
+local function build_path(root, info, id, name)
+  -- Strip the CRS affix from the name for the filename (object declaration
+  -- keeps the full name; organise_file will enforce it on first save).
+  local suffix = read_crs_suffix(root)
+  local dname  = strip_affix(name, suffix)
+  local sname  = sanitise_name(dname)
+  local fname  = sname .. "." .. info.file_type .. ".al"
+  local dir    = root .. "/src/" .. info.key
   return dir, dir .. "/" .. fname
 end
 
@@ -809,9 +880,15 @@ local function detect_obj_type(bufnr)
   return nil
 end
 
--- Called from BufWritePost. Moves the saved file into src/<obj_type>/ if it
--- isn't already there, then updates the buffer to point at the new path.
+-- Guard against re-entrancy when organise_file triggers a :write.
+local _organising = false
+
+-- Called from BufWritePost.
+-- 1. Enforces CRS.ObjectNameSuffix on the object declaration (adds it if missing).
+-- 2. Moves the file into src/<obj_type>/ if not already there.
+-- 3. Renames the file to <NameWithoutAffix>.<FileType>.al (CRS convention).
 function M.organise_file(bufnr)
+  if _organising then return end
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" then return end
@@ -819,34 +896,71 @@ function M.organise_file(bufnr)
   local root = lsp.get_root(bufnr)
   if not root then return end
 
-  -- Only act on files that are inside the project tree.
   if path:sub(1, #root) ~= root then return end
-
-  -- Relative path from project root (strip leading slash)
-  local rel = path:sub(#root + 2)
-
-  -- Already in src/<type>/…  →  nothing to do.
-  if rel:match("^src/[^/]+/.+") then return end
 
   local obj_type = detect_obj_type(bufnr)
   if not obj_type then return end
 
-  local fname      = vim.fn.fnamemodify(path, ":t")
-  local target_dir = root .. "/src/" .. obj_type
-  local target     = target_dir .. "/" .. fname
+  local suffix    = read_crs_suffix(root)
+  local file_type = FILE_TYPE_MAP[obj_type] or obj_type
 
-  if target == path then return end
+  -- ── 1. Enforce suffix in the object declaration ───────────────────────────
+  local decl_lnum, decl_line, obj_name = find_obj_decl(bufnr)
+  local name_modified = false
 
-  vim.fn.mkdir(target_dir, "p")
+  if obj_name and suffix and not has_affix(obj_name, suffix) then
+    -- Append suffix inside the existing quotes, or wrap unquoted name.
+    local new_name = obj_name .. " " .. suffix
+    local new_line
+    -- Try replacing quoted form first
+    new_line = decl_line:gsub('"' .. vim.pesc(obj_name) .. '"', '"' .. new_name .. '"', 1)
+    if new_line == decl_line then
+      new_line = decl_line:gsub("'" .. vim.pesc(obj_name) .. "'", '"' .. new_name .. '"', 1)
+    end
+    if new_line == decl_line then
+      -- Unquoted: wrap in quotes with suffix
+      new_line = decl_line:gsub(vim.pesc(obj_name), '"' .. new_name .. '"', 1)
+    end
+    if new_line ~= decl_line then
+      vim.api.nvim_buf_set_lines(bufnr, decl_lnum, decl_lnum + 1, false, { new_line })
+      obj_name = new_name
+      name_modified = true
+    end
+  end
 
-  if vim.fn.rename(path, target) ~= 0 then
-    vim.notify("AL: could not move file to " .. target, vim.log.levels.ERROR)
+  -- ── 2. Compute the CRS target path ───────────────────────────────────────
+  local display   = obj_name and strip_affix(obj_name, suffix) or vim.fn.fnamemodify(path, ":t:r")
+  local fname     = sanitise_name(display) .. "." .. file_type .. ".al"
+  local targetdir = root .. "/src/" .. obj_type
+  local target    = targetdir .. "/" .. fname
+
+  -- Nothing to do if already correct.
+  if target == path and not name_modified then return end
+
+  -- ── 3. Move / rename ─────────────────────────────────────────────────────
+  vim.fn.mkdir(targetdir, "p")
+
+  if target ~= path then
+    if vim.fn.rename(path, target) ~= 0 then
+      vim.notify("AL: could not rename file to " .. target, vim.log.levels.ERROR)
+      return
+    end
+    vim.api.nvim_buf_set_name(bufnr, target)
+  end
+
+  -- Write the buffer so the suffix change (and/or new path) is persisted.
+  _organising = true
+  local ok, err = pcall(vim.cmd, "write")
+  _organising = false
+  if not ok then
+    vim.notify("AL: write failed: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
 
-  vim.api.nvim_buf_set_name(bufnr, target)
   vim.bo[bufnr].modified = false
-  vim.notify("AL: organised → " .. vim.fn.fnamemodify(target, ":~:."), vim.log.levels.INFO)
+  local msg = target ~= path and ("AL: organised → " .. vim.fn.fnamemodify(target, ":~:."))
+                              or  ("AL: added suffix → " .. obj_name)
+  vim.notify(msg, vim.log.levels.INFO)
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
