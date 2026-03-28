@@ -293,6 +293,25 @@ end
 -- receives a "launch" request — VSCode never does a direct HTTP POST to
 -- /dev/apps. We compile with alc, then hand a launch config to dap.run().
 
+-- Create a no-op xdg-open stub so the adapter's browser-open call succeeds
+-- silently instead of crashing and aborting the debug session.
+-- Returns the directory containing the stub (to prepend to PATH).
+local function make_xdg_open_stub()
+  local dir  = vim.fn.stdpath("cache") .. "/alnvim"
+  local stub = dir .. "/xdg-open"
+  vim.fn.mkdir(dir, "p")
+  -- Only (re)write if missing
+  if vim.fn.filereadable(stub) == 0 then
+    local f = io.open(stub, "w")
+    if f then
+      f:write("#!/bin/sh\n# no-op stub created by ALNvim — adapter browser-open is handled by Lua\nexit 0\n")
+      f:close()
+      vim.uv.fs_chmod(stub, 493)   -- 0755 decimal
+    end
+  end
+  return dir
+end
+
 function M.launch(root)
   local ok, dap = pcall(require, "dap")
   if not ok then
@@ -315,8 +334,9 @@ function M.launch(root)
     return
   end
 
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local ext      = require("al").config.ext_path or require("al.ext").path
+  local host     = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local stub_dir = make_xdg_open_stub()
 
   dap.adapters.al = {
     type    = "executable",
@@ -325,7 +345,9 @@ function M.launch(root)
     options = {
       env = {
         DOTNET_ROOT             = "/usr/share/dotnet",
-        -- Pass display env so the adapter's xdg-open can open a browser
+        -- stub_dir is prepended so our no-op xdg-open shadows any real one;
+        -- the adapter's browser-open is handled by Lua after attach instead.
+        PATH                     = stub_dir .. ":" .. (os.getenv("PATH") or ""),
         DISPLAY                  = os.getenv("DISPLAY") or "",
         WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
         DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
@@ -396,8 +418,15 @@ function M.launch(root)
 
     dap.run(launch_cfg)
 
+    -- Open the BC web client after launching (adapter's own xdg-open is suppressed).
     if cfg.launchBrowser then
-      vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })
+      local url = conn.webclient_url(cfg)
+      -- vim.ui.open is available in Neovim 0.10+; fall back to xdg-open jobstart.
+      if vim.ui.open then
+        vim.ui.open(url)
+      else
+        vim.fn.jobstart({ "xdg-open", url }, { detach = true })
+      end
     end
   end)
 end
