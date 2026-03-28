@@ -155,7 +155,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local status = require("al.status")
     status.set_lsp_starting()
     local _app = require("al.lsp").read_app_json(root)
-    if _app then status.set_project(_app.name, _app.version) end
+    if _app then status.set_project(_app.name, _app.version, root) end
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
     -- Use empty array — avoids hanging on network-mounted .netpackages directories.

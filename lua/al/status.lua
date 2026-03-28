@@ -15,14 +15,47 @@ local _s = {
   compile = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
   publish = nil,   -- nil | "publishing" | { ok=bool }
   project = nil,   -- nil | { name=string, version=string }
+  root    = nil,   -- project root path (for git HEAD lookup)
+  branch  = nil,   -- cached branch name
+  branch_t = 0,   -- vim.uv.now() when branch was last read
 }
+
+-- Read the current git branch by parsing .git/HEAD directly (no subprocess).
+-- Walks upward from root to find the git repo. Returns nil if not in a repo.
+local function read_branch(root)
+  if not root then return nil end
+  local path = root
+  for _ = 1, 8 do
+    local f = io.open(path .. "/.git/HEAD", "r")
+    if f then
+      local line = f:read("*l")
+      f:close()
+      return line and (line:match("^ref: refs/heads/(.+)$") or line:sub(1, 7))
+    end
+    local parent = vim.fn.fnamemodify(path, ":h")
+    if parent == path then break end
+    path = parent
+  end
+end
+
+-- Return cached branch, refreshing if the cache is older than 2 seconds.
+local function branch()
+  local now = vim.uv.now()
+  if now - _s.branch_t > 2000 then
+    _s.branch   = read_branch(_s.root)
+    _s.branch_t = now
+  end
+  return _s.branch
+end
 
 local function redraw()
   vim.schedule(function() vim.cmd("redrawstatus!") end)
 end
 
-function M.set_project(name, ver)
-  _s.project = { name = name, version = ver }
+function M.set_project(name, ver, root)
+  _s.project  = { name = name, version = ver }
+  _s.root     = root
+  _s.branch_t = 0   -- force refresh on next get()
   redraw()
 end
 
@@ -85,6 +118,9 @@ function M.get()
   if _s.project then
     parts[#parts + 1] = _s.project.name .. " " .. _s.project.version
   end
+
+  local br = branch()
+  if br then parts[#parts + 1] = " " .. br end
 
   if _s.lsp == "starting" then
     parts[#parts + 1] = "starting…"
