@@ -228,10 +228,13 @@ function M.objects(root)
   end
 
   pickers.new({}, {
-    prompt_title = string.format("AL Objects (%d) — %d symbol pkg(s)  [<C-s> sort]", #entries, sym_count),
-    finder       = make_finder(),
-    sorter       = conf.generic_sorter({}),
-    previewer    = conf.grep_previewer({}),
+    prompt_title  = string.format("AL Objects (%d) — %d symbol pkg(s)  [<C-s> sort]", #entries, sym_count),
+    finder        = make_finder(),
+    sorter        = conf.generic_sorter({}),
+    previewer     = conf.grep_previewer({}),
+    layout_config = {
+      preview_width = 0.35,   -- preview takes 35% of width; results get the rest
+    },
     attach_mappings = function(prompt_bufnr, map)
       actions.select_default:replace(function()
         local sel = action_state.get_selected_entry()
@@ -260,6 +263,13 @@ function M.objects(root)
         actions.close(prompt_bufnr)
         M.search(root)
       end)
+
+      -- Horizontal scroll: <S-Left>/<S-Right> scroll the results list;
+      -- <A-Left>/<A-Right> scroll the preview pane.
+      map({ "i", "n" }, "<S-Left>",  actions.results_scrolling_left)
+      map({ "i", "n" }, "<S-Right>", actions.results_scrolling_right)
+      map({ "i", "n" }, "<A-Left>",  actions.preview_scrolling_left)
+      map({ "i", "n" }, "<A-Right>", actions.preview_scrolling_right)
 
       return true
     end,
