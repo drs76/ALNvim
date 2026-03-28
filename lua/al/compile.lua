@@ -19,10 +19,13 @@ local function ensure_executable(path)
 end
 
 -- Parse alc compiler output into a quickfix-compatible list.
--- alc format:  /path/to/file.al(line,col): error|warning ALxxxx: message
+-- Two formats:
+--   /path/to/file.al(line,col): error|warning ALxxxx: message   (file diagnostic)
+--   error|warning ALxxxx: message                               (no file, e.g. AL1022 missing package)
 local function parse_output(lines)
   local qf = {}
   for _, line in ipairs(lines) do
+    -- File-scoped diagnostic (has filename + position)
     local file, lnum, col, kind, code, msg =
       line:match("^(.+)%((%d+),(%d+)%)%s*:%s*(%a+)%s+(%S+):%s+(.+)$")
     if file then
@@ -30,9 +33,18 @@ local function parse_output(lines)
         filename = file,
         lnum     = tonumber(lnum),
         col      = tonumber(col),
-        type     = kind:sub(1, 1):upper(),   -- "E" or "W"
+        type     = kind:sub(1, 1):upper(),
         text     = code .. ": " .. msg,
       })
+    else
+      -- Project-level diagnostic (no filename, e.g. missing package AL1022)
+      local kind2, code2, msg2 = line:match("^(%a+)%s+(AL%d+):%s+(.+)$")
+      if kind2 then
+        table.insert(qf, {
+          type = kind2:sub(1, 1):upper(),
+          text = code2 .. ": " .. msg2,
+        })
+      end
     end
   end
   return qf
