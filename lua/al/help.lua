@@ -12,7 +12,6 @@ local LEARN_PREFIX =
 local TOPICS = {
   -- ── Language fundamentals ──────────────────────────────────────────────────
   { "Programming in AL",                  "devenv-programming-in-al" },
-  { "AL Code Guidelines",                 "devenv-al-code-guidelines" },
   { "Variables and Constants",            "devenv-variables-and-constants" },
   { "Data Types Overview",                "devenv-data-types-overview" },
   { "Simple Statements",                  "devenv-al-simple-statements" },
@@ -50,6 +49,12 @@ local TOPICS = {
   -- ── Testing ────────────────────────────────────────────────────────────────
   { "Testing AL Code",                    "devenv-testing-application" },
   { "Test Codeunits and Methods",         "devenv-test-codeunits-and-test-methods" },
+  -- ── Guidelines ─────────────────────────────────────────────────────────────
+  { "AL Code Guidelines",                 "devenv-al-code-guidelines" },
+  { "Best Practices for AL",              "devenv-best-practices" },
+  { "Security Guidelines",               "devenv-security-guidelines" },
+  { "AppSource Submission Checklist",     "devenv-checklist-submission-app" },
+  { "Technical Validation FAQ",           "devenv-checklist-submission-faq" },
 }
 
 -- Extract a slug from a bare slug, a relative .md filename, or a full MS Learn URL.
@@ -89,6 +94,11 @@ function M.topics()
       end
     end
   end)
+end
+
+-- Open the AL code guidelines page directly.
+function M.guidelines()
+  require("al.platform").open_url(LEARN_PREFIX .. "devenv-al-code-guidelines")
 end
 
 -- Kept for backwards compat (plugin/al.lua calls M.toggle).

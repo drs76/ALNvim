@@ -407,6 +407,10 @@ vim.api.nvim_create_user_command("ALHelpTopics", function()
   require("al.help").topics()
 end, { desc = "AL Help: pick a topic from the curated list" })
 
+vim.api.nvim_create_user_command("ALGuidelines", function()
+  require("al.help").guidelines()
+end, { desc = "Open AL Code Guidelines in browser" })
+
 vim.api.nvim_create_user_command("ALInfo", function()
   local lsp = require("al.lsp")
   local root = lsp.get_root()
