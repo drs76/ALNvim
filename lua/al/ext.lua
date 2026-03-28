@@ -31,8 +31,8 @@ local function version_gt(a, b)
 end
 
 local function find()
-  local pattern = vim.fn.expand("~/.vscode/extensions/ms-dynamics-smb.al-*")
-  local dirs     = vim.fn.glob(pattern, false, true)
+  local base    = vim.fn.expand("~") .. "/.vscode/extensions"
+  local dirs    = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
 
   -- Keep only actual directories (not leftover files)
   dirs = vim.tbl_filter(function(d)
