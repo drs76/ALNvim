@@ -132,16 +132,6 @@ local function telescope_picker(root, active_set)
     }),
     sorter = conf.generic_sorter({}),
     attach_mappings = function(prompt_bufnr, map)
-      -- Pre-select currently active cops
-      vim.schedule(function()
-        local picker = action_state.get_current_picker(prompt_bufnr)
-        for i, cop in ipairs(COPS) do
-          if active_set[cop.token] then
-            picker:add_selection(picker.manager:get(i - 1))
-          end
-        end
-      end)
-
       -- Apply on <CR>
       actions.select_default:replace(function()
         local picker = action_state.get_current_picker(prompt_bufnr)
