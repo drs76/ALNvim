@@ -26,13 +26,12 @@ local function fetch_version(cb)
     "curl", "-s", "-X", "POST", url,
     "-H", "Content-Type: application/json",
     "-H", "Accept: application/json;api-version=6.1-preview.1",
+    "-H", "X-Market-Client-Id: VSCode",
     "--data", body,
   }, {
     stdout_buffered = true,
     on_stdout = function(_, data)
-      for _, line in ipairs(data) do
-        out[#out + 1] = line
-      end
+      for _, line in ipairs(data) do out[#out + 1] = line end
     end,
     on_exit = function()
       local ok, parsed = pcall(vim.fn.json_decode, table.concat(out, ""))
@@ -48,54 +47,126 @@ local function fetch_version(cb)
   })
 end
 
--- Download the VSIX for a given version to a temp file.
--- curl --progress-bar sends its progress to stderr; we forward it to the log window.
-local function download_vsix(version, log, cb)
-  local url     = GALLERY .. "/publishers/" .. PUBLISHER
-                  .. "/vsextensions/" .. EXT_ID .. "/" .. version .. "/vspackage"
-  local tmpfile = vim.fn.tempname() .. ".vsix"
-  log("Downloading v" .. version .. "  (~683 MB — this will take a while…)")
-  log("From: " .. url)
+-- VS Code uses the vsassets.io CDN, not the marketplace web URL.
+-- Format: https://{publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/
+--           {publisher}/extension/{ext}/{version}/assetbyname/
+--           Microsoft.VisualStudio.Services.VSIXPackage
+local function vsix_url(version)
+  return string.format(
+    "https://%s.gallery.vsassets.io/_apis/public/gallery/publisher/%s/extension/%s/%s"
+    .. "/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage",
+    PUBLISHER, PUBLISHER, EXT_ID, version)
+end
 
+-- Return true when the file at path starts with the ZIP magic bytes "PK".
+local function is_zip(path)
+  local f = io.open(path, "rb")
+  if not f then return false end
+  local magic = f:read(2)
+  f:close()
+  return magic == "PK"
+end
+
+-- Download the VSIX for a given version.
+-- Uses --fail so curl exits non-zero on HTTP errors (catches HTML error pages).
+-- Uses --silent --show-error to suppress the progress bar (which floods the window
+-- with \r-terminated partial lines) while still reporting real errors.
+local function download_vsix(version, log, cb)
+  local url = vsix_url(version)
+  -- Predictable cache path avoids any tempname() directory creation edge cases.
+  local tmpfile = vim.fn.stdpath("cache") .. "/alnvim_al_" .. version .. ".vsix"
+
+  log("Downloading v" .. version .. "  (~300–700 MB — this may take several minutes)")
+  log("  " .. url)
+
+  local err_lines = {}
   vim.fn.jobstart({
-    "curl", "-L", "--progress-bar", "-o", tmpfile, url,
+    "curl", "-L", "--fail", "--silent", "--show-error",
+    "-H", "Accept: application/octet-stream;api-version=6.1-preview.1",
+    "-H", "X-Market-Client-Id: VSCode",
+    "-H", "User-Agent: VSCode/1.86.2 (X11; Linux x86_64)",
+    "-o", tmpfile,
+    url,
   }, {
-    stderr_buffered = false,
+    stderr_buffered = true,
     on_stderr = function(_, data)
       for _, line in ipairs(data) do
-        if line ~= "" then log(line) end
+        if line ~= "" then err_lines[#err_lines + 1] = line end
       end
     end,
     on_exit = function(_, code)
       vim.schedule(function()
-        if code == 0 and vim.fn.getfsize(tmpfile) > 0 then
-          cb(tmpfile)
-        else
+        if code ~= 0 then
+          log("ERROR: download failed (curl exit " .. code .. ")")
+          for _, l in ipairs(err_lines) do log("  " .. l) end
+          log("Hint: check your internet connection, or that the version exists.")
           cb(nil)
+          return
         end
+        local size = vim.fn.getfsize(tmpfile)
+        if size <= 0 then
+          log("ERROR: downloaded file is empty — CDN may have blocked the request.")
+          cb(nil)
+          return
+        end
+        -- Verify ZIP magic bytes (PK) — catches HTML/JSON error pages saved as .vsix
+        if not is_zip(tmpfile) then
+          log(string.format("ERROR: downloaded file (%d MB) is not a ZIP archive", math.floor(size / 1048576)))
+          log("  The CDN returned an error response instead of the VSIX.")
+          log("  Delete the cached file and retry:  " .. tmpfile)
+          local f = io.open(tmpfile, "r")
+          if f then
+            local first = f:read("*l")
+            f:close()
+            if first then log("  Starts with: " .. first:sub(1, 120)) end
+          end
+          cb(nil)
+          return
+        end
+        log(string.format("Download complete: %.0f MB", size / 1048576))
+        cb(tmpfile)
       end)
     end,
   })
 end
 
 -- Extract VSIX (zip) and install to EXT_DIR/ms-dynamics-smb.al-{version}/.
--- VSIX contents are rooted under extension/ inside the zip.
+-- Extracts everything (no glob filter) for maximum compatibility, then moves
+-- the extension/ subdirectory to the final location.
 local function extract_vsix(tmpfile, version, log, cb)
   local target = EXT_DIR .. "/" .. PUBLISHER .. "." .. EXT_ID .. "-" .. version
-  local tmpdir = vim.fn.tempname()
+  local tmpdir = vim.fn.stdpath("cache") .. "/alnvim_al_extract_" .. version
+  vim.fn.delete(tmpdir, "rf")   -- clean any previous failed attempt
   vim.fn.mkdir(tmpdir, "p")
-  log("Extracting…")
+  log("Extracting…  (may take a minute)")
 
   vim.fn.jobstart({
-    "unzip", "-q", "-o", tmpfile, "extension/*", "-d", tmpdir,
+    "unzip", "-q", "-o", tmpfile, "-d", tmpdir,
   }, {
+    stderr_buffered = true,
+    on_stderr = function(_, data)
+      for _, line in ipairs(data) do
+        if line ~= "" then log("  " .. line) end
+      end
+    end,
     on_exit = function(_, code)
       vim.schedule(function()
         local src = tmpdir .. "/extension"
-        -- unzip exits 1 as a warning when a glob pattern matches nothing — not fatal.
-        -- Check for the extracted directory instead.
+
+        -- unzip exits 1 as a non-fatal warning (e.g. one glob matched nothing).
+        -- Anything >= 2 is a real error; always verify the output dir exists.
+        if code >= 2 and vim.fn.isdirectory(src) == 0 then
+          log("ERROR: unzip failed (exit " .. code .. ")")
+          log("  The VSIX may be corrupt. Delete the cached file and retry:")
+          log("  " .. tmpfile)
+          vim.fn.delete(tmpdir, "rf")
+          cb(false)
+          return
+        end
+
         if vim.fn.isdirectory(src) == 0 then
-          log("ERROR: unzip failed (exit " .. code .. ") — src dir not found")
+          log("ERROR: extension/ directory not found inside VSIX")
+          log("  VSIX contents may use an unexpected layout.")
           vim.fn.delete(tmpdir, "rf")
           cb(false)
           return
@@ -103,16 +174,16 @@ local function extract_vsix(tmpfile, version, log, cb)
 
         vim.fn.mkdir(EXT_DIR, "p")
 
-        -- Prefer os.rename (atomic, zero-copy); falls back to cp -r on cross-device moves.
-        local ok = os.rename(src, target)
-        if not ok then
-          log("(cross-device move — copying…)")
+        -- Prefer os.rename (atomic); falls back to cp -r for cross-device moves.
+        local renamed = os.rename(src, target)
+        if not renamed then
+          log("  (cross-device — copying…)")
           vim.fn.system({ "cp", "-r", src .. "/.", target })
         end
         vim.fn.delete(tmpdir, "rf")
 
         if vim.fn.isdirectory(target) == 0 then
-          log("ERROR: installation directory not created")
+          log("ERROR: target directory was not created: " .. target)
           cb(false)
           return
         end
@@ -126,7 +197,7 @@ local function extract_vsix(tmpfile, version, log, cb)
         }
         for _, bin in ipairs(bins) do
           if vim.fn.filereadable(bin) == 1 then
-            vim.uv.fs_chmod(bin, 73)  -- octal 0o111 in decimal
+            vim.uv.fs_chmod(bin, 73)  -- 0o111 in decimal
           end
         end
 
@@ -174,9 +245,10 @@ function M.install()
 
   local function done(success)
     vim.schedule(function()
+      log("")
       log(success
-        and "✓ Done.  Restart Neovim or run :ALInfo to confirm."
-        or  "✗ FAILED — see output above.")
+        and "Done.  Open an .al file to verify LSP attaches, or run :ALInfo."
+        or  "FAILED — see messages above.")
       for _, key in ipairs({ "q", "<Esc>" }) do
         vim.keymap.set("n", key, "<cmd>bdelete!<CR>", { buffer = buf, silent = true })
       end
@@ -197,7 +269,7 @@ function M.install()
 
     local target = EXT_DIR .. "/" .. PUBLISHER .. "." .. EXT_ID .. "-" .. version
     if vim.fn.isdirectory(target) == 1 then
-      log("Already installed at:")
+      log("Already installed:")
       log("  " .. target)
       done(true)
       return
@@ -205,18 +277,30 @@ function M.install()
 
     download_vsix(version, log, function(tmpfile)
       if not tmpfile then
-        log("ERROR: download failed — check network / disk space.")
         done(false)
         return
       end
-
       extract_vsix(tmpfile, version, log, function(ok)
         if ok then
-          -- Refresh ext.lua path cache so LSP/compile work without a restart.
-          local new_path = require("al.ext").reload()
-          if new_path then
-            log("Extension path updated: " .. new_path)
+          local ok2, ext_path = pcall(function() return require("al.ext").reload() end)
+          if ok2 and ext_path then
+            log("Extension path: " .. ext_path)
           end
+          -- Trigger LSP start for any AL buffers already open in this session
+          vim.schedule(function()
+            local triggered = 0
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+              if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].filetype == "al" then
+                vim.api.nvim_buf_call(bufnr, function()
+                  pcall(vim.cmd, "doautocmd FileType al")
+                end)
+                triggered = triggered + 1
+              end
+            end
+            if triggered > 0 then
+              log(string.format("LSP start triggered for %d open AL buffer(s).", triggered))
+            end
+          end)
         end
         done(ok)
       end)

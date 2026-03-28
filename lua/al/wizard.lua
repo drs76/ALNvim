@@ -88,6 +88,36 @@ end
 local function tpl_page(d)
   local src = d.source_table and ('"' .. d.source_table .. '"') or '""'
   local pt  = d.page_type or "Card"
+
+  -- Build field controls for the layout
+  local field_lines = {}
+  if d.fields and #d.fields > 0 then
+    for _, fname in ipairs(d.fields) do
+      field_lines[#field_lines + 1] = string.format(
+        '                field("%s"; Rec."%s")\n                {\n                    ApplicationArea = All;\n                }',
+        fname, fname)
+    end
+  end
+
+  -- List-type pages use repeater; others use group
+  local is_list = (pt == "List" or pt == "ListPart" or pt == "ListPlus")
+  local container
+  if is_list then
+    if #field_lines > 0 then
+      container = "            repeater(Lines)\n            {\n"
+        .. table.concat(field_lines, "\n") .. "\n            }"
+    else
+      container = "            repeater(Lines)\n            {\n            }"
+    end
+  else
+    if #field_lines > 0 then
+      container = "            group(General)\n            {\n                Caption = 'General';\n"
+        .. table.concat(field_lines, "\n") .. "\n            }"
+    else
+      container = "            group(General)\n            {\n                Caption = 'General';\n            }"
+    end
+  end
+
   return string.format([[page %d "%s"
 {
     Caption = '%s';
@@ -100,10 +130,7 @@ local function tpl_page(d)
     {
         area(Content)
         {
-            group(General)
-            {
-                Caption = 'General';
-            }
+%s
         }
     }
 
@@ -114,7 +141,7 @@ local function tpl_page(d)
         }
     }
 }
-]], d.id, d.name, d.name, pt, src)
+]], d.id, d.name, d.name, pt, src, container)
 end
 
 local function tpl_pageextension(d)
@@ -460,6 +487,71 @@ local function scan_project_objects(root)
   return entries
 end
 
+-- Find the .al file that declares the named table (project + symbol caches),
+-- then extract its field names. Uses io.open to avoid CIFS/VFS issues.
+local function scan_table_fields(root, table_name)
+  local search_dirs = require("al.explorer").build_search_dirs(root)
+
+  -- Step 1: find the file that contains the table declaration
+  local target_file
+  for _, dir in ipairs(search_dirs) do
+    local files = vim.fn.systemlist({
+      "find", dir, "(", "-name", "*.al", "-o", "-name", "*.AL", ")", "-type", "f",
+    })
+    for _, fpath in ipairs(files) do
+      local f = io.open(fpath, "r")
+      if f then
+        local first = f:read("*l")
+        f:close()
+        if first then
+          first = first:gsub("\r$", "")
+          local kw, rest = first:match("^%s*([%a]+)%s+%d+%s*(.*)")
+          if kw and kw:lower() == "table" then
+            local nm = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'") or rest:match("^([^%s{]+)")
+            if nm and nm:lower() == table_name:lower() then
+              target_file = fpath
+              break
+            end
+          end
+        end
+      end
+    end
+    if target_file then break end
+  end
+
+  if not target_file then return {} end
+
+  -- Step 2: extract field names from the table file
+  local fields = {}
+  local f = io.open(target_file, "r")
+  if not f then return {} end
+
+  local in_fields = false
+  for line in f:lines() do
+    line = line:gsub("\r$", "")
+    -- Enter fields block
+    if not in_fields and line:match("^%s*fields%s*{?%s*$") then
+      in_fields = true
+    elseif in_fields then
+      -- Leave fields block when we hit keys or fieldgroups
+      if line:match("^%s*keys%s") or line:match("^%s*fieldgroups%s") then break end
+      -- Field declaration anchored to start of line (avoids matching code inside triggers)
+      local name = line:match('^%s*field%s*%([^;]+;%s*"([^"]+)"')
+                or line:match("^%s*field%s*%([^;]+;%s*'([^']+)'")
+      if not name then
+        local unquoted = line:match("^%s*field%s*%([^;]+;%s*([%w_][^;]-)%s*;")
+        if unquoted then name = unquoted:gsub("%s+$", "") end
+      end
+      if name and name ~= "" then
+        fields[#fields + 1] = name
+      end
+    end
+  end
+  f:close()
+
+  return fields
+end
+
 -- ── Type-specific extra prompts ───────────────────────────────────────────────
 
 -- Each handler calls cb(data) when done, or cb(nil) to abort.
@@ -484,15 +576,82 @@ extra_prompts.tableextension = function(data, cb)
 end
 
 extra_prompts.page = function(data, cb)
+  -- 1. Pick page type
   vim.ui.select(PAGE_TYPES, { prompt = "Page Type:" }, function(pt)
     if not pt then cb(nil); return end
     data.page_type = pt
-    vim.ui.input({ prompt = "Source Table (leave blank for none): " }, function(src)
-      if src == nil then cb(nil); return end
-      data.source_table = src ~= "" and src or nil
-      cb(data)
-    end)
-  end)
+    data.fields    = {}
+
+    -- 2. Pick source table (with "none" at top so Esc still cancels the whole wizard)
+    local table_list   = get_objects_of_type(data.root, "table")
+    local NO_TABLE     = "— No source table —"
+    local display_list = { NO_TABLE }
+    vim.list_extend(display_list, table_list)
+
+    vim.ui.select(display_list, { prompt = "Source Table:" }, function(choice)
+      if choice == nil then cb(nil); return end  -- Esc = cancel wizard
+      if choice == NO_TABLE then
+        data.source_table = nil
+        cb(data)
+        return
+      end
+      data.source_table = choice
+
+      -- Defer so the source-table picker fully closes before opening a new one
+      vim.schedule(function()
+        -- 3. Scan fields of the chosen table
+        local field_list = scan_table_fields(data.root, choice)
+        if #field_list == 0 then
+          cb(data)
+          return
+        end
+
+        -- 4. Multi-select field picker; skip if Telescope unavailable
+        if not pcall(require, "telescope") then
+          cb(data)
+          return
+        end
+
+        local pickers      = require("telescope.pickers")
+        local finders      = require("telescope.finders")
+        local conf         = require("telescope.config").values
+        local actions      = require("telescope.actions")
+        local action_state = require("telescope.actions.state")
+
+        pickers.new({}, {
+          prompt_title = string.format('Fields from "%s"  (<Tab> toggle, <CR> confirm)', choice),
+          finder = finders.new_table({
+            results     = field_list,
+            entry_maker = function(fname)
+              return { value = fname, display = fname, ordinal = fname }
+            end,
+          }),
+          sorter = conf.generic_sorter({}),
+          attach_mappings = function(prompt_bufnr, map)
+            actions.select_default:replace(function()
+              local picker = action_state.get_current_picker(prompt_bufnr)
+              local multi  = picker:get_multi_selection()
+              if #multi == 0 then
+                local sel = action_state.get_selected_entry()
+                if sel then multi = { sel } end
+              end
+              actions.close(prompt_bufnr)
+              data.fields = vim.tbl_map(function(s) return s.value end, multi)
+              cb(data)
+            end)
+            -- Esc = proceed without fields
+            map({ "i", "n" }, "<Esc>", function()
+              actions.close(prompt_bufnr)
+              data.fields = {}
+              cb(data)
+            end)
+            map({ "i", "n" }, "<Tab>", actions.toggle_selection + actions.move_selection_next)
+            return true
+          end,
+        }):find()
+      end)  -- vim.schedule
+    end)  -- display_list select
+  end)  -- PAGE_TYPES select
 end
 
 extra_prompts.pageextension = function(data, cb)
