@@ -24,12 +24,13 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/cops.lua` | Code Cop selector — per-project cop config, Telescope/fallback picker, live apply via `al/setActiveWorkspace` |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
 | `lua/al/help.lua` | AL Help — opens MS Learn AL docs or alguidelines.dev in the default browser |
+| `lua/al/status.lua` | AL statusline state store — aggregates LSP, project, compile, and publish status |
 | `lua/al/platform.lua` | OS detection and all platform-specific operations (binary paths, chmod, browser open, zip extraction) |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
 | `syntax/al.vim` | Vim syntax highlighting derived from `alsyntax.tmlanguage` |
-| `colors/bc_dark.lua` | BC Dark colorscheme (applied per-buffer for AL files, restored on BufLeave) |
+| `colors/bc_dark.lua` | BC Dark colorscheme (applied when focusing an AL window, restored on WinEnter to non-AL windows) |
 | `snippets/al.json` | VSCode-format snippets (object templates + control flow) |
 | `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
 
@@ -319,6 +320,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
 | `:ALClearCredentials` | Clear cached BC credentials |
 | `:ALInfo` | Show project and extension info |
+| `:ALUpdate` | Pull latest ALNvim from GitHub (git pull --ff-only on the plugin directory) |
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -392,7 +394,7 @@ Bearer token via Azure CLI: `az account get-access-token --resource https://api.
 
 ## BC Dark colorscheme (`colors/bc_dark.lua`)
 
-A per-buffer colorscheme applied automatically when an AL file is opened, restored to the previous colorscheme on `BufLeave`. Matches the user's VSCode TextMate colour settings:
+Applied automatically when focusing an AL window, restored when focusing a non-AL window. Matches the user's VSCode TextMate colour settings:
 
 | Element | Colour |
 |---|---|
@@ -403,7 +405,7 @@ A per-buffer colorscheme applied automatically when an AL file is opened, restor
 | Strings | `#ce8349` (orange) |
 | Numbers / constants | `#2fafff` (blue) |
 
-**Implementation note:** `ftplugin/al.lua` saves `vim.g.colors_name` before applying `bc_dark`, then uses a `BufLeave` autocmd to restore it and a `BufEnter` autocmd to re-apply it. Both are permanent (no `once=true`) so the theme toggles correctly across repeated focus changes — LSP hover floats, `gd` navigation to other files, split switching, etc. Do not use `BufWinLeave` (fires on float open/close, causing spurious restores) or `once=true` (breaks after the first focus change).
+**Implementation note:** `plugin/al.lua` saves `vim.g._al_user_colorscheme` once at load time (before any AL file triggers `bc_dark`). A global `WinEnter` autocmd applies `bc_dark` when the newly focused window has `filetype=al`, and restores the saved scheme when it does not. This handles LSP hover floats, `gd` navigation, split switching, and neo-tree focus correctly without buffer-local autocmds.
 
 **Syntax string regions use `oneline`** on `alString`, `alVerbatim`, and `alQuotedIdent` in `syntax/al.vim`. Without `oneline`, unclosed quote characters bleed highlight colour across the rest of the file.
 
