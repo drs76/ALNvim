@@ -23,7 +23,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector — per-project cop config, Telescope/fallback picker, live apply via `al/setActiveWorkspace` |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
-| `lua/al/help.lua` | AL Help panel — toggleable left split showing MS Learn AL docs via `smd` (ANSI) or render-markdown fallback |
+| `lua/al/help.lua` | AL Help — opens MS Learn AL docs or alguidelines.dev in the default browser |
 | `lua/al/platform.lua` | OS detection and all platform-specific operations (binary paths, chmod, browser open, zip extraction) |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
@@ -267,8 +267,9 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>aq` | n | Open quickfix list |
 | `<leader>ac` | n | `:ALSelectCops` — select active code cops |
 | `<leader>ad` | n | Buffer diagnostics list (Telescope or `vim.diagnostic.setloclist`) |
-| `<leader>ah` | n | `:ALHelp` — toggle AL Help panel (MS Learn docs as Markdown) |
+| `<leader>ah` | n | `:ALHelp` — open AL docs in browser (MS Learn) |
 | `<leader>aH` | n | `:ALHelpTopics` — AL Help topic picker |
+| `<leader>aG` | n | `:ALGuidelines` — open alguidelines.dev in browser |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
@@ -304,8 +305,9 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALSnapshotStart` | Start a BC snapshot debugging session |
 | `:ALSnapshotFinish` | Download snapshot file and open it |
 | `:ALDebugSetup` | Configure nvim-dap for AL live attach |
-| `:ALHelp [url]` | Toggle AL Help panel (MS Learn AL docs as Markdown); optional URL/slug argument |
+| `:ALHelp [url]` | Open AL docs in browser (MS Learn); optional URL or slug argument |
 | `:ALHelpTopics` | Open AL Help topic picker |
+| `:ALGuidelines` | Open alguidelines.dev in browser |
 | `:ALNewObject [dir]` | AL Object Wizard: interactively create a new AL object file |
 | `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
@@ -470,76 +472,24 @@ Up to 5 free IDs are shown per range so the user can choose a round number if pr
 
 `:ALNextId` calls `M.show_next()` which notifies the next 3 free IDs for the object type on the current line (no insert mode required).
 
-## AL Help panel (`lua/al/help.lua`)
+## AL Help (`lua/al/help.lua`)
 
-`:ALHelp [url]` / `<leader>ah` toggles a left-side vertical split (85 cols, fixed width) showing
-MS Learn AL documentation fetched as Markdown from the MicrosoftDocs GitHub repo.
-`:ALHelpTopics` / `<leader>aH` opens a topic picker without toggling the panel.
+All help commands open documentation in the default browser — no in-editor panel.
 
-**Source:** `https://raw.githubusercontent.com/MicrosoftDocs/dynamics365smb-devitpro-pb/main/dev-itpro/developer/<slug>.md`
+| Command | Key | Action |
+|---|---|---|
+| `:ALHelp [url]` | `<leader>ah` | Open MS Learn AL docs (default: AL overview page) |
+| `:ALHelpTopics` | `<leader>aH` | Pick from curated topic list, open in browser |
+| `:ALGuidelines` | `<leader>aG` | Open https://alguidelines.dev/ |
 
-Requires `curl` and an internet connection.
-
-### Rendering — smd (preferred) vs render-markdown fallback
-
-The panel has two rendering paths:
-
-| Condition | Rendering |
-|---|---|
-| `smd` on `$PATH` | ANSI-styled terminal buffer via `smd` (colours, headings, code blocks) |
-| `smd` absent | `nofile` buffer with `filetype=markdown` + `render-markdown.nvim` |
-
-`smd` is optional. When absent the panel falls back to a `nofile` buffer with `filetype=markdown` (rendered by render-markdown.nvim if installed, otherwise plain text).
-
-When smd is active: each page navigation runs `smd <tmpfile>` via `vim.fn.jobstart`
-(no PTY — stdout is a pipe, so smd auto-selects `cat` rather than `less`).
-The full ANSI output is collected via `stdout_buffered = true` then written to a
-`nvim_open_term` channel buffer. Since no job is attached to the channel the user
-always enters the buffer in Normal mode — no `<C-\><C-n>` required.
-
-**Link navigation (smd path):** Before writing to the temp file, `preprocess_links_for_smd`
-rewrites internal devenv links from `[text](devenv-foo.md)` to
-`[text (→devenv-foo)](devenv-foo.md)`. smd still styles the link (underline/colour) and
-hides the URL, but `(→devenv-foo)` survives in the rendered display text.
-`follow_link` "Try 0" matches `%(→(devenv%-[^)]+)%)` on the current terminal line and
-navigates directly — no fuzzy text matching needed.
-
-**Link navigation (nofile path):** "Try 1" parses `[text](url)` markdown syntax directly
-from the line (the raw markdown is displayed as-is via render-markdown).
-
-### Behaviour
-
-- **First open**: fetches the default page async via `curl`, displays it via smd or render-markdown
-- **Close** (toggle off): closes the window; buffer and history are preserved
-- **Re-open**: shows existing content; smd path creates a fresh terminal buffer per navigation
-- **`:ALHelp <url>`**: accepts a full MS Learn URL or a bare slug; extracts the slug automatically
-- Focus returns to the editing window automatically after the panel opens
-
-### Keymaps inside the panel
-
-| Key | Action |
-|---|---|
-| `<CR>` | Follow link — smd path: matches `(→devenv-slug)` in line; nofile path: parses `[text](url)` syntax |
-| `u` / `<BS>` | Go back (history stack) |
-| `r` | Reload current page |
-| `t` | Open topic picker |
-| `q` | Close panel |
+`:ALHelp` accepts a full MS Learn URL or a bare `devenv-*` slug as an optional argument.
 
 ### Topic list
 
-35 curated topics covering language fundamentals, all object types, events, pages/UI, API/integration,
-and testing. Displayed via `vim.ui.select`; selecting a topic fetches and replaces the panel content.
-
-### URL resolution
-
-`to_slug()` accepts:
-- Full MS Learn URL — extracts the last path segment
-- Relative `.md` filename (from markdown links) — strips the extension
-- Bare `devenv-*` slug — used as-is
-
-### Content processing
-
-YAML front matter (`--- … ---`) and `[!INCLUDE [...](…)]` directives are stripped before display.
+Curated topics covering language fundamentals, all object types, events, pages/UI, API/integration,
+testing, and guidelines. Displayed via `vim.ui.select`. Topics with a full URL (e.g. `alguidelines.dev`)
+open that URL directly; others are resolved as MS Learn slugs under
+`https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/developer/`.
 
 ## Code Cop selector (`lua/al/cops.lua`)
 
