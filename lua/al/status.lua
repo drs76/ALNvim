@@ -1,0 +1,120 @@
+-- AL statusline state store.
+-- Aggregates LSP loading state, project identity, and compile/publish results
+-- into a single string for display via vim.wo.statusline in AL windows.
+--
+-- State is updated by:
+--   plugin/al.lua  → set_lsp_*, set_project
+--   compile.lua    → set_compiling, set_compile_result
+--   publish.lua    → set_publishing, set_publish_result
+
+local M = {}
+
+local _s = {
+  lsp     = nil,   -- nil | "starting" | "loading" | "ready"
+  pct     = nil,   -- number 0-100 while lsp == "loading"
+  compile = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
+  publish = nil,   -- nil | "publishing" | { ok=bool }
+  project = nil,   -- nil | { name=string, version=string }
+}
+
+local function redraw()
+  vim.schedule(function() vim.cmd("redrawstatus!") end)
+end
+
+function M.set_project(name, ver)
+  _s.project = { name = name, version = ver }
+  redraw()
+end
+
+function M.set_lsp_starting()
+  _s.lsp = "starting"
+  _s.pct = nil
+  redraw()
+end
+
+function M.set_lsp_loading(pct)
+  _s.lsp = "loading"
+  _s.pct = pct
+  redraw()
+end
+
+function M.set_lsp_ready()
+  _s.lsp = "ready"
+  _s.pct = nil
+  redraw()
+end
+
+function M.set_lsp_off()
+  _s.lsp = nil
+  _s.pct = nil
+  redraw()
+end
+
+function M.set_compiling()
+  _s.compile = "building"
+  redraw()
+end
+
+function M.set_compile_result(errors, warnings)
+  _s.compile = { ok = (errors == 0 and warnings == 0), errors = errors, warnings = warnings }
+  redraw()
+end
+
+function M.set_publishing()
+  _s.publish = "publishing"
+  redraw()
+end
+
+function M.set_publish_result(ok)
+  _s.publish = { ok = ok }
+  redraw()
+  -- Clear the publish result after 5 seconds so it doesn't linger
+  vim.defer_fn(function()
+    if type(_s.publish) == "table" then
+      _s.publish = nil
+      redraw()
+    end
+  end, 5000)
+end
+
+-- Returns a formatted string suitable for embedding in vim.wo.statusline via
+-- %{v:lua.require('al.status').get()}
+function M.get()
+  local parts = {}
+
+  if _s.project then
+    parts[#parts + 1] = _s.project.name .. " " .. _s.project.version
+  end
+
+  if _s.lsp == "starting" then
+    parts[#parts + 1] = "starting…"
+  elseif _s.lsp == "loading" then
+    parts[#parts + 1] = _s.pct and string.format("loading %d%%", _s.pct) or "loading…"
+  elseif _s.lsp == "ready" then
+    parts[#parts + 1] = "ready"
+  end
+
+  if _s.compile == "building" then
+    parts[#parts + 1] = "building…"
+  elseif type(_s.compile) == "table" then
+    if _s.compile.ok then
+      parts[#parts + 1] = "✓"
+    else
+      local msg = "✗"
+      if _s.compile.errors   > 0 then msg = msg .. " " .. _s.compile.errors   .. " err"  end
+      if _s.compile.warnings > 0 then msg = msg .. " " .. _s.compile.warnings .. " warn" end
+      parts[#parts + 1] = msg
+    end
+  end
+
+  if _s.publish == "publishing" then
+    parts[#parts + 1] = "publishing…"
+  elseif type(_s.publish) == "table" then
+    parts[#parts + 1] = _s.publish.ok and "published ✓" or "publish failed ✗"
+  end
+
+  if #parts == 0 then return "" end
+  return table.concat(parts, "  ")
+end
+
+return M

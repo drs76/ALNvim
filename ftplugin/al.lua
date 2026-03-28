@@ -5,6 +5,20 @@
 if vim.g.colors_name ~= "bc_dark" then
   vim.cmd("colorscheme bc_dark")
 end
+
+-- AL statusline: show project name/version, LSP loading state, compile/publish result.
+-- Save and restore around focus changes so other buffers get their default statusline back.
+local _AL_STL = " %f %m  │  %{v:lua.require('al.status').get()}  %=  %l:%c  %P "
+local _prev_stl = vim.wo.statusline
+vim.wo.statusline = _AL_STL
+vim.api.nvim_create_autocmd("BufLeave", {
+  buffer   = 0,
+  callback = function() vim.wo.statusline = _prev_stl end,
+})
+vim.api.nvim_create_autocmd("BufEnter", {
+  buffer   = 0,
+  callback = function() vim.wo.statusline = _AL_STL end,
+})
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
 vim.api.nvim_create_autocmd("BufWritePost", {
   buffer   = 0,

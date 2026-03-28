@@ -57,6 +57,7 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
   vim.notify(
     "AL: Uploading " .. vim.fn.fnamemodify(app_file, ":t") .. " to " .. base .. "…",
     vim.log.levels.INFO)
+  require("al.status").set_publishing()
 
   local output = {}
   vim.fn.jobstart(cmd, {
@@ -75,7 +76,9 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
       local status = tonumber(http_status) or 0
       body = body:gsub("^%s+", ""):gsub("%s+$", "")
 
-      if status >= 200 and status < 300 then
+      local pub_ok = status >= 200 and status < 300
+      require("al.status").set_publish_result(pub_ok)
+      if pub_ok then
         vim.notify("AL: Published successfully", vim.log.levels.INFO)
         if cfg and cfg.launchBrowser then
           vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })

@@ -97,16 +97,16 @@ vim.api.nvim_create_autocmd("FileType", {
 -- and the server stays in a broken state. Respond with null and notify the user.
 vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
-    vim.notify("AL: project loaded — gd and K ready", vim.log.levels.WARN)
+    require("al.status").set_lsp_ready()
   end
   return vim.NIL  -- server-initiated request: must respond with null
 end
 
--- Show loading progress so the user knows the server is working.
+-- Track loading progress in the statusline.
 -- al/progressNotification is a server notification: { owner=string, percent=number, cancel=bool }
 vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
   if result and result.percent then
-    vim.notify(string.format("AL: loading… %d%%", result.percent), vim.log.levels.INFO)
+    require("al.status").set_lsp_loading(result.percent)
   end
 end
 
@@ -150,6 +150,12 @@ vim.api.nvim_create_autocmd("LspAttach", {
         return _orig(self, method, params, callback, bufnr_)
       end
     end
+
+    -- Surface project identity and LSP state in the statusline.
+    local status = require("al.status")
+    status.set_lsp_starting()
+    local _app = require("al.lsp").read_app_json(root)
+    if _app then status.set_project(_app.name, _app.version) end
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
     -- Use empty array — avoids hanging on network-mounted .netpackages directories.
@@ -266,6 +272,17 @@ vim.api.nvim_create_autocmd("LspAttach", {
         end, args.buf)
       end, { buffer = args.buf, desc = "AL: Go to definition" })
     end)
+  end,
+})
+
+-- Clear statusline state when the AL server detaches.
+vim.api.nvim_create_autocmd("LspDetach", {
+  group = vim.api.nvim_create_augroup("ALNvimLspDetach", { clear = true }),
+  callback = function(args)
+    local client = vim.lsp.get_client_by_id(args.data.client_id)
+    if client and client.name == "al_language_server" then
+      require("al.status").set_lsp_off()
+    end
   end,
 })
 

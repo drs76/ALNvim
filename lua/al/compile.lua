@@ -109,6 +109,8 @@ local function finish(buf, qf, exit_code, on_success)
     buf_append(buf, { "", "── " .. summary .. " ──" })
     buf_highlight(buf)
 
+    require("al.status").set_compile_result(#errors, #warnings)
+
     -- Populate quickfix (for jump-to-error with <leader>aq)
     vim.fn.setqflist(qf, "r")
 
@@ -131,6 +133,7 @@ function M.compile(project_dir, extra_args, on_success)
   end
 
   ensure_executable(ALC)
+  require("al.status").set_compiling()
 
   local cfg          = require("al").config
   local packagecache = project_dir .. "/" .. (cfg.packagecachepath or ".alpackages")
