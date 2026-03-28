@@ -11,13 +11,15 @@ function M.get_root(bufnr)
   local from_buf = vim.fs.root(fname, { "app.json" })
   if from_buf then return from_buf end
 
-  -- Fallback: scan downward from cwd for app.json files
-  local hits = vim.fs.find("app.json", {
-    path  = vim.fn.getcwd(),
-    upward = false,
-    type  = "file",
-    limit = 20,
-  })
+  -- Fallback: scan downward from cwd for app.json, max 3 levels deep.
+  -- vim.fs.find has no depth limit and will traverse entire drives on Windows.
+  local cwd  = vim.fn.getcwd()
+  local hits = {}
+  for _, pat in ipairs({ "/app.json", "/*/app.json", "/*/*/app.json" }) do
+    for _, f in ipairs(vim.fn.glob(cwd .. pat, false, true)) do
+      table.insert(hits, f)
+    end
+  end
   if #hits == 0 then return nil end
   if #hits == 1 then return vim.fs.dirname(hits[1]) end
 

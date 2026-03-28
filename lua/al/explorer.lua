@@ -12,6 +12,18 @@ local M        = {}
 local lsp      = require("al.lsp")
 local platform = require("al.platform")
 
+-- Check once at load time; warn clearly rather than hanging on missing rg.
+local function check_rg()
+  if vim.fn.executable("rg") == 0 then
+    vim.notify(
+      "AL Explorer: ripgrep (rg) not found on PATH.\n"
+      .. "Install from https://github.com/BurntSushi/ripgrep/releases",
+      vim.log.levels.ERROR)
+    return false
+  end
+  return true
+end
+
 local CACHE = vim.fn.stdpath("cache") .. "/alnvim/symbols"
 
 local OBJ_PAT = table.concat({
@@ -127,6 +139,7 @@ M.build_search_dirs = build_search_dirs
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.objects(root)
+  if not check_rg() then return end
   root = root or lsp.get_root()
   if not root then
     vim.notify("AL: No project root", vim.log.levels.ERROR)
@@ -255,6 +268,7 @@ end
 
 -- Telescope picker: procedures and triggers in the current file.
 function M.procedures()
+  if not check_rg() then return end
   local ok_tel, _ = pcall(require, "telescope")
   if not ok_tel then
     vim.notify("AL Explorer: telescope.nvim not installed", vim.log.levels.ERROR)
@@ -318,6 +332,7 @@ end
 
 -- Telescope live-grep across all AL files (project + symbol packages).
 function M.search(root)
+  if not check_rg() then return end
   root = root or lsp.get_root()
   if not root then
     vim.notify("AL: No project root", vim.log.levels.ERROR)
