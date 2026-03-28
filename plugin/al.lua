@@ -40,6 +40,14 @@ vim.api.nvim_create_user_command("ALInstallExtension", function()
   require("al.install").install()
 end, { desc = "Download and install the MS AL VSCode extension (no VS Code required)" })
 
+-- ── ALUpdate — pull latest ALNvim from GitHub ─────────────────────────────────
+vim.api.nvim_create_user_command("ALUpdate", function()
+  local dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h")
+  local out = vim.fn.system({ "git", "-C", dir, "pull", "--ff-only" })
+  vim.notify("ALNvim :ALUpdate\n" .. vim.trim(out),
+    vim.v.shell_error == 0 and vim.log.levels.INFO or vim.log.levels.ERROR)
+end, { desc = "Pull latest ALNvim from GitHub" })
+
 -- ── AL Language Server (Microsoft.Dynamics.Nav.EditorServices.Host) ──────────
 -- The binary communicates via standard LSP over stdio.
 -- On Linux/macOS the extension ships the binaries without the exec bit set;
