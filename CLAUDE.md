@@ -554,7 +554,7 @@ sequence to create a new AL object file, then opens it.
 | Enum | yes | Extensible (true/false select) |
 | EnumExtension | yes | `extends`: picker of all enums (project + symbols) |
 | Interface | **no** | — |
-| PermissionSet | yes | — |
+| PermissionSet | yes | Auto-generates permission entries for all project objects |
 
 ### Prompt flow
 
@@ -578,6 +578,20 @@ For TableExtension, PageExtension and EnumExtension the `extends` prompt uses
 Interface omits the ID: `src/interface/My_Interface.Interface.al`.
 The target directory is created if absent. If the file already exists, an overwrite
 confirmation is shown via `vim.ui.select`.
+
+### Permission Set auto-generation (`scan_project_objects`)
+
+When creating a PermissionSet, the wizard scans the project for all table, page, codeunit, report,
+query, and xmlport objects and generates the `Permissions` block automatically.
+
+- Tables produce two entries: `tabledata "Name" = RIMD` and `table "Name" = X`
+- All other types produce `<type> "Name" = X`
+- Existing file can be overwritten via a confirmation prompt
+
+**Implementation:** uses `find` for directory traversal (not `rg` or `vim.fn.glob`) and `io.open`
+for file reading — both work reliably on CIFS/SMB network mounts where `rg` fails silently and
+`vim.fn.glob("**")` may return nothing. Handles both quoted (`"Name"`) and unquoted (`Name`)
+AL object identifiers.
 
 ### ID suggestion
 

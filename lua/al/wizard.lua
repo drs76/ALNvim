@@ -377,40 +377,79 @@ end
 
 -- ── Permission set helpers ────────────────────────────────────────────────────
 
--- Scan the project source (src/ only, not .alpackages) and return a list of
--- permission entries covering every table, page, codeunit, report, query and
--- xmlport found.  Tables get both a tabledata (RIMD) and a table (X) entry.
-local PERM_KEYWORDS = { "table", "page", "codeunit", "report", "query", "xmlport" }
+-- Scan the project source and return a list of permission entries covering every
+-- table, page, codeunit, report, query and xmlport found.
+-- Tables get both a tabledata (RIMD) and a table (X) entry.
+-- Uses vim.fn.glob + vim.fn.readfile to avoid rg unreliability on network mounts.
+local PERM_KEYWORDS = {
+  table = true, page = true, codeunit = true,
+  report = true, query = true, xmlport = true,
+}
 
 local function scan_project_objects(root)
-  local entries = {}
+  -- Use find for directory traversal (reliable on CIFS/SMB where ** glob can fail)
+  local raw = vim.fn.systemlist({
+    "find", root,
+    "(", "-name", "*.al", "-o", "-name", "*.AL", ")",
+    "-type", "f",
+    "!", "-path", "*/.alpackages/*",
+  })
+  local files = (vim.v.shell_error == 0 or #raw > 0) and raw or {}
+  -- Fallback to glob if find returned nothing (e.g. not installed)
+  if #files == 0 then
+    files = vim.fn.glob(root .. "/**/*.al", false, true)
+    vim.list_extend(files, vim.fn.glob(root .. "/**/*.AL", false, true))
+  end
 
-  for _, kw in ipairs(PERM_KEYWORDS) do
-    local pat = string.format("^\\s*%s\\s+\\d+", kw)
-    local cmd = {
-      "rg", "--no-heading", "--no-filename", "--color=never", "-i",
-      "--glob", "*.al", "--glob", "*.AL",
-      "-e", pat,
-    }
-    table.insert(cmd, root)
-    local raw = vim.fn.systemlist(cmd)
-    for _, line in ipairs(raw) do
-      local rest = line:match("^%s*[%a]+%s+%d+%s*(.*)")
-      if rest then
-        local name = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'")
-        if name and name ~= "" then
-          if kw == "table" then
-            entries[#entries + 1] = { perm_type = "tabledata", name = name, perms = "RIMD" }
-            entries[#entries + 1] = { perm_type = "table",     name = name, perms = "X" }
-          else
-            entries[#entries + 1] = { perm_type = kw, name = name, perms = "X" }
+  local entries = {}
+  local seen    = {}  -- deduplicate by "type:name"
+
+  for _, fpath in ipairs(files) do
+    -- io.open avoids Vim's VFS layer — more reliable on CIFS/SMB mounts
+    local f = io.open(fpath, "r")
+    if f then
+      -- Read first 10 lines — object declaration is always near the top
+      local lines = {}
+      for _ = 1, 10 do
+        local ln = f:read("*l")
+        if not ln then break end
+        lines[#lines + 1] = ln
+      end
+      f:close()
+      for _, line in ipairs(lines) do
+        -- Strip Windows \r if present
+        line = line:gsub("\r$", "")
+        local kw, rest = line:match("^%s*([%a]+)%s+%d+%s*(.*)")
+        if kw and PERM_KEYWORDS[kw:lower()] then
+          local name = rest:match('^"([^"]+)"')
+                  or rest:match("^'([^']+)'")
+                  or rest:match("^([^%s{]+)")  -- unquoted identifier
+          if name and name ~= "" then
+            local kw_lower = kw:lower()
+            local key_td   = "tabledata:" .. name
+            local key_tb   = kw_lower .. ":" .. name
+            if kw_lower == "table" then
+              if not seen[key_td] then
+                seen[key_td] = true
+                entries[#entries + 1] = { perm_type = "tabledata", name = name, perms = "RIMD" }
+              end
+              if not seen[key_tb] then
+                seen[key_tb] = true
+                entries[#entries + 1] = { perm_type = "table", name = name, perms = "X" }
+              end
+            else
+              if not seen[key_tb] then
+                seen[key_tb] = true
+                entries[#entries + 1] = { perm_type = kw_lower, name = name, perms = "X" }
+              end
+            end
           end
         end
       end
     end
   end
 
-  -- Sort: tabledata first, then by type alpha, then by name
+  -- Sort: tabledata first, then by type, then by name
   local order = { tabledata = 1, table = 2, page = 3, codeunit = 4,
                   report = 5, query = 6, xmlport = 7 }
   table.sort(entries, function(a, b)
