@@ -171,6 +171,8 @@ function M.setup_dap(root)
     return
   end
 
+  patch_dap_nil_command(dap)
+
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
@@ -305,6 +307,28 @@ local function ensure_xdg_stub()
   return dir
 end
 
+-- The AL adapter responds to configurationDone with {"command":null,...}.
+-- nvim-dap's listener dispatch does listeners.before[decoded.command] without
+-- a nil guard, so rawset(tbl, nil, {}) crashes with "table index is nil".
+-- Patch both listener metatables to return {} for nil keys so the callback
+-- that sets adapter_responded=true can still run.
+local _dap_listeners_patched = false
+local function patch_dap_nil_command(dap)
+  if _dap_listeners_patched then return end
+  _dap_listeners_patched = true
+  for _, name in ipairs({ "before", "after" }) do
+    local tbl = dap.listeners[name]
+    local mt  = getmetatable(tbl)
+    if mt and type(mt.__index) == "function" then
+      local orig = mt.__index
+      mt.__index = function(t, k)
+        if k == nil then return {} end
+        return orig(t, k)
+      end
+    end
+  end
+end
+
 -- Build a minimal string-array environment for the DAP adapter process.
 -- uv.spawn expects env as {"KEY=value", ...} (integer-keyed array).
 -- Passing nil inherits Neovim's full env, which causes the adapter to SIGABRT
@@ -353,6 +377,8 @@ function M.launch(root)
     vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
     return
   end
+
+  patch_dap_nil_command(dap)
 
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
