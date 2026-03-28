@@ -36,6 +36,8 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 
 `ext.lua` scans `~/.vscode/extensions/ms-dynamics-smb.al-*` and picks the highest version numerically. Binaries are relative to that directory:
 
+**Glob pitfall:** use `vim.fn.glob(vim.fn.expand("~") .. "/.vscode/extensions/ms-dynamics-smb.al-*", false, true)` — NOT `vim.fn.glob(vim.fn.expand("~/.vscode/extensions/ms-dynamics-smb.al-*"), ...)`. `vim.fn.expand` with a wildcard does its own glob expansion before the result is passed to `vim.fn.glob`, causing double-expansion that silently returns nothing even when the directory exists. Expand only `~`, then pass the full `*` pattern to `vim.fn.glob`.
+
 ```
 <ext_path>/
   bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host   ← LSP server (stdio)
@@ -526,13 +528,20 @@ without requiring VS Code to be installed. Requires `curl` and `unzip`.
 
 **Flow:**
 1. POST to the VS Code gallery `extensionquery` API to get the latest version number
-2. Download the VSIX (~683 MB) via `curl --progress-bar` with live output in a floating window
-3. `unzip extension/*` into a temp dir, then move `extension/` to `~/.vscode/extensions/ms-dynamics-smb.al-{version}/`
-4. Set exec bit (decimal 73 = `0o111`) on `alc`, `altool`, `aldoc`, `Microsoft.Dynamics.Nav.EditorServices.Host`
-5. Call `require("al.ext").reload()` to update the cached path so AL features work immediately
+2. Download the VSIX via `curl --fail --silent --show-error` to a cache path; logs file size on completion
+3. Verify ZIP magic bytes (`PK`) — catches HTML/JSON error responses saved as `.vsix`
+4. `unzip` everything into a temp dir, move `extension/` to `~/.vscode/extensions/ms-dynamics-smb.al-{version}/`
+5. Set exec bit (decimal 73 = `0o111`) on `alc`, `altool`, `aldoc`, `Microsoft.Dynamics.Nav.EditorServices.Host`
+6. Call `require("al.ext").reload()` to update the cached path so AL features work immediately
+7. Trigger `doautocmd FileType al` for any already-open AL buffers so the LSP starts without reopening files
 
-If the target version directory already exists the download is skipped. After install, no Neovim
-restart is needed — the LSP will pick up the new path on the next `:ALCompile` or `FileType al`.
+Download URL uses the `vsassets.io` CDN (not the `marketplace.visualstudio.com` API URL, which returns
+a non-ZIP redirect). Requires `Accept: application/octet-stream`, `X-Market-Client-Id: VSCode`, and
+`User-Agent: VSCode/...` headers or the CDN returns an error page.
+
+If the target version directory already exists the download is skipped. `:ALInstallExtension` is
+registered before the `ext_path` guard in `plugin/al.lua` so it is always available, even when no
+extension is installed yet.
 
 ## AL Text Objects (`lua/al/textobj.lua`)
 
