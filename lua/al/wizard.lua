@@ -258,15 +258,25 @@ local function tpl_interface(d)
 end
 
 local function tpl_permissionset(d)
+  local perm_lines = {}
+  if d.permissions and #d.permissions > 0 then
+    for i, p in ipairs(d.permissions) do
+      local sep = (i < #d.permissions) and "," or ";"
+      perm_lines[#perm_lines + 1] = string.format(
+        '        %s "%s" = %s%s', p.perm_type, p.name, p.perms, sep)
+    end
+  else
+    perm_lines[#perm_lines + 1] = "        ;"
+  end
   return string.format([[permissionset %d "%s"
 {
     Caption = '%s';
     Assignable = true;
 
     Permissions =
-        ;
+%s
 }
-]], d.id, d.name, d.name)
+]], d.id, d.name, d.name, table.concat(perm_lines, "\n"))
 end
 
 local TEMPLATES = {
@@ -365,6 +375,51 @@ local function write_and_open(path, content)
   vim.notify("AL Wizard: created " .. vim.fn.fnamemodify(path, ":~:."), vim.log.levels.INFO)
 end
 
+-- ── Permission set helpers ────────────────────────────────────────────────────
+
+-- Scan the project source (src/ only, not .alpackages) and return a list of
+-- permission entries covering every table, page, codeunit, report, query and
+-- xmlport found.  Tables get both a tabledata (RIMD) and a table (X) entry.
+local PERM_KEYWORDS = { "table", "page", "codeunit", "report", "query", "xmlport" }
+
+local function scan_project_objects(root)
+  local src_dir = vim.fn.isdirectory(root .. "/src") == 1 and (root .. "/src") or root
+  local entries = {}
+
+  for _, kw in ipairs(PERM_KEYWORDS) do
+    local pat = string.format("^\\s*%s\\s+\\d+", kw)
+    local raw = vim.fn.systemlist({
+      "rg", "--no-heading", "--no-filename", "--color=never", "-i",
+      "--glob", "*.al", "--glob", "*.AL",
+      "-e", pat, src_dir,
+    })
+    for _, line in ipairs(raw) do
+      local rest = line:match("^%s*[%a]+%s+%d+%s*(.*)")
+      if rest then
+        local name = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'")
+        if name and name ~= "" then
+          if kw == "table" then
+            entries[#entries + 1] = { perm_type = "tabledata", name = name, perms = "RIMD" }
+            entries[#entries + 1] = { perm_type = "table",     name = name, perms = "X" }
+          else
+            entries[#entries + 1] = { perm_type = kw, name = name, perms = "X" }
+          end
+        end
+      end
+    end
+  end
+
+  -- Sort: tabledata first, then by type alpha, then by name
+  local order = { tabledata = 1, table = 2, page = 3, codeunit = 4,
+                  report = 5, query = 6, xmlport = 7 }
+  table.sort(entries, function(a, b)
+    local oa, ob = order[a.perm_type] or 99, order[b.perm_type] or 99
+    if oa ~= ob then return oa < ob end
+    return a.name:lower() < b.name:lower()
+  end)
+  return entries
+end
+
 -- ── Type-specific extra prompts ───────────────────────────────────────────────
 
 -- Each handler calls cb(data) when done, or cb(nil) to abort.
@@ -438,6 +493,27 @@ extra_prompts.enumextension = function(data, cb)
     data.extends = choice
     cb(data)
   end)
+end
+
+extra_prompts.permissionset = function(data, cb)
+  local entries = scan_project_objects(data.root)
+  if #entries == 0 then
+    vim.notify("AL Wizard: no objects found in project source — empty permission set created",
+      vim.log.levels.WARN)
+    data.permissions = {}
+    cb(data)
+    return
+  end
+  -- Count unique objects (tabledata + table count as one table object)
+  local obj_count = 0
+  for _, e in ipairs(entries) do
+    if e.perm_type ~= "tabledata" then obj_count = obj_count + 1 end
+  end
+  vim.notify(string.format(
+    "AL Wizard: generated permissions for %d objects (%d entries)",
+    obj_count, #entries), vim.log.levels.INFO)
+  data.permissions = entries
+  cb(data)
 end
 
 -- ── Wizard runner ─────────────────────────────────────────────────────────────
