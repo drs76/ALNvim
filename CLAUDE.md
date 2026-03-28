@@ -199,6 +199,27 @@ The `_al_completion_patched` guard prevents double-wrapping when `LspAttach` fir
 
 **Quickfix list** is also populated with parsed errors/warnings for jump-to-error via `<leader>aq`.
 
+**Code analyzers** (CodeCop, PerTenantExtensionCop, UICop, AppSourceCop) are automatically included as `/analyzer:` flags using the same selection as the LSP (from `:ALSelectCops` / `.vscode/alnvim.json`). This ensures warnings visible in the editor also appear in compile output.
+
+**Ruleset** — to suppress or adjust the severity of specific diagnostics, set `ruleset_path` in `setup()`:
+```lua
+require("al").setup({
+  ruleset_path = "/home/dav/Documents/AL/codeanalyzer.json",
+})
+```
+This passes `/ruleset:<file>` to `alc`. The ruleset JSON format:
+```json
+{
+  "name": "My Ruleset",
+  "rules": [
+    { "id": "AA0072", "action": "None", "justification": "..." }
+  ]
+}
+```
+`"action"` values: `"None"` (suppress), `"Warning"`, `"Error"`, `"Info"`. **Do not add `ruleSetPath` to `app.json`** — it is a Microsoft-controlled manifest and custom properties break AL validation.
+
+**Success condition:** exit code 0 with no errors. Warnings do not block `:ALPublish`. Summary line shows `Build succeeded (N warning(s))` when warnings are present.
+
 Error line format parsed from alc output:
 ```
 /path/to/file.al(line,col): error|warning ALxxxx: message
