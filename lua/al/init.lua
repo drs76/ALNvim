@@ -10,8 +10,7 @@ M.defaults = {
   alc_extra_args = {},
 
   -- Path to a ruleset JSON file passed to alc via /ruleset:<file>.
-  -- Per-project: set "ruleSetPath" in app.json (relative to project root) — takes priority.
-  -- Global fallback: set this to an absolute path, e.g. "/home/user/Documents/AL/codeanalyzer.json"
+  -- Set to an absolute path, e.g. "/home/user/Documents/AL/codeanalyzer.json"
   ruleset_path = nil,
 
   -- Relative path inside the project root where symbol packages are cached
