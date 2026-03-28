@@ -53,7 +53,9 @@ local function find()
   if #dirs == 0 then
     vim.schedule(function()
       vim.notify(
-        "ALNvim: MS AL extension not found under ~/.vscode/extensions/ or ~/.vscode-insiders/extensions/\n"
+        "ALNvim: MS AL extension not found.\nSearched:\n"
+        .. "  " .. home .. "/.vscode/extensions/\n"
+        .. "  " .. home .. "/.vscode-insiders/extensions/\n"
         .. "Run :ALInstallExtension to download it automatically.",
         vim.log.levels.WARN)
     end)
