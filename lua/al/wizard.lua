@@ -935,13 +935,17 @@ function M.organise_file(bufnr)
     vim.api.nvim_buf_set_name(bufnr, target)
   end
 
-  -- Write the buffer so the suffix change (and/or new path) is persisted.
-  _organising = true
-  local ok, err = pcall(vim.cmd, "write")
-  _organising = false
-  if not ok then
-    vim.notify("AL: write failed: " .. tostring(err), vim.log.levels.ERROR)
-    return
+  if name_modified then
+    -- Buffer content was changed (suffix added); write! to persist it.
+    -- The file already exists at the target path so write (not write!) would
+    -- fail with E13 — force-overwrite is correct here since we own the file.
+    _organising = true
+    local ok, err = pcall(vim.cmd, "write!")
+    _organising = false
+    if not ok then
+      vim.notify("AL: write failed: " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
   end
 
   vim.bo[bufnr].modified = false
