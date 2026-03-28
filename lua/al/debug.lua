@@ -146,87 +146,6 @@ function M.snapshot_finish(root)
   })
 end
 
--- ── Live attach via nvim-dap ──────────────────────────────────────────────────
---
--- The AL debug adapter is the EditorServices.Host binary.
--- It speaks DAP over stdio when launched in adapter mode.
--- NOTE: The exact launch arguments for debug-adapter mode are not publicly
--- documented by Microsoft. This configuration may need adjustment – start with
--- :ALDebugSetup, then :DapContinue, and inspect :DapLog if it does not connect.
-
-function M.setup_dap(root)
-  local ok, dap = pcall(require, "dap")
-  if not ok then
-    vim.notify(
-      "AL: nvim-dap not installed.\n"
-      .. "Add { src = 'https://github.com/mfussenegger/nvim-dap' } to vim.pack.add",
-      vim.log.levels.WARN)
-    return
-  end
-
-  root = root or lsp.get_root()
-  local cfg = conn.read_launch(root)
-  if not cfg then
-    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
-    return
-  end
-
-  patch_dap_nil_command(dap)
-  register_al_dap_events(dap)
-
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local p    = require("al.platform")
-  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
-
-  dap.adapters.al = {
-    type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env = make_adapter_env(),
-      initialize_timeout_sec = 30,
-    },
-  }
-
-  local base   = conn.base_url(cfg)
-  local tenant = cfg.tenant or "default"
-
-  -- Map the launch.json attach configuration to a nvim-dap configuration
-  dap.configurations.al = {
-    {
-      type                          = "al",
-      request                       = "attach",
-      name                          = "AL: Attach to " .. (cfg.serverInstance or "BC"),
-      server                        = cfg.server or "http://localhost",
-      serverInstance                = cfg.serverInstance or "BC",
-      authentication                = cfg.authentication or "Windows",
-      tenant                        = tenant,
-      breakOnError                  = to_break_bool(cfg.breakOnError, true),
-      breakOnRecordWrite            = to_break_bool(cfg.breakOnRecordWrite, false),
-      breakOnNext                   = cfg.breakOnNext or "WebClient",
-      enableSqlInformationDebugger  = cfg.enableSqlInformationDebugger  ~= false,
-      enableLongRunningSqlStatements = cfg.enableLongRunningSqlStatements ~= false,
-      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-      numberOfSqlStatements         = cfg.numberOfSqlStatements or 10,
-    },
-    {
-      type          = "al",
-      request       = "attach",
-      name          = "AL: Attach to Web Service client",
-      server        = cfg.server or "http://localhost",
-      serverInstance = cfg.serverInstance or "BC",
-      authentication = cfg.authentication or "Windows",
-      tenant        = tenant,
-      breakOnError  = to_break_bool(cfg.breakOnError, true),
-      breakOnNext   = "WebServiceClient",
-    },
-  }
-
-  vim.notify(
-    "AL: nvim-dap configured for " .. base .. "\nRun :DapContinue to attach.",
-    vim.log.levels.INFO)
-end
-
 -- ── launch.json patching ─────────────────────────────────────────────────────
 --
 -- The adapter reads .vscode/launch.json directly via /projectRoot: and
@@ -416,6 +335,87 @@ end
 -- adapter just enough context while keeping our stub dir at the front of PATH.
 local function make_adapter_env()
   return require("al.platform").adapter_env(ensure_xdg_stub())
+end
+
+-- ── Live attach via nvim-dap ──────────────────────────────────────────────────
+--
+-- The AL debug adapter is the EditorServices.Host binary.
+-- It speaks DAP over stdio when launched in adapter mode.
+-- NOTE: The exact launch arguments for debug-adapter mode are not publicly
+-- documented by Microsoft. This configuration may need adjustment – start with
+-- :ALDebugSetup, then :DapContinue, and inspect :DapLog if it does not connect.
+
+function M.setup_dap(root)
+  local ok, dap = pcall(require, "dap")
+  if not ok then
+    vim.notify(
+      "AL: nvim-dap not installed.\n"
+      .. "Add { src = 'https://github.com/mfussenegger/nvim-dap' } to vim.pack.add",
+      vim.log.levels.WARN)
+    return
+  end
+
+  root = root or lsp.get_root()
+  local cfg = conn.read_launch(root)
+  if not cfg then
+    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
+    return
+  end
+
+  patch_dap_nil_command(dap)
+  register_al_dap_events(dap)
+
+  local ext  = require("al").config.ext_path or require("al.ext").path
+  local p    = require("al.platform")
+  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+
+  dap.adapters.al = {
+    type    = "executable",
+    command = host,
+    args    = { "/startDebugging", "/projectRoot:" .. root },
+    options = {
+      env = make_adapter_env(),
+      initialize_timeout_sec = 30,
+    },
+  }
+
+  local base   = conn.base_url(cfg)
+  local tenant = cfg.tenant or "default"
+
+  -- Map the launch.json attach configuration to a nvim-dap configuration
+  dap.configurations.al = {
+    {
+      type                          = "al",
+      request                       = "attach",
+      name                          = "AL: Attach to " .. (cfg.serverInstance or "BC"),
+      server                        = cfg.server or "http://localhost",
+      serverInstance                = cfg.serverInstance or "BC",
+      authentication                = cfg.authentication or "Windows",
+      tenant                        = tenant,
+      breakOnError                  = to_break_bool(cfg.breakOnError, true),
+      breakOnRecordWrite            = to_break_bool(cfg.breakOnRecordWrite, false),
+      breakOnNext                   = cfg.breakOnNext or "WebClient",
+      enableSqlInformationDebugger  = cfg.enableSqlInformationDebugger  ~= false,
+      enableLongRunningSqlStatements = cfg.enableLongRunningSqlStatements ~= false,
+      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+      numberOfSqlStatements         = cfg.numberOfSqlStatements or 10,
+    },
+    {
+      type          = "al",
+      request       = "attach",
+      name          = "AL: Attach to Web Service client",
+      server        = cfg.server or "http://localhost",
+      serverInstance = cfg.serverInstance or "BC",
+      authentication = cfg.authentication or "Windows",
+      tenant        = tenant,
+      breakOnError  = to_break_bool(cfg.breakOnError, true),
+      breakOnNext   = "WebServiceClient",
+    },
+  }
+
+  vim.notify(
+    "AL: nvim-dap configured for " .. base .. "\nRun :DapContinue to attach.",
+    vim.log.levels.INFO)
 end
 
 function M.launch(root)
