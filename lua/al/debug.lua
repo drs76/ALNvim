@@ -346,32 +346,87 @@ function M.launch(root)
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
-  -- Prepend our no-op xdg-open stub to Neovim's PATH so the adapter and all
-  -- its child processes see it before the system xdg-open.
-  install_xdg_open_stub()
-
-  dap.adapters.al = {
-    type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env = {
-        DOTNET_ROOT             = "/usr/share/dotnet",
-        DISPLAY                  = os.getenv("DISPLAY") or "",
-        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
-        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
-        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+  -- Adapter registration shared by both paths.
+  local function register_adapter()
+    install_xdg_open_stub()
+    dap.adapters.al = {
+      type    = "executable",
+      command = host,
+      args    = { "/startDebugging", "/projectRoot:" .. root },
+      options = {
+        env = {
+          DOTNET_ROOT             = "/usr/share/dotnet",
+          DISPLAY                  = os.getenv("DISPLAY") or "",
+          WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
+          DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
+          XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
+        },
       },
-    },
-  }
+    }
+  end
 
-  -- Build the DAP launch configuration from launch.json fields.
-  -- request = "launch" tells the adapter to publish the .app then attach.
+  local function open_browser()
+    if not cfg.launchBrowser then return end
+    local url = conn.webclient_url(cfg)
+    if vim.ui.open then
+      vim.ui.open(url)
+    else
+      vim.fn.jobstart({ "xdg-open", url }, { detach = true })
+    end
+  end
+
+  -- ── On-prem: compile → HTTP publish → DAP "attach" ───────────────────────
+  -- The DAP "launch" request triggers a browser-open inside the adapter that
+  -- fails on Linux (xdg-open or similar tools cannot run from the .NET subprocess
+  -- context).  For on-prem we can publish via HTTP ourselves and then attach,
+  -- which bypasses the adapter's browser-open code path entirely.
+  if not cfg.environmentType then
+    local attach_cfg = {
+      type               = "al",
+      request            = "attach",
+      name               = "AL: Attach (after publish)",
+      server             = cfg.server,
+      serverInstance     = cfg.serverInstance,
+      authentication     = cfg.authentication or "Windows",
+      tenant             = cfg.tenant or "default",
+      breakOnError       = to_break_bool(cfg.breakOnError, true),
+      breakOnNext        = cfg.breakOnNext or "WebClient",
+      breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
+      enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
+      enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
+      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+      numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+    }
+    dap.configurations.al = { attach_cfg }
+
+    require("al.compile").compile(root, nil, function()
+      vim.notify("AL: Compile succeeded — uploading to BC…", vim.log.levels.INFO)
+      -- skip_compile=true: upload whatever .app the compile just produced.
+      require("al.publish").publish(root, true, function()
+        vim.notify("AL: Published — attaching debugger…", vim.log.levels.INFO)
+        register_adapter()
+        dap.run(attach_cfg)
+        open_browser()
+      end)
+    end)
+    return
+  end
+
+  -- ── Cloud: compile → DAP "launch" (adapter handles publish + attach) ─────
+  -- Cloud endpoints reject direct HTTP publish (HTTP 415), so we must use
+  -- the adapter's "launch" request.  We patch launch.json to suppress the
+  -- adapter's built-in browser-open (which also fails on Linux) and open
+  -- the URL from Lua instead.
   local launch_cfg = {
     type               = "al",
     request            = "launch",
     name               = "AL: Launch",
     schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+    environmentType    = cfg.environmentType,
+    environmentName    = cfg.environmentName,
+    tenant             = cfg.tenant,
+    primaryTenantDomain = cfg.primaryTenantDomain,
+    authentication     = cfg.authentication or "MicrosoftEntraID",
     breakOnError       = to_break_bool(cfg.breakOnError, true),
     breakOnNext        = cfg.breakOnNext or "WebClient",
     breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
@@ -379,39 +434,17 @@ function M.launch(root)
     enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
     longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
     numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-    launchBrowser     = false,  -- handled by Lua after attach; adapter xdg-open fails on Linux
-    startupObjectType = cfg.startupObjectType or "Page",
-    startupObjectId   = cfg.startupObjectId or 22,
+    launchBrowser      = false,
+    startupObjectType  = cfg.startupObjectType or "Page",
+    startupObjectId    = cfg.startupObjectId or 22,
   }
-
-  -- Cloud environments use environmentType/environmentName/tenant;
-  -- on-prem uses server/serverInstance.
-  if cfg.environmentType then
-    launch_cfg.environmentType     = cfg.environmentType
-    launch_cfg.environmentName     = cfg.environmentName
-    launch_cfg.tenant              = cfg.tenant
-    launch_cfg.primaryTenantDomain = cfg.primaryTenantDomain
-    launch_cfg.authentication      = cfg.authentication or "MicrosoftEntraID"
-  else
-    launch_cfg.server          = cfg.server
-    launch_cfg.serverInstance  = cfg.serverInstance
-    launch_cfg.tenant          = cfg.tenant or "default"
-    launch_cfg.authentication  = cfg.authentication or "Windows"
-  end
-
-  -- Also register as the default DapContinue configuration so re-attaching works.
   dap.configurations.al = { launch_cfg }
 
-  -- Compile first; on a clean build hand the launch config to the adapter.
-  -- The adapter publishes the .app and attaches — no separate HTTP upload needed.
   require("al.compile").compile(root, nil, function()
     vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
 
-    -- Patch launch.json before the adapter reads it (v18 is strict about bool fields).
     local bak = patch_launch_json(root)
     if bak then
-      -- Restore once the DAP session ends (terminated or exited).
-      -- nvim-dap has no .once; set the listener and self-remove on first call.
       local restored = false
       local function restore()
         if not restored then
@@ -425,18 +458,9 @@ function M.launch(root)
       dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
     end
 
+    register_adapter()
     dap.run(launch_cfg)
-
-    -- Open the BC web client after launching (adapter's own xdg-open is suppressed).
-    if cfg.launchBrowser then
-      local url = conn.webclient_url(cfg)
-      -- vim.ui.open is available in Neovim 0.10+; fall back to xdg-open jobstart.
-      if vim.ui.open then
-        vim.ui.open(url)
-      else
-        vim.fn.jobstart({ "xdg-open", url }, { detach = true })
-      end
-    end
+    open_browser()
   end)
 end
 
