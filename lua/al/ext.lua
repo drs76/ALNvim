@@ -35,12 +35,15 @@ local function version_gt(a, b)
 end
 
 local function find()
-  local home = vim.fn.expand("~")
+  -- Use vim.fn.expand per directory (no wildcard) so the path is OS-normalised
+  -- on Windows (backslash home + forward-slash suffix causes glob to fail).
   local dirs = {}
+  local searched = {}
 
-  -- Search both stable and Insiders extension directories
   for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
-    local base    = home .. "/" .. subdir .. "/extensions"
+    -- expand "~/.vscode" etc. — no wildcard so no double-expansion (see CLAUDE.md)
+    local base = vim.fn.expand("~/" .. subdir) .. "/extensions"
+    table.insert(searched, base)
     local matched = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
     for _, d in ipairs(matched) do
       local stat = vim.uv.fs_stat(d)
@@ -51,14 +54,19 @@ local function find()
   end
 
   if #dirs == 0 then
-    vim.schedule(function()
-      vim.notify(
-        "ALNvim: MS AL extension not found.\nSearched:\n"
-        .. "  " .. home .. "/.vscode/extensions/\n"
-        .. "  " .. home .. "/.vscode-insiders/extensions/\n"
-        .. "Run :ALInstallExtension to download it automatically.",
-        vim.log.levels.WARN)
-    end)
+    -- Defer notification past vim.pack.add to avoid it being caught as a fatal error.
+    vim.api.nvim_create_autocmd("VimEnter", {
+      once    = true,
+      pattern = "*",
+      callback = function()
+        vim.notify(
+          "ALNvim: MS AL extension not found.\nSearched:\n"
+          .. "  " .. searched[1] .. "\n"
+          .. "  " .. searched[2] .. "\n"
+          .. "Run :ALInstallExtension to download it automatically.",
+          vim.log.levels.WARN)
+      end,
+    })
     return nil
   end
 
