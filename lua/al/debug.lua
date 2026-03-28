@@ -171,24 +171,19 @@ function M.setup_dap(root)
     return
   end
 
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local ext      = require("al").config.ext_path or require("al.ext").path
+  local host     = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local stub_dir = make_xdg_open_stub()
 
   -- Register the adapter (stdio transport, same binary as the LSP).
-  -- /startDebugging switches the binary from LSP mode to DAP mode.
-  -- /projectRoot tells the adapter which project to attach to.
+  -- Launch via sh so stub_dir is prepended to PATH (see make_xdg_open_stub).
   dap.adapters.al = {
     type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env = {
-        DOTNET_ROOT             = "/usr/share/dotnet",
-        DISPLAY                  = os.getenv("DISPLAY") or "",
-        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
-        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
-        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
-      },
+    command = "/bin/sh",
+    args    = {
+      "-c",
+      string.format("PATH=%s:$PATH DOTNET_ROOT=/usr/share/dotnet exec %s /startDebugging /projectRoot:%s",
+        stub_dir, host, root),
     },
   }
 
@@ -338,21 +333,16 @@ function M.launch(root)
   local host     = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
   local stub_dir = make_xdg_open_stub()
 
+  -- Launch adapter via sh so we can prepend stub_dir to PATH before exec.
+  -- This guarantees our no-op xdg-open is found first by the adapter AND all
+  -- its child processes, regardless of how nvim-dap handles options.env.
   dap.adapters.al = {
     type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env = {
-        DOTNET_ROOT             = "/usr/share/dotnet",
-        -- stub_dir is prepended so our no-op xdg-open shadows any real one;
-        -- the adapter's browser-open is handled by Lua after attach instead.
-        PATH                     = stub_dir .. ":" .. (os.getenv("PATH") or ""),
-        DISPLAY                  = os.getenv("DISPLAY") or "",
-        WAYLAND_DISPLAY          = os.getenv("WAYLAND_DISPLAY") or "",
-        DBUS_SESSION_BUS_ADDRESS = os.getenv("DBUS_SESSION_BUS_ADDRESS") or "",
-        XDG_RUNTIME_DIR          = os.getenv("XDG_RUNTIME_DIR") or "",
-      },
+    command = "/bin/sh",
+    args    = {
+      "-c",
+      string.format("PATH=%s:$PATH DOTNET_ROOT=/usr/share/dotnet exec %s /startDebugging /projectRoot:%s",
+        stub_dir, host, root),
     },
   }
 
