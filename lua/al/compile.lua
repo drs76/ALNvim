@@ -166,6 +166,16 @@ function M.compile(project_dir, extra_args, on_success)
     end
   end
 
+  -- Ruleset: suppress/adjust specific diagnostic severities.
+  -- Priority: app.json "ruleSetPath" (project-level) > config.ruleset_path (global).
+  local app_json   = require("al.lsp").read_app_json(project_dir)
+  local ruleset    = app_json and app_json.ruleSetPath
+                     and (project_dir .. "/" .. app_json.ruleSetPath)
+                     or  cfg.ruleset_path
+  if ruleset and vim.fn.filereadable(ruleset) == 1 then
+    table.insert(cmd, "/ruleset:" .. ruleset)
+  end
+
   for _, arg in ipairs(extra_args or cfg.alc_extra_args or {}) do
     table.insert(cmd, arg)
   end
