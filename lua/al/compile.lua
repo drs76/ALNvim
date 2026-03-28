@@ -4,6 +4,14 @@ local EXT_PATH = require("al.ext").path or ""
 local ALC      = EXT_PATH .. "/bin/linux/alc"
 local lsp      = require("al.lsp")
 
+-- Map VSCode cop tokens to the actual analyzer DLL paths that alc accepts.
+local ANALYZER_DLLS = {
+  ["${CodeCop}"]               = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.CodeCop.dll",
+  ["${PerTenantExtensionCop}"] = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.PerTenantExtensionCop.dll",
+  ["${UICop}"]                 = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.UICop.dll",
+  ["${AppSourceCop}"]          = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.AppSourceCop.dll",
+}
+
 -- Ensure alc is executable (the file is shipped without the exec bit set)
 local function ensure_executable(path)
   local stat = vim.uv.fs_stat(path)
@@ -101,8 +109,12 @@ local function finish(buf, qf, exit_code, on_success)
     local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
     local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
     local summary
-    if exit_code == 0 and #qf == 0 then
-      summary = "Build succeeded"
+    if exit_code == 0 and #errors == 0 then
+      if #warnings > 0 then
+        summary = string.format("Build succeeded  (%d warning(s))", #warnings)
+      else
+        summary = "Build succeeded"
+      end
     else
       summary = string.format("%d error(s), %d warning(s)", #errors, #warnings)
     end
@@ -114,7 +126,8 @@ local function finish(buf, qf, exit_code, on_success)
     -- Populate quickfix (for jump-to-error with <leader>aq)
     vim.fn.setqflist(qf, "r")
 
-    if exit_code == 0 and #qf == 0 then
+    -- Success = clean exit and no errors. Warnings are allowed — they don't block publish.
+    if exit_code == 0 and #errors == 0 then
       if on_success then on_success() end
     end
   end)
@@ -143,6 +156,16 @@ function M.compile(project_dir, extra_args, on_success)
     "/project:" .. project_dir,
     "/packagecachepath:" .. packagecache,
   }
+
+  -- Add active code analyzers so warnings from CodeCop etc. appear in compile output.
+  -- Uses the same cop selection as the LSP (saved in .vscode/alnvim.json or defaults).
+  for _, token in ipairs(require("al.cops").get_active(project_dir)) do
+    local dll = ANALYZER_DLLS[token]
+    if dll and vim.fn.filereadable(dll) == 1 then
+      table.insert(cmd, "/analyzer:" .. dll)
+    end
+  end
+
   for _, arg in ipairs(extra_args or cfg.alc_extra_args or {}) do
     table.insert(cmd, arg)
   end
