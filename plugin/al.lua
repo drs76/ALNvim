@@ -397,10 +397,10 @@ end, {
 
 vim.api.nvim_create_user_command("ALHelp", function(opts)
   local url = opts.args ~= "" and opts.args or nil
-  require("al.help").toggle(url)
+  require("al.help").open(url)
 end, {
   nargs = "?",
-  desc  = "Toggle AL Help panel (MS Learn AL docs as Markdown)",
+  desc  = "Open AL Help in browser (MS Learn AL docs)",
 })
 
 vim.api.nvim_create_user_command("ALHelpTopics", function()
