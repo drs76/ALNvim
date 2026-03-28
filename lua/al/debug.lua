@@ -172,6 +172,7 @@ function M.setup_dap(root)
   end
 
   patch_dap_nil_command(dap)
+  register_al_dap_events(dap)
 
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
@@ -307,6 +308,38 @@ local function ensure_xdg_stub()
   return dir
 end
 
+-- Register listeners for the two custom AL DAP events the adapter fires.
+-- al/openUri   — adapter sends the real BC web client URL (with debug context)
+--               after publishing; we open the browser here, not in open_browser().
+-- al/deviceLogin — OAuth2 device code flow; adapter sends message + token + URI;
+--               copy the code to clipboard and open the login URL.
+-- al/launchDeviceLoginWindow — reverse request (server→client); adapter asks us
+--               to open the browser for device login. Must send a response.
+local _al_dap_events_registered = false
+local function register_al_dap_events(dap)
+  if _al_dap_events_registered then return end
+  _al_dap_events_registered = true
+
+  dap.listeners.before["event_al/openUri"]["alnvim"] = function(_, body)
+    if not (body and body.uri) then return end
+    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(body.uri) })
+    vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
+  end
+
+  dap.listeners.before["event_al/deviceLogin"]["alnvim"] = function(_, body)
+    if not body then return end
+    local token = body.token or ""
+    local uri   = body.uri   or ""
+    -- Copy device code to clipboard and open the login page.
+    vim.fn.setreg("+", token)
+    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(uri) })
+    vim.notify(
+      string.format("AL: Device login — code %s copied to clipboard\n%s\n%s",
+        token, body.message or "", uri),
+      vim.log.levels.WARN)
+  end
+end
+
 -- The AL adapter responds to configurationDone with {"command":null,...}.
 -- nvim-dap's listener dispatch does listeners.before[decoded.command] without
 -- a nil guard, so rawset(tbl, nil, {}) crashes with "table index is nil".
@@ -379,15 +412,11 @@ function M.launch(root)
   end
 
   patch_dap_nil_command(dap)
+  register_al_dap_events(dap)
 
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
-  -- Adapter registration shared by both paths.
-  -- Pass a minimal string-array env (not nil, not a dict).
-  -- nil → inherit Neovim's full env → adapter SIGABRT (NVIM/LD_* vars).
-  -- dict → luv treats as empty array → adapter gets NO env (works, but fragile).
-  -- string-array → controlled minimal env with xdg-open stub dir in PATH.
   local function register_adapter()
     dap.adapters.al = {
       type    = "executable",
@@ -395,20 +424,29 @@ function M.launch(root)
       args    = { "/startDebugging", "/projectRoot:" .. root },
       options = {
         env = make_adapter_env(),
-        -- The attach request can take >4s on slow networks; raise timeout so
-        -- nvim-dap shows the actual error instead of "adapter didn't respond".
         initialize_timeout_sec = 30,
+      },
+      -- al/launchDeviceLoginWindow is a server-initiated request asking us to
+      -- open the browser for OAuth2 device code login. Must send back a response.
+      reverse_request_handlers = {
+        ["al/launchDeviceLoginWindow"] = function(session, request)
+          local uri = ((request.arguments or {}).Uri or "")
+          if uri ~= "" then
+            vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(uri) })
+            vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
+          end
+          session:response(request, {})
+        end,
       },
     }
   end
 
-  local function open_browser()
+  -- For on-prem "attach" path only: open the BC web client after HTTP publish
+  -- so the user can start a session. Cloud uses al/openUri from the adapter instead.
+  local function open_browser_onprem()
+    if not cfg.launchBrowser then return end
     local url = conn.webclient_url(cfg)
-    if cfg.launchBrowser then
-      -- Use sh -c so the URL launches in background and doesn't block.
-      vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(url) })
-    end
-    -- Always notify so the user can open the URL manually if the browser doesn't focus.
+    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(url) })
     vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
   end
 
@@ -463,7 +501,7 @@ function M.launch(root)
         vim.notify("AL: Published — attaching debugger…", vim.log.levels.INFO)
         register_adapter()
         dap.run(attach_cfg)
-        open_browser()
+        open_browser_onprem()
       end)
     end)
     return
@@ -517,7 +555,8 @@ function M.launch(root)
 
     register_adapter()
     dap.run(launch_cfg)
-    open_browser()
+    -- Browser will be opened by the al/openUri event the adapter fires
+    -- after it finishes publishing (includes the debug-context in the URL).
   end)
 end
 
