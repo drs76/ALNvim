@@ -79,6 +79,19 @@ vim.keymap.set("n", "<leader>adl", "<cmd>ALLaunch<CR>",          vim.tbl_extend(
 vim.keymap.set("n", "<leader>ads", "<cmd>ALSnapshotStart<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Start snapshot debug session" }))
 vim.keymap.set("n", "<leader>adf", "<cmd>ALSnapshotFinish<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Finish snapshot and download" }))
 vim.keymap.set("n", "<leader>add", "<cmd>ALDebugSetup<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Configure nvim-dap for AL" }))
+-- nvim-dap runtime controls (only mapped when nvim-dap is present)
+if pcall(require, "dap") then
+  local dap = require("dap")
+  vim.keymap.set("n", "<F9>",        dap.toggle_breakpoint,                                           vim.tbl_extend("force", opts, { desc = "DAP: Toggle breakpoint" }))
+  vim.keymap.set("n", "<leader>adb", dap.toggle_breakpoint,                                           vim.tbl_extend("force", opts, { desc = "DAP: Toggle breakpoint" }))
+  vim.keymap.set("n", "<leader>adB", function() dap.set_breakpoint(vim.fn.input("Condition: ")) end,  vim.tbl_extend("force", opts, { desc = "DAP: Conditional breakpoint" }))
+  vim.keymap.set("n", "<F10>",       dap.step_over,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Step over" }))
+  vim.keymap.set("n", "<F11>",       dap.step_into,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Step into" }))
+  vim.keymap.set("n", "<F12>",       dap.step_out,                                                    vim.tbl_extend("force", opts, { desc = "DAP: Step out" }))
+  vim.keymap.set("n", "<leader>adc", dap.continue,                                                    vim.tbl_extend("force", opts, { desc = "DAP: Continue" }))
+  vim.keymap.set("n", "<leader>adq", dap.terminate,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Terminate session" }))
+  vim.keymap.set("n", "<leader>adi", function() require("dap.ui.widgets").hover() end,                vim.tbl_extend("force", opts, { desc = "DAP: Inspect variable under cursor" }))
+end
 -- Text objects
 local _to = require("al.textobj")
 vim.keymap.set({ "o", "x" }, "af", _to.around_proc,  { buffer = true, silent = true, desc = "AL: around procedure/trigger" })

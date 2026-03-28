@@ -320,6 +320,26 @@ local function register_al_dap_events(dap)
   if _al_dap_events_registered then return end
   _al_dap_events_registered = true
 
+  -- The AL adapter's setBreakpoints handler does an indexed lookup of the source
+  -- file in the project. It can throw ArgumentOutOfRangeException when:
+  --   1. The source path contains a trailing slash or mismatched separators.
+  --   2. The path isn't under projectRoot (e.g. a symbol-package stub file).
+  -- Strip trailing slashes and ensure Unix separators before the request is sent.
+  dap.listeners.before.setBreakpoints["alnvim"] = function(session, body)
+    if not (body and body.source and body.source.path) then return end
+    local p = body.source.path
+    p = p:gsub("\\", "/")          -- Windows → Unix separators
+    p = p:gsub("/+$", "")          -- strip trailing slash
+    body.source.path = p
+    -- Also normalise each breakpoint's column: the AL adapter ignores column
+    -- but some versions throw on non-nil values — send nil explicitly.
+    if type(body.breakpoints) == "table" then
+      for _, bp in ipairs(body.breakpoints) do
+        bp.column = nil
+      end
+    end
+  end
+
   dap.listeners.before["event_al/openUri"]["alnvim"] = function(_, body)
     if not (body and body.uri) then return end
     vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(body.uri) })
