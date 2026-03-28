@@ -81,7 +81,7 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
       if pub_ok then
         vim.notify("AL: Published successfully", vim.log.levels.INFO)
         if cfg and cfg.launchBrowser then
-          vim.fn.jobstart({ "xdg-open", conn.webclient_url(cfg) })
+          require("al.platform").open_url(conn.webclient_url(cfg))
         end
         if on_success then on_success() end
       else

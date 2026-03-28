@@ -485,19 +485,7 @@ local PERM_KEYWORDS = {
 }
 
 local function scan_project_objects(root)
-  -- Use find for directory traversal (reliable on CIFS/SMB where ** glob can fail)
-  local raw = vim.fn.systemlist({
-    "find", root,
-    "(", "-name", "*.al", "-o", "-name", "*.AL", ")",
-    "-type", "f",
-    "!", "-path", "*/.alpackages/*",
-  })
-  local files = (vim.v.shell_error == 0 or #raw > 0) and raw or {}
-  -- Fallback to glob if find returned nothing (e.g. not installed)
-  if #files == 0 then
-    files = vim.fn.glob(root .. "/**/*.al", false, true)
-    vim.list_extend(files, vim.fn.glob(root .. "/**/*.AL", false, true))
-  end
+  local files = require("al.platform").glob_al_files(root)
 
   local entries = {}
   local seen    = {}  -- deduplicate by "type:name"
@@ -565,10 +553,9 @@ local function scan_table_fields(root, table_name)
 
   -- Step 1: find the file that contains the table declaration
   local target_file
+  local platform = require("al.platform")
   for _, dir in ipairs(search_dirs) do
-    local files = vim.fn.systemlist({
-      "find", dir, "(", "-name", "*.al", "-o", "-name", "*.AL", ")", "-type", "f",
-    })
+    local files = platform.glob_al_files(dir)
     for _, fpath in ipairs(files) do
       local f = io.open(fpath, "r")
       if f then

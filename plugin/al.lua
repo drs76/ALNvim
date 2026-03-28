@@ -42,18 +42,17 @@ end, { desc = "Download and install the MS AL VSCode extension (no VS Code requi
 
 -- ── AL Language Server (Microsoft.Dynamics.Nav.EditorServices.Host) ──────────
 -- The binary communicates via standard LSP over stdio.
--- It must be executable; we set that here because the VSCode extension ships
--- it without the exec bit on Linux.
+-- On Linux/macOS the extension ships the binaries without the exec bit set;
+-- platform.ensure_executable fixes that. No-op on Windows.
+local platform  = require("al.platform")
 local ext_path  = require("al.ext").path
 if not ext_path then return end   -- ext.lua already notified the user
-local lsp_bin   = ext_path .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+local bin_dir   = ext_path .. "/bin/" .. platform.bin_subdir() .. "/"
+local lsp_bin   = bin_dir .. platform.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
 
--- Make both binaries executable (best-effort; errors are silent)
-for _, bin in ipairs({ lsp_bin, ext_path .. "/bin/linux/alc" }) do
-  local stat = vim.uv.fs_stat(bin)
-  if stat and bit.band(stat.mode, 73) == 0 then
-    vim.uv.fs_chmod(bin, bit.bor(stat.mode, 73))
-  end
+-- Ensure both binaries are executable (no-op on Windows)
+for _, name in ipairs({ "Microsoft.Dynamics.Nav.EditorServices.Host", "alc" }) do
+  platform.ensure_executable(bin_dir .. platform.exe(name))
 end
 
 -- vim.lsp.config/enable does not support on_new_config (nvim-lspconfig concept only),

@@ -288,10 +288,13 @@ end
 -- receives a "launch" request — VSCode never does a direct HTTP POST to
 -- /dev/apps. We compile with alc, then hand a launch config to dap.run().
 
--- Create a no-op xdg-open stub in the ALNvim cache dir.
--- Returns the stub directory path.
+-- Create a no-op xdg-open stub in the ALNvim cache dir (Linux/macOS only).
+-- On Windows the adapter is given nil env (inherit parent), and launchBrowser is
+-- patched to false, so the adapter never tries to invoke xdg-open.
+-- Returns the stub directory path (empty string on Windows — unused by adapter_env).
 local _xdg_stub_dir = nil
 local function ensure_xdg_stub()
+  if require("al.platform").is_windows then return "" end
   if _xdg_stub_dir then return _xdg_stub_dir end
   local dir  = vim.fn.stdpath("cache") .. "/alnvim"
   local stub = dir .. "/xdg-open"
@@ -342,7 +345,7 @@ local function register_al_dap_events(dap)
 
   dap.listeners.before["event_al/openUri"]["alnvim"] = function(_, body)
     if not (body and body.uri) then return end
-    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(body.uri) })
+    require("al.platform").open_url(body.uri)
     vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
   end
 
@@ -352,7 +355,7 @@ local function register_al_dap_events(dap)
     local uri   = body.uri   or ""
     -- Copy device code to clipboard and open the login page.
     vim.fn.setreg("+", token)
-    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(uri) })
+    require("al.platform").open_url(uri)
     vim.notify(
       string.format("AL: Device login — code %s copied to clipboard\n%s\n%s",
         token, body.message or "", uri),
@@ -390,23 +393,7 @@ end
 -- but then xdg-open cannot be found. A minimal string-array env gives the
 -- adapter just enough context while keeping our stub dir at the front of PATH.
 local function make_adapter_env()
-  local stub_dir = ensure_xdg_stub()
-  local sys_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-  local env = {
-    "PATH=" .. stub_dir .. ":" .. sys_path,
-    "HOME=" .. (os.getenv("HOME") or "/root"),
-    "TMPDIR=" .. (os.getenv("TMPDIR") or "/tmp"),
-    "LANG=" .. (os.getenv("LANG") or "C.UTF-8"),
-  }
-  -- Forward display / session bus vars so any GUI subprocess can start.
-  for _, k in ipairs({ "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS",
-                        "XDG_RUNTIME_DIR", "DOTNET_ROOT" }) do
-    local v = os.getenv(k)
-    if v and v ~= "" then
-      table.insert(env, k .. "=" .. v)
-    end
-  end
-  return env
+  return require("al.platform").adapter_env(ensure_xdg_stub())
 end
 
 function M.launch(root)
@@ -452,7 +439,7 @@ function M.launch(root)
         ["al/launchDeviceLoginWindow"] = function(session, request)
           local uri = ((request.arguments or {}).Uri or "")
           if uri ~= "" then
-            vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(uri) })
+            require("al.platform").open_url(uri)
             vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
           end
           session:response(request, {})
@@ -466,7 +453,7 @@ function M.launch(root)
   local function open_browser_onprem()
     if not cfg.launchBrowser then return end
     local url = conn.webclient_url(cfg)
-    vim.fn.jobstart({ "sh", "-c", "xdg-open " .. vim.fn.shellescape(url) })
+    require("al.platform").open_url(url)
     vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
   end
 

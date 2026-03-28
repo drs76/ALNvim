@@ -125,7 +125,7 @@ function M.curl_auth(cfg)
     local az = vim.trim(vim.fn.system(
       "az account get-access-token" ..
       " --resource https://api.businesscentral.dynamics.com" ..
-      " --query accessToken -o tsv 2>/dev/null"))
+      " --query accessToken -o tsv " .. require("al.platform").devnull()))
     if vim.v.shell_error == 0 and az ~= "" then
       return { "-H", "Authorization: Bearer " .. az }
     end

@@ -2,10 +2,12 @@
 -- Downloads the MS AL VSCode extension from the marketplace without requiring VS Code.
 -- Entry point: M.install()  →  :ALInstallExtension
 --
--- Requirements: curl, unzip (standard on Linux)
+-- Requirements: curl (built into Windows 10+, standard on Linux/macOS),
+--               unzip (Linux/macOS) or tar.exe (Windows 10+)
 -- Install target: ~/.vscode/extensions/ms-dynamics-smb.al-{version}/
 
 local M = {}
+local platform = require("al.platform")
 
 local PUBLISHER = "ms-dynamics-smb"
 local EXT_ID    = "al"
@@ -140,9 +142,11 @@ local function extract_vsix(tmpfile, version, log, cb)
   vim.fn.mkdir(tmpdir, "p")
   log("Extracting…  (may take a minute)")
 
-  vim.fn.jobstart({
-    "unzip", "-q", "-o", tmpfile, "-d", tmpdir,
-  }, {
+  local extract_cmd = platform.is_windows
+    and { "tar", "-xf", tmpfile, "-C", tmpdir }
+    or  { "unzip", "-q", "-o", tmpfile, "-d", tmpdir }
+
+  vim.fn.jobstart(extract_cmd, {
     stderr_buffered = true,
     on_stderr = function(_, data)
       for _, line in ipairs(data) do
@@ -156,7 +160,7 @@ local function extract_vsix(tmpfile, version, log, cb)
         -- unzip exits 1 as a non-fatal warning (e.g. one glob matched nothing).
         -- Anything >= 2 is a real error; always verify the output dir exists.
         if code >= 2 and vim.fn.isdirectory(src) == 0 then
-          log("ERROR: unzip failed (exit " .. code .. ")")
+          log("ERROR: extraction failed (exit " .. code .. ")")
           log("  The VSIX may be corrupt. Delete the cached file and retry:")
           log("  " .. tmpfile)
           vim.fn.delete(tmpdir, "rf")
@@ -178,7 +182,7 @@ local function extract_vsix(tmpfile, version, log, cb)
         local renamed = os.rename(src, target)
         if not renamed then
           log("  (cross-device — copying…)")
-          vim.fn.system({ "cp", "-r", src .. "/.", target })
+          platform.copy_dir(src, target)
         end
         vim.fn.delete(tmpdir, "rf")
 
@@ -188,16 +192,13 @@ local function extract_vsix(tmpfile, version, log, cb)
           return
         end
 
-        -- Set execute bit on the AL binaries (they ship without it).
-        local bins = {
-          target .. "/bin/linux/alc",
-          target .. "/bin/linux/altool",
-          target .. "/bin/linux/aldoc",
-          target .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host",
-        }
-        for _, bin in ipairs(bins) do
+        -- Ensure the AL binaries are executable on Linux/macOS (no-op on Windows).
+        local bin_subdir = platform.bin_subdir()
+        for _, name in ipairs({ "alc", "altool", "aldoc",
+                                 "Microsoft.Dynamics.Nav.EditorServices.Host" }) do
+          local bin = target .. "/bin/" .. bin_subdir .. "/" .. platform.exe(name)
           if vim.fn.filereadable(bin) == 1 then
-            vim.uv.fs_chmod(bin, 73)  -- 0o111 in decimal
+            platform.ensure_executable(bin)
           end
         end
 

@@ -1,7 +1,8 @@
 local M = {}
 
+local platform = require("al.platform")
 local EXT_PATH = require("al.ext").path or ""
-local ALC      = EXT_PATH .. "/bin/linux/alc"
+local ALC      = EXT_PATH .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc")
 local lsp      = require("al.lsp")
 
 -- Map VSCode cop tokens to the actual analyzer DLL paths that alc accepts.
@@ -12,12 +13,9 @@ local ANALYZER_DLLS = {
   ["${AppSourceCop}"]          = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.AppSourceCop.dll",
 }
 
--- Ensure alc is executable (the file is shipped without the exec bit set)
+-- Ensure alc is executable (no-op on Windows; sets exec bit on Linux/macOS)
 local function ensure_executable(path)
-  local stat = vim.uv.fs_stat(path)
-  if stat and bit.band(stat.mode, 73) == 0 then
-    vim.uv.fs_chmod(path, bit.bor(stat.mode, 73))
-  end
+  platform.ensure_executable(path)
 end
 
 -- Parse alc compiler output into a quickfix-compatible list.

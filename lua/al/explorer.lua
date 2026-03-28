@@ -8,8 +8,9 @@
 --   <C-s>  cycle sort mode: type → id → publisher → name
 --   <C-f>  jump to live grep across all AL files
 
-local M   = {}
-local lsp = require("al.lsp")
+local M        = {}
+local lsp      = require("al.lsp")
+local platform = require("al.platform")
 
 local CACHE = vim.fn.stdpath("cache") .. "/alnvim/symbols"
 
@@ -53,12 +54,11 @@ local function ensure_extracted(app_path)
   end
 
   vim.fn.mkdir(dir, "p")
-  vim.fn.system(string.format(
-    "unzip -q -o %s 'src/*.al' 'src/*.AL' -d %s",
-    vim.fn.shellescape(app_path), vim.fn.shellescape(dir)))
+  platform.extract_zip(app_path, dir, { "src/*.al", "src/*.AL" })
 
   -- Check whether src/ was actually created rather than relying on exit code
-  -- (unzip returns 1 as a warning when one glob matches nothing — not a failure)
+  -- (unzip returns 1 as a warning when one glob matches nothing — not a failure;
+  --  tar on Windows extracts fully so src/ will be present if the app has AL sources)
   if vim.fn.isdirectory(dir .. "/src") == 0 then
     vim.fn.writefile({ "0" }, stamp)  -- stamp to skip future retries
     return nil
