@@ -396,11 +396,30 @@ function M.launch(root)
       enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
       longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
       numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+      -- Adapter reads launch.json AND DAP request for launchBrowser; set false
+      -- in both places so it never tries to invoke xdg-open itself.
+      launchBrowser      = false,
     }
     dap.configurations.al = { attach_cfg }
 
     require("al.compile").compile(root, nil, function()
       vim.notify("AL: Compile succeeded — uploading to BC…", vim.log.levels.INFO)
+      -- Patch launch.json so the adapter sees launchBrowser=false even if it
+      -- reads the file directly (which it does for both launch and attach).
+      local bak = patch_launch_json(root)
+      if bak then
+        local restored = false
+        local function restore()
+          if not restored then
+            restored = true
+            dap.listeners.after.event_terminated["alnvim_restore_launch"] = nil
+            dap.listeners.after.event_exited["alnvim_restore_launch"]     = nil
+            restore_launch_json(root, bak)
+          end
+        end
+        dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
+        dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
+      end
       -- skip_compile=true: upload whatever .app the compile just produced.
       require("al.publish").publish(root, true, function()
         vim.notify("AL: Published — attaching debugger…", vim.log.levels.INFO)
