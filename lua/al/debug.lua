@@ -175,7 +175,8 @@ function M.setup_dap(root)
   register_al_dap_events(dap)
 
   local ext  = require("al").config.ext_path or require("al.ext").path
-  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local p    = require("al.platform")
+  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
 
   dap.adapters.al = {
     type    = "executable",
@@ -228,10 +229,19 @@ end
 
 -- ── launch.json patching ─────────────────────────────────────────────────────
 --
--- The v18 adapter reads .vscode/launch.json directly via /projectRoot: before
--- processing DAP arguments. It deserialises breakOnError strictly as bool
--- ("All" string → exception), and it tries xdg-open when launchBrowser is true.
--- We patch the file in-place before launching and restore it afterwards.
+-- The adapter reads .vscode/launch.json directly via /projectRoot: and
+-- deserialises breakOnError as a strict bool — sending the string "All" throws
+-- ArgumentException. We patch the file before launching and restore afterwards.
+-- Uses JSON parse+encode so the patch works regardless of whitespace/formatting.
+
+-- Minimal JSONC comment stripper (single-line // only; preserves URLs).
+local function strip_jsonc(text)
+  local lines = {}
+  for line in text:gmatch("[^\n]*") do
+    lines[#lines + 1] = line:gsub("([^:/])//[^\n]*$", "%1")
+  end
+  return table.concat(lines, "\n")
+end
 
 local function patch_launch_json(root)
   local path = root .. "/.vscode/launch.json"
@@ -240,30 +250,42 @@ local function patch_launch_json(root)
   local original = f:read("*a")
   f:close()
 
-  local patched = original
-  -- breakOnError / breakOnRecordWrite: "All"|"ExcludeTry"|"ExcludeTemporary" → true, "None" → false
-  for _, field in ipairs({ "breakOnError", "breakOnRecordWrite" }) do
-    local esc = field:gsub("([^%w])", "%%%1")
-    patched = patched:gsub('"' .. esc .. '"%s*:%s*"All"',             '"' .. field .. '": true')
-    patched = patched:gsub('"' .. esc .. '"%s*:%s*"ExcludeTry"',      '"' .. field .. '": true')
-    patched = patched:gsub('"' .. esc .. '"%s*:%s*"ExcludeTemporary"','"' .. field .. '": true')
-    patched = patched:gsub('"' .. esc .. '"%s*:%s*"None"',            '"' .. field .. '": false')
+  -- Parse via JSON (stripping JSONC comments first)
+  local ok, data = pcall(vim.fn.json_decode, strip_jsonc(original))
+  if not ok or type(data) ~= "table" then return nil end
+
+  local changed = false
+  for _, cfg_entry in ipairs(data.configurations or {}) do
+    if cfg_entry.type == "al" then
+      -- breakOnError / breakOnRecordWrite: string enum → bool
+      for _, field in ipairs({ "breakOnError", "breakOnRecordWrite" }) do
+        local v = cfg_entry[field]
+        if type(v) == "string" then
+          cfg_entry[field] = (v == "All" or v == "ExcludeTry" or v == "ExcludeTemporary")
+          changed = true
+        end
+      end
+      -- launchBrowser: adapter's own browser open fails; handled from Lua
+      if cfg_entry.launchBrowser == true then
+        cfg_entry.launchBrowser = false
+        changed = true
+      end
+    end
   end
-  -- launchBrowser: adapter xdg-open fails on Linux; we open the URL from Lua
-  patched = patched:gsub('"launchBrowser"%s*:%s*true', '"launchBrowser": false')
 
-  if patched == original then return nil end  -- nothing to patch
+  if not changed then return nil end
 
-  -- Write backup alongside the original
+  -- Write backup (preserves original with comments intact)
   local bak = path .. ".alnvim.bak"
   local fb = io.open(bak, "w")
   if not fb then return nil end
   fb:write(original)
   fb:close()
 
+  -- Write patched JSON (comments stripped, but backup restores the original)
   local fw = io.open(path, "w")
   if not fw then os.remove(bak) return nil end
-  fw:write(patched)
+  fw:write(vim.fn.json_encode(data))
   fw:close()
 
   return bak
@@ -422,7 +444,8 @@ function M.launch(root)
   register_al_dap_events(dap)
 
   local ext  = require("al").config.ext_path or require("al.ext").path
-  local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
+  local p    = require("al.platform")
+  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
 
   local function register_adapter()
     dap.adapters.al = {
