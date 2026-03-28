@@ -43,7 +43,7 @@ local function find()
   if #dirs == 0 then
     vim.notify(
       "ALNvim: MS AL extension not found under ~/.vscode/extensions/\n"
-      .. "Install the AL Language extension in VSCode first.",
+      .. "Run :ALInstallExtension to download it automatically.",
       vim.log.levels.ERROR)
     return nil
   end
@@ -54,5 +54,11 @@ local function find()
 end
 
 M.path = find()
+
+-- Re-scan for the newest installed extension (called after :ALInstallExtension).
+function M.reload()
+  M.path = find()
+  return M.path
+end
 
 return M

@@ -247,6 +247,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 
 | Command | Description |
 |---|---|
+| `:ALInstallExtension` | Download and install the MS AL extension from the VS Code marketplace (no VS Code needed) |
 | `:ALCompile [dir]` | Compile project with `alc` |
 | `:ALPublish [dir]` | Compile then publish `.app` to BC |
 | `:ALPublishOnly [dir]` | Publish existing `.app` to BC (skip compile) |
@@ -517,6 +518,21 @@ After the user confirms, `cops.apply()` re-sends `al/setActiveWorkspace` with th
 
 - **Telescope present**: multi-select picker (`<Tab>` to toggle, `<CR>` to apply).
 - **No Telescope**: iterative `vim.ui.select` loop showing `[x]`/`[ ]` state with an Apply and Cancel option.
+
+## AL Extension Installer (`lua/al/install.lua`)
+
+`:ALInstallExtension` downloads the latest MS AL VSCode extension from the VS Code marketplace
+without requiring VS Code to be installed. Requires `curl` and `unzip`.
+
+**Flow:**
+1. POST to the VS Code gallery `extensionquery` API to get the latest version number
+2. Download the VSIX (~683 MB) via `curl --progress-bar` with live output in a floating window
+3. `unzip extension/*` into a temp dir, then move `extension/` to `~/.vscode/extensions/ms-dynamics-smb.al-{version}/`
+4. Set exec bit (decimal 73 = `0o111`) on `alc`, `altool`, `aldoc`, `Microsoft.Dynamics.Nav.EditorServices.Host`
+5. Call `require("al.ext").reload()` to update the cached path so AL features work immediately
+
+If the target version directory already exists the download is skipped. After install, no Neovim
+restart is needed — the LSP will pick up the new path on the next `:ALCompile` or `FileType al`.
 
 ## AL Text Objects (`lua/al/textobj.lua`)
 

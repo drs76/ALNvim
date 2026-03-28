@@ -266,6 +266,10 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
 -- ── User commands ─────────────────────────────────────────────────────────────
 
+vim.api.nvim_create_user_command("ALInstallExtension", function()
+  require("al.install").install()
+end, { desc = "Download and install the MS AL VSCode extension (no VS Code required)" })
+
 vim.api.nvim_create_user_command("ALCompile", function(opts)
   require("al.compile").compile(opts.args ~= "" and opts.args or nil)
 end, {
