@@ -405,19 +405,21 @@ function M.launch(root)
   local function open_browser()
     if not cfg.launchBrowser then return end
     local url = conn.webclient_url(cfg)
-    if vim.ui.open then
-      vim.ui.open(url)
-    else
-      vim.fn.jobstart({ "xdg-open", url }, { detach = true })
+    vim.notify("AL: Opening BC web client — " .. url, vim.log.levels.INFO)
+    local _, err = vim.fn.jobstart({ "xdg-open", url }, { detach = true })
+    if err and err ~= 0 then
+      vim.notify("AL: Could not open browser (" .. tostring(err) .. ") — open manually:\n" .. url,
+        vim.log.levels.WARN)
     end
   end
 
   -- ── On-prem: compile → HTTP publish → DAP "attach" ───────────────────────
+  -- Treat any non-cloud environmentType (nil, "OnPrem", etc.) as on-prem.
+  -- Cloud is only "Sandbox" or "Production" (Azure BC).
   -- The DAP "launch" request triggers a browser-open inside the adapter that
-  -- fails on Linux (xdg-open or similar tools cannot run from the .NET subprocess
-  -- context).  For on-prem we can publish via HTTP ourselves and then attach,
-  -- which bypasses the adapter's browser-open code path entirely.
-  if not cfg.environmentType then
+  -- fails on Linux; for on-prem we publish via HTTP ourselves and use "attach".
+  local is_cloud = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
+  if not is_cloud then
     local attach_cfg = {
       type               = "al",
       request            = "attach",
