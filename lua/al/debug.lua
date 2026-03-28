@@ -363,8 +363,6 @@ function M.launch(root)
   -- dict → luv treats as empty array → adapter gets NO env (works, but fragile).
   -- string-array → controlled minimal env with xdg-open stub dir in PATH.
   local function register_adapter()
-    -- Close any stale session left by a previous crash before starting fresh.
-    pcall(function() dap.terminate() end)
     dap.adapters.al = {
       type    = "executable",
       command = host,
