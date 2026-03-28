@@ -380,15 +380,18 @@ function M.launch(root)
     local bak = patch_launch_json(root)
     if bak then
       -- Restore once the DAP session ends (terminated or exited).
+      -- nvim-dap has no .once; set the listener and self-remove on first call.
       local restored = false
       local function restore()
         if not restored then
           restored = true
+          dap.listeners.after.event_terminated["alnvim_restore_launch"] = nil
+          dap.listeners.after.event_exited["alnvim_restore_launch"]     = nil
           restore_launch_json(root, bak)
         end
       end
-      dap.listeners.once.event_terminated["alnvim_restore_launch"] = restore
-      dap.listeners.once.event_exited["alnvim_restore_launch"]     = restore
+      dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
+      dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
     end
 
     dap.run(launch_cfg)
