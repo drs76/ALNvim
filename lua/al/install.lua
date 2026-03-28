@@ -4,7 +4,7 @@
 --
 -- Requirements: curl (built into Windows 10+, standard on Linux/macOS),
 --               unzip (Linux/macOS) or tar.exe (Windows 10+)
--- Install target: ~/.vscode/extensions/ms-dynamics-smb.al-{version}/
+-- Install target: ~/.vscode-insiders/extensions/ if it exists, else ~/.vscode/extensions/
 
 local M = {}
 local platform = require("al.platform")
@@ -12,7 +12,17 @@ local platform = require("al.platform")
 local PUBLISHER = "ms-dynamics-smb"
 local EXT_ID    = "al"
 local GALLERY   = "https://marketplace.visualstudio.com/_apis/public/gallery"
-local EXT_DIR   = vim.fn.expand("~/.vscode/extensions")
+
+-- Prefer the Insiders extensions dir if it already exists (user has Insiders installed),
+-- otherwise fall back to the stable extensions dir.
+local function pick_ext_dir()
+  local home     = vim.fn.expand("~")
+  local insiders = home .. "/.vscode-insiders/extensions"
+  local stable   = home .. "/.vscode/extensions"
+  if vim.fn.isdirectory(insiders) == 1 then return insiders end
+  return stable
+end
+local EXT_DIR = pick_ext_dir()
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
