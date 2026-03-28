@@ -174,13 +174,11 @@ function M.setup_dap(root)
   local ext  = require("al").config.ext_path or require("al.ext").path
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
-  install_xdg_open_stub()
-
-  -- Register the adapter — no options.env so uv.spawn inherits Neovim's env.
   dap.adapters.al = {
     type    = "executable",
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },
+    options = { env = make_adapter_env() },
   }
 
   local base   = conn.base_url(cfg)
@@ -284,13 +282,11 @@ end
 -- receives a "launch" request — VSCode never does a direct HTTP POST to
 -- /dev/apps. We compile with alc, then hand a launch config to dap.run().
 
--- Create a no-op xdg-open stub and prepend its directory to Neovim's own PATH
--- so all child processes (including the DAP adapter and its children) inherit
--- it and find our stub before the system xdg-open.
--- Called once; subsequent calls skip the write and the PATH prepend if already done.
-local _xdg_stub_installed = false
-local function install_xdg_open_stub()
-  if _xdg_stub_installed then return end
+-- Create a no-op xdg-open stub in the ALNvim cache dir.
+-- Returns the stub directory path.
+local _xdg_stub_dir = nil
+local function ensure_xdg_stub()
+  if _xdg_stub_dir then return _xdg_stub_dir end
   local dir  = vim.fn.stdpath("cache") .. "/alnvim"
   local stub = dir .. "/xdg-open"
   vim.fn.mkdir(dir, "p")
@@ -302,12 +298,35 @@ local function install_xdg_open_stub()
       vim.uv.fs_chmod(stub, 493)   -- 0755 decimal
     end
   end
-  -- Prepend to Neovim's process PATH so the adapter inherits it.
-  local current_path = os.getenv("PATH") or ""
-  if not current_path:find(dir .. ":", 1, true) then
-    vim.fn.setenv("PATH", dir .. ":" .. current_path)
+  _xdg_stub_dir = dir
+  return dir
+end
+
+-- Build a minimal string-array environment for the DAP adapter process.
+-- uv.spawn expects env as {"KEY=value", ...} (integer-keyed array).
+-- Passing nil inherits Neovim's full env, which causes the adapter to SIGABRT
+-- (likely due to NVIM/LD_* vars). Passing a Lua dict (non-integer keys) is
+-- silently treated as an empty array by luv — adapter gets no env and works,
+-- but then xdg-open cannot be found. A minimal string-array env gives the
+-- adapter just enough context while keeping our stub dir at the front of PATH.
+local function make_adapter_env()
+  local stub_dir = ensure_xdg_stub()
+  local sys_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  local env = {
+    "PATH=" .. stub_dir .. ":" .. sys_path,
+    "HOME=" .. (os.getenv("HOME") or "/root"),
+    "TMPDIR=" .. (os.getenv("TMPDIR") or "/tmp"),
+    "LANG=" .. (os.getenv("LANG") or "C.UTF-8"),
+  }
+  -- Forward display / session bus vars so any GUI subprocess can start.
+  for _, k in ipairs({ "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS",
+                        "XDG_RUNTIME_DIR", "DOTNET_ROOT" }) do
+    local v = os.getenv(k)
+    if v and v ~= "" then
+      table.insert(env, k .. "=" .. v)
+    end
   end
-  _xdg_stub_installed = true
+  return env
 end
 
 function M.launch(root)
@@ -336,16 +355,16 @@ function M.launch(root)
   local host = ext .. "/bin/linux/Microsoft.Dynamics.Nav.EditorServices.Host"
 
   -- Adapter registration shared by both paths.
-  -- No options.env: let uv.spawn inherit Neovim's full environment so the
-  -- adapter gets our setenv-patched PATH (with the xdg-open stub dir) and
-  -- DISPLAY.  Passing a Lua dict as options.env causes luv to hand libuv an
-  -- empty string array, giving the adapter NO environment at all.
+  -- Pass a minimal string-array env (not nil, not a dict).
+  -- nil → inherit Neovim's full env → adapter SIGABRT (NVIM/LD_* vars).
+  -- dict → luv treats as empty array → adapter gets NO env (works, but fragile).
+  -- string-array → controlled minimal env with xdg-open stub dir in PATH.
   local function register_adapter()
-    install_xdg_open_stub()
     dap.adapters.al = {
       type    = "executable",
       command = host,
       args    = { "/startDebugging", "/projectRoot:" .. root },
+      options = { env = make_adapter_env() },
     }
   end
 
