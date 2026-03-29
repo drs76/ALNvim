@@ -485,7 +485,7 @@ function M.launch(root)
   -- Cloud is only "Sandbox" or "Production" (Azure BC).
   -- The DAP "launch" request triggers a browser-open inside the adapter that
   -- fails on Linux; for on-prem we publish via HTTP ourselves and use "attach".
-  local is_cloud = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
+  local is_cloud = conn.is_cloud(cfg)
   if not is_cloud then
     local attach_cfg = {
       type               = "al",

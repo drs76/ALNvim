@@ -62,7 +62,7 @@ end
 --   1. cfg.port field in launch.json  (e.g. "port": 7049)
 --   2. Port already present in cfg.server  (e.g. "server": "http://bc27:7049")
 --   3. Default: 7049  (BC NST dev service port — BCContainer and standard NST)
-local function is_cloud(cfg)
+function M.M.is_cloud(cfg)
   local cloud_type = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
   if not cloud_type then return false end
   -- If a server is explicitly set and points to a non-Microsoft host, treat as on-prem.
@@ -74,7 +74,7 @@ local function is_cloud(cfg)
 end
 
 function M.base_url(cfg)
-  if is_cloud(cfg) then
+  if M.is_cloud(cfg) then
     local tenant = cfg.primaryTenantDomain or cfg.tenant or ""
     local env    = cfg.environmentName or "sandbox"
     return string.format("https://api.businesscentral.dynamics.com/v2.0/%s/%s",
@@ -98,7 +98,7 @@ end
 -- Note: WebClient runs on the HTTP port (80/443), not the NST dev port (7049).
 -- The server field is used as-is — no port is appended here.
 function M.webclient_url(cfg)
-  if is_cloud(cfg) then
+  if M.is_cloud(cfg) then
     local tenant = M.urlencode(cfg.primaryTenantDomain or cfg.tenant or "")
     local env    = M.urlencode(cfg.environmentName or "sandbox")
     return string.format("https://businesscentral.dynamics.com/%s/%s", tenant, env)
@@ -127,7 +127,7 @@ end
 --                   3. Manual prompt (cached per session)
 function M.curl_auth(cfg)
   -- Cloud environments always use Entra ID even when the field is absent (matches VSCode behaviour)
-  local auth = cfg.authentication or (is_cloud(cfg) and "MicrosoftEntraID" or "Windows")
+  local auth = cfg.authentication or (M.is_cloud(cfg) and "MicrosoftEntraID" or "Windows")
   local key  = M.base_url(cfg) .. "|" .. auth
 
   if auth == "Windows" then
