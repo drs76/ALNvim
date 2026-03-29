@@ -187,10 +187,13 @@ local function patch_launch_json(root, is_onprem)
           changed = true
         end
       end
-      -- launchBrowser: controlled via the DAP launch config, not via the file.
-      -- launchBrowser=true in the DAP config makes the adapter wait for a BC client
-      -- rather than failing immediately ("Could not publish"). We leave the file
-      -- value as-is so the adapter reads consistent settings from both sources.
+      -- launchBrowser: the adapter reads this from launch.json, not from the DAP
+      -- launch request. Set true so it waits for a BC client rather than failing
+      -- immediately with "Could not publish the package to the server".
+      if cfg_entry.launchBrowser ~= true then
+        cfg_entry.launchBrowser = true
+        changed = true
+      end
       -- For on-prem (BCContainer): override environmentType so the adapter
       -- uses the on-prem publish path regardless of what launch.json says.
       if is_onprem and (cfg_entry.environmentType == "Sandbox"
@@ -566,6 +569,9 @@ function M.publish_only(root)
       end
       dap.listeners.after.event_terminated["alnvim_restore_pub"] = restore
       dap.listeners.after.event_exited["alnvim_restore_pub"]     = restore
+      -- Safety net: if the adapter exits without sending DAP events (e.g. code 1),
+      -- restore launch.json once the session is gone.
+      vim.defer_fn(function() if not restored and not dap.session() then restore() end end, 10000)
     end
     dap.run(launch_cfg)
   end)
@@ -695,6 +701,9 @@ function M.launch(root)
         end
         dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
         dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
+        -- Safety net: if the adapter exits without sending DAP events (e.g. code 1),
+        -- restore launch.json once the session is gone.
+        vim.defer_fn(function() if not restored and not dap.session() then restore() end end, 10000)
       end
       register_adapter()
       dap.run(launch_cfg)
