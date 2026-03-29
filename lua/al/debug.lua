@@ -504,6 +504,14 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.dependencyPublishingOption == nil then
     cfg.dependencyPublishingOption = "Ignore"
   end
+  -- The adapter uses the `port` field (not the port in the server URL) when
+  -- connecting to the BC NST dev service. If launch.json was hand-written or
+  -- created without the port field, the adapter defaults to the HTTP port (80)
+  -- and hits the BC web client instead of the dev service on 7049.
+  -- BCContainerHelper and standard NST use 7049; match connection.base_url() logic.
+  if cfg.port == nil then
+    cfg.port = 7049
+  end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
