@@ -539,14 +539,11 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- BC Management Services (port 7047) vs the dev endpoint (port 7049) based on server
   -- version detection. Forcing useMcpServerForDebugging=true caused "An internal error"
   -- on on-prem servers. Pass these through from launch.json only if the user sets them.
-  -- directory: where the adapter looks for the compiled .app file.
-  -- VSCode always sends this (as getAlParams().outFolder). Default to the project root.
-  if cfg.directory == nil and root then
-    cfg.directory = require("al.platform").native_path(root)
-  end
-  -- schemaUpdateMode: how the adapter handles schema changes during publish.
-  -- VSCode defaults to "synchronize". Absence causes nil publish body field.
-  if cfg.schemaUpdateMode == nil then cfg.schemaUpdateMode = "synchronize" end
+  -- directory: VSCode sets this to compilationOptions.outFolder from VS Code settings,
+  -- which is undefined/omitted when not configured. Do NOT default to projectRoot —
+  -- the adapter finds the .app via /projectRoot: arg when directory is absent.
+  -- schemaUpdateMode: VSCode only sends this if explicitly set in launch.json.
+  -- Do NOT default it — absence lets the adapter use its own default.
   -- startupObjectType / startupObjectId: paired defaults (Page 22 = Customer List).
   -- VSCode defaults to "Page" / 22. Missing startupObjectId causes a NullReferenceException
   -- in the adapter's on-prem WebClient URL builder (cloud uses al/openUri instead and
