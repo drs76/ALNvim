@@ -553,6 +553,10 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- dependencyPublishingOption: controls how dependent apps are published.
   -- VSCode defaults to "default". Absence may cause adapter null-ref.
   if cfg.dependencyPublishingOption == nil then cfg.dependencyPublishingOption = "default" end
+  -- projectReferenceDefinitions: list of workspace project references (computed by VSCode
+  -- from getProjectReferences()). For a single-project workspace this is []. Sending nil
+  -- (absent) instead of [] can cause NullReferenceException in the adapter's C# code.
+  if cfg.projectReferenceDefinitions == nil then cfg.projectReferenceDefinitions = {} end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
@@ -620,12 +624,10 @@ function M.publish_only(root)
     if not p.is_windows then
       launch_cfg.launchBrowser = false
     end
-    -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
-    -- Force "OnPrem" so the adapter uses on-prem routing, not cloud Entra auth.
+    -- Do NOT override environmentType (VSCode passes it through unchanged).
+    -- BCContainerHelper sets usePublicURLFromServer=true; override to false to prevent
+    -- the adapter calling an AAD-backed Azure endpoint that fails on local containers.
     if not conn.is_cloud(cfg) then
-      launch_cfg.environmentType = "OnPrem"
-      -- BCContainerHelper sets usePublicURLFromServer=true; causes adapter to call an
-      -- AAD-backed endpoint to resolve the public URL — fails on local containers.
       launch_cfg.usePublicURLFromServer = false
     end
     -- Publish-only: never break on errors (not a debug session).
@@ -736,12 +738,12 @@ function M.launch(root)
       if not p.is_windows then
         launch_cfg.launchBrowser = false
       end
-      -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
-      -- Force "OnPrem" so the adapter uses on-prem routing and auth, not cloud Entra.
-      launch_cfg.environmentType = "OnPrem"
-      -- BCContainerHelper sets usePublicURLFromServer=true; this causes the adapter to call
-      -- an AAD-backed Azure endpoint to resolve the public URL, which returns HTTP 500 on
-      -- containers with conflicting AzureActiveDirectoryClientCertificateThumbprint / Secret.
+      -- Do NOT override environmentType — VSCode passes it through unchanged from launch.json.
+      -- BCContainerHelper sets "Sandbox"; the adapter uses this to select the correct debug
+      -- registration endpoint. Overriding to "OnPrem" sends the wrong endpoint → BC 500.
+      -- BCContainerHelper sets usePublicURLFromServer=true; override to false to prevent the
+      -- adapter from calling an AAD-backed Azure endpoint to resolve the public URL — that
+      -- call returns HTTP 500 on containers with conflicting AAD cert/secret settings.
       launch_cfg.usePublicURLFromServer = false
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
