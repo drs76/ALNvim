@@ -49,8 +49,13 @@ function M.urlencode(s)
 end
 
 -- Return the BC dev API base URL derived from a launch configuration.
---   On-prem  → http[s]://<server>/<serverInstance>
+--   On-prem  → http[s]://<server>:<port>/<serverInstance>
 --   Cloud    → https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>
+--
+-- Port resolution for on-prem (dev endpoint, not Web Client):
+--   1. cfg.port field in launch.json  (e.g. "port": 7049)
+--   2. Port already present in cfg.server  (e.g. "server": "http://bc27:7049")
+--   3. Default: 7049  (BC NST dev service port — BCContainer and standard NST)
 function M.base_url(cfg)
   if cfg.environmentType == "Sandbox" or cfg.environmentType == "Production" then
     local tenant = cfg.primaryTenantDomain or cfg.tenant or ""
@@ -59,6 +64,13 @@ function M.base_url(cfg)
       M.urlencode(tenant), M.urlencode(env))
   end
   local server   = (cfg.server or "http://localhost"):gsub("/*$", "")
+  -- Append port if not already in the server URL.
+  -- BC dev endpoint (symbols, publish, debug) always uses the NST service port,
+  -- not the Web Client port. BCContainer default is 7049.
+  if not server:match(":%d+$") then
+    local port = cfg.port or 7049
+    server = server .. ":" .. tostring(port)
+  end
   local instance = cfg.serverInstance or "BC"
   return server .. "/" .. instance
 end
@@ -66,6 +78,8 @@ end
 -- Return the BC WebClient URL for a launch configuration.
 --   Cloud    → https://businesscentral.dynamics.com/<tenant>/<env>
 --   On-prem  → http[s]://<server>/<serverInstance>/WebClient/?<ObjType>=<ObjId>&tenant=<tenant>
+-- Note: WebClient runs on the HTTP port (80/443), not the NST dev port (7049).
+-- The server field is used as-is — no port is appended here.
 function M.webclient_url(cfg)
   if cfg.environmentType == "Sandbox" or cfg.environmentType == "Production" then
     local tenant = M.urlencode(cfg.primaryTenantDomain or cfg.tenant or "")

@@ -369,7 +369,14 @@ Explicit dependencies are appended after these, with duplicates skipped.
 
 ## BC dev API endpoints
 
-All three feature modules hit the BC dev endpoint. On-prem base: `http[s]://<server>/<serverInstance>`. Cloud base: `https://api.businesscentral.dynamics.com/v2.0/<tenant>/<env>`.
+All three feature modules hit the BC dev endpoint. On-prem base: `http[s]://<server>:<port>/<serverInstance>`. Cloud base: `https://api.businesscentral.dynamics.com/v2.0/<tenant>/<env>`.
+
+**On-prem port resolution** (`connection.base_url`): the dev endpoint (symbols, publish, debug) uses the BC NST service port, not the Web Client HTTP port. Port is resolved in this order:
+1. `port` field in `launch.json` (e.g. `"port": 7049`)
+2. Port already present in `server` field (e.g. `"server": "http://bc27:7049"`)
+3. Default: **7049** (BCContainer and standard BC NST installation)
+
+The `webclient_url` function uses the `server` field as-is (no port appended) since the Web Client runs on port 80/443.
 
 | Feature | Method | Path |
 |---|---|---|
