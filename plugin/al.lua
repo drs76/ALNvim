@@ -8,32 +8,32 @@ if not vim.g._al_user_colorscheme then
   vim.g._al_user_colorscheme = vim.g.colors_name or "default"
 end
 
--- Global WinEnter: apply bc_dark when focusing an AL window; restore the user's scheme
--- when focusing a normal (non-AL) file buffer.  Special buffers — neo-tree, quickfix,
--- help, terminal, etc. (buftype ~= "") — are intentionally ignored so the theme does
--- not flash when toggling side panels while editing AL code.
-vim.api.nvim_create_autocmd("WinEnter", {
-  group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true }),
-  callback = function()
-    local buf = vim.api.nvim_get_current_buf()
-    local ft  = vim.bo[buf].filetype
-    local bt  = vim.bo[buf].buftype
-    if ft == "al" then
-      if vim.g.colors_name ~= "bc_dark" then
-        vim.cmd("colorscheme bc_dark")
-      end
-    elseif bt == "" and ft ~= "" then
-      -- Real file buffer that is not AL: restore user theme.
-      if vim.g.colors_name == "bc_dark" then
-        local restore = vim.g._al_user_colorscheme or "default"
-        if restore ~= "bc_dark" then
-          vim.cmd("colorscheme " .. restore)
-        end
+-- Shared colorscheme-switch logic used by both WinEnter and BufWinEnter.
+-- WinEnter handles switching between already-loaded windows.
+-- BufWinEnter fires after FileType is set, catching the race where WinEnter fires
+-- before the filetype is known (e.g. opening a file from neo-tree).
+local function al_colorscheme_check()
+  local buf = vim.api.nvim_get_current_buf()
+  local ft  = vim.bo[buf].filetype
+  local bt  = vim.bo[buf].buftype
+  if ft == "al" then
+    if vim.g.colors_name ~= "bc_dark" then
+      vim.cmd("colorscheme bc_dark")
+    end
+  elseif bt == "" and ft ~= "" then
+    if vim.g.colors_name == "bc_dark" then
+      local restore = vim.g._al_user_colorscheme or "default"
+      if restore ~= "bc_dark" then
+        vim.cmd("colorscheme " .. restore)
       end
     end
-    -- bt ~= "": special buffer — keep whatever scheme is current.
-  end,
-})
+  end
+  -- bt ~= "": special buffer (neo-tree, quickfix, etc.) — keep current scheme.
+end
+
+local _cs_group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true })
+vim.api.nvim_create_autocmd("WinEnter",    { group = _cs_group, callback = al_colorscheme_check })
+vim.api.nvim_create_autocmd("BufWinEnter", { group = _cs_group, callback = al_colorscheme_check })
 
 -- ── ALInstallExtension — always available, even before extension is installed ─
 vim.api.nvim_create_user_command("ALInstallExtension", function()
