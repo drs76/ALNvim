@@ -300,10 +300,10 @@ local function register_al_dap_events(dap)
   end
 
   -- Fired by the adapter after a successful publish on all environment types.
-  -- For publish-only mode a one-shot listener overrides this; here we just
-  -- notify so the user knows the deploy went through.
+  -- For publish-only mode a one-shot listener ("alnvim_publish_only") handles
+  -- this instead and shows the success message; here we just update the status.
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim"] = function()
-    vim.notify("AL: App published to BC successfully", vim.log.levels.INFO)
+    require("al.status").set_publish_result(true)
   end
 
   dap.listeners.before["event_al/deviceLogin"]["alnvim"] = function(_, body)
@@ -487,9 +487,12 @@ function M.publish_only(root)
     },
   }
 
+  -- noDebug=true tells the adapter to publish only — skip the debug session setup
+  -- that would otherwise fail with "Could not publish" when no BC client is running.
   local launch_cfg = is_onprem and {
     type               = "al",
     request            = "launch",
+    noDebug            = true,
     name               = "AL: Publish (on-prem)",
     server             = cfg.server,
     serverInstance     = cfg.serverInstance,
@@ -509,6 +512,7 @@ function M.publish_only(root)
   } or {
     type                = "al",
     request             = "launch",
+    noDebug             = true,
     name                = "AL: Publish (cloud)",
     schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
     environmentType     = cfg.environmentType,
@@ -524,12 +528,11 @@ function M.publish_only(root)
     launchBrowser       = false,
   }
 
-  -- Disconnect as soon as publish is confirmed (al/refreshExplorerObjects).
-  -- Override the persistent handler just for this session.
+  -- Show success as soon as publish is confirmed (al/refreshExplorerObjects).
+  -- One-shot: remove itself so subsequent ALLaunch sessions use the persistent handler.
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
     dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
     vim.notify("AL: Published successfully", vim.log.levels.INFO)
-    vim.defer_fn(function() pcall(dap.disconnect) end, 200)
   end
 
   require("al.compile").compile(root, nil, function()
