@@ -47,6 +47,9 @@ local function save_creds_to_lsp(cfg, user, pass, cb)
     if err then
       vim.notify("AL: Warning — could not save credentials to LSP: " .. tostring(err.message or err),
         vim.log.levels.WARN)
+    else
+      vim.notify("AL: Credentials saved to LSP credential store (user: " .. (user or "") .. ")",
+        vim.log.levels.INFO)
     end
     cb()
   end, bufnr)
@@ -572,7 +575,8 @@ function M.publish_only(root)
     dap.adapters.al = {
       type    = "executable",
       command = host,
-      args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
+      args    = { "/startDebugging", "/logLevel:Verbose",
+                  "/projectRoot:" .. require("al.platform").native_path(root) },
       options = {
         env      = make_adapter_env(),
         cwd      = root,   -- adapter must run from project root to find the .app
@@ -643,7 +647,9 @@ function M.publish_only(root)
         return
       end
       vim.notify("AL: Publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …", vim.log.levels.INFO)
-      save_creds_to_lsp(cfg, user, pass, function()
+      -- Pass launch_cfg (resolved config) so the LSP stores credentials under the
+      -- same key the adapter will look up (environmentType=OnPrem, etc.).
+      save_creds_to_lsp(launch_cfg, user, pass, function()
         dap.run(launch_cfg)
       end)
     end)
@@ -682,7 +688,8 @@ function M.launch(root)
       dap.adapters.al = {
         type    = "executable",
         command = host,
-        args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
+        args    = { "/startDebugging", "/logLevel:Verbose",
+                    "/projectRoot:" .. require("al.platform").native_path(root) },
         options = {
           env      = make_adapter_env(),
           cwd      = root,   -- adapter must run from project root to find the .app
@@ -753,8 +760,9 @@ function M.launch(root)
           "AL: Compile succeeded — publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …",
           vim.log.levels.INFO)
         -- Save credentials to LSP store before starting the adapter.
-        -- The adapter reads credentials from there, not from the DAP launch request.
-        save_creds_to_lsp(cfg, user, pass, function()
+        -- Pass launch_cfg (resolved config) so the LSP stores under the same key
+        -- the adapter will look up (environmentType=OnPrem instead of Sandbox, etc.).
+        save_creds_to_lsp(launch_cfg, user, pass, function()
           register_adapter()
           dap.run(launch_cfg)
         end)
