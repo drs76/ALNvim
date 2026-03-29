@@ -52,12 +52,29 @@ end
 --   On-prem  → http[s]://<server>:<port>/<serverInstance>
 --   Cloud    → https://api.businesscentral.dynamics.com/v2.0/<tenant>/<environment>
 --
+-- Cloud vs on-prem detection:
+--   A non-empty cfg.server that does not contain a Microsoft cloud domain always
+--   means on-prem — even when environmentType is "Sandbox" or "Production".
+--   This allows BCContainer launch.json to keep environmentType without breaking
+--   VSCode compatibility (VSCode reads environmentType; ALNvim looks at server first).
+--
 -- Port resolution for on-prem (dev endpoint, not Web Client):
 --   1. cfg.port field in launch.json  (e.g. "port": 7049)
 --   2. Port already present in cfg.server  (e.g. "server": "http://bc27:7049")
 --   3. Default: 7049  (BC NST dev service port — BCContainer and standard NST)
+local function is_cloud(cfg)
+  local cloud_type = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
+  if not cloud_type then return false end
+  -- If a server is explicitly set and points to a non-Microsoft host, treat as on-prem.
+  local srv = cfg.server or ""
+  if srv ~= "" and not srv:match("microsoft%.com") and not srv:match("dynamics%.com") then
+    return false
+  end
+  return true
+end
+
 function M.base_url(cfg)
-  if cfg.environmentType == "Sandbox" or cfg.environmentType == "Production" then
+  if is_cloud(cfg) then
     local tenant = cfg.primaryTenantDomain or cfg.tenant or ""
     local env    = cfg.environmentName or "sandbox"
     return string.format("https://api.businesscentral.dynamics.com/v2.0/%s/%s",
@@ -81,7 +98,7 @@ end
 -- Note: WebClient runs on the HTTP port (80/443), not the NST dev port (7049).
 -- The server field is used as-is — no port is appended here.
 function M.webclient_url(cfg)
-  if cfg.environmentType == "Sandbox" or cfg.environmentType == "Production" then
+  if is_cloud(cfg) then
     local tenant = M.urlencode(cfg.primaryTenantDomain or cfg.tenant or "")
     local env    = M.urlencode(cfg.environmentName or "sandbox")
     return string.format("https://businesscentral.dynamics.com/%s/%s", tenant, env)
@@ -110,8 +127,7 @@ end
 --                   3. Manual prompt (cached per session)
 function M.curl_auth(cfg)
   -- Cloud environments always use Entra ID even when the field is absent (matches VSCode behaviour)
-  local is_cloud = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
-  local auth = cfg.authentication or (is_cloud and "MicrosoftEntraID" or "Windows")
+  local auth = cfg.authentication or (is_cloud(cfg) and "MicrosoftEntraID" or "Windows")
   local key  = M.base_url(cfg) .. "|" .. auth
 
   if auth == "Windows" then

@@ -371,6 +371,8 @@ Explicit dependencies are appended after these, with duplicates skipped.
 
 All three feature modules hit the BC dev endpoint. On-prem base: `http[s]://<server>:<port>/<serverInstance>`. Cloud base: `https://api.businesscentral.dynamics.com/v2.0/<tenant>/<env>`.
 
+**Cloud vs on-prem detection** (`connection.is_cloud`): a non-empty `server` field that does not contain `microsoft.com` or `dynamics.com` always means on-prem — even when `environmentType` is `"Sandbox"` or `"Production"`. This allows BCContainer launch.json to keep `environmentType` for VSCode compatibility without ALNvim routing to the cloud API.
+
 **On-prem port resolution** (`connection.base_url`): the dev endpoint (symbols, publish, debug) uses the BC NST service port, not the Web Client HTTP port. Port is resolved in this order:
 1. `port` field in `launch.json` (e.g. `"port": 7049`)
 2. Port already present in `server` field (e.g. `"server": "http://bc27:7049"`)
