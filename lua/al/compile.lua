@@ -210,15 +210,22 @@ function M.compile(project_dir, extra_args, on_success)
   local buf, _win = open_build_win("AL Build — " .. proj_name)
   buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
 
+  -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
+  local function strip_cr(lines)
+    return vim.tbl_map(function(l) return l:gsub("\r", "") end, lines)
+  end
+
   local output = {}
   vim.fn.jobstart(cmd, {
     on_stdout = function(_, data)
-      vim.list_extend(output, data)
-      vim.schedule(function() buf_append(buf, data) end)
+      local clean = strip_cr(data)
+      vim.list_extend(output, clean)
+      vim.schedule(function() buf_append(buf, clean) end)
     end,
     on_stderr = function(_, data)
-      vim.list_extend(output, data)
-      vim.schedule(function() buf_append(buf, data) end)
+      local clean = strip_cr(data)
+      vim.list_extend(output, clean)
+      vim.schedule(function() buf_append(buf, clean) end)
     end,
     on_exit = function(_, code)
       finish(buf, parse_output(output), code, on_success)
