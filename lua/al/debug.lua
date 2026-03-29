@@ -511,38 +511,28 @@ end
 -- @param root       project root path (native separators on Windows)
 -- @param boe        breakOnError boolean (already converted from string)
 -- @param borw       breakOnRecordWrite boolean (already converted from string)
-local function apply_vscode_defaults(cfg, root, boe, borw)
-  cfg.breakOnError               = boe
-  cfg.breakOnRecordWrite         = borw
-  -- VSCode computes these as ValueAsNotBoolean(breakOnError/breakOnRecordWrite).
-  -- The 18.x adapter appears to require them; their absence may trigger "An internal error".
-  cfg.breakOnErrorBehaviour      = not boe
+-- @param root unused (kept for call-site compatibility)
+local function apply_vscode_defaults(cfg, _root, boe, borw)
+  -- Boolean conversions — C# deserialiser rejects string enum values ("All", "None").
+  cfg.breakOnError                = boe
+  cfg.breakOnRecordWrite          = borw
+  -- VSCode always computes and sends these as ValueAsNotBoolean(...).
+  cfg.breakOnErrorBehaviour       = not boe
   cfg.breakOnRecordWriteBehaviour = not borw
-  if cfg.schemaUpdateMode          == nil then cfg.schemaUpdateMode          = "synchronize" end
-  if cfg.startupObjectType         == nil then cfg.startupObjectType         = "Page" end
-  if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
-  -- directory: where the adapter looks for the compiled .app.
-  -- VSCode sets this to the project output folder; default to native project root.
-  if cfg.directory == nil then
-    cfg.directory = require("al.platform").native_path(root)
-  end
-  -- Tell the adapter not to re-publish dependencies; the BC server already has the
-  -- Microsoft base apps installed. Without this the adapter attempts to publish every
-  -- package in .alpackages and fails with "An internal error" if any are missing.
-  if cfg.dependencyPublishingOption == nil then
-    cfg.dependencyPublishingOption = "Ignore"
-  end
-  -- Ensure the port field is set so the adapter knows which port to use.
-  -- Do NOT embed port into the server URL — VSCode passes server as-is and port separately.
-  -- Embedding causes a double-port URL (e.g. http://bc27:7049:7049/BC) if the adapter
-  -- constructs the URL as server + ":" + port + "/" + instance.
+  -- VSCode always sends these three; adapter may require them to know session type.
+  cfg.publishOnly = cfg.publishOnly or false
+  cfg.isRad       = cfg.isRad       or false
+  cfg.justDebug   = cfg.justDebug   or false
+  -- Port: VSCode sends r.port || DefaultDevEndpointPort (7049).
   if cfg.port == nil then cfg.port = 7049 end
-  -- AL 18.0+ adapter uses port 7047 (BC Management Services) for deployment by default.
-  -- VSCode always sends useMcpServerForDebugging=true and mcpServerPort=7047. Without
-  -- these fields the adapter C# model defaults to false and uses the old deploy path
-  -- which fails in the 18.x adapter with "An internal error has occurred".
+  -- validateServerCertificate: VSCode sends r.validateServerCertificate ?? true.
+  if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
+  -- AL 18.0 extension sends useMcpServerForDebugging and mcpServerPort by default.
   if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = true end
-  if cfg.mcpServerPort           == nil then cfg.mcpServerPort            = 7047 end
+  if cfg.mcpServerPort            == nil then cfg.mcpServerPort            = 7047 end
+  -- NOTE: directory, schemaUpdateMode, startupObjectType, dependencyPublishingOption
+  -- are intentionally NOT defaulted here — VSCode omits them when not in launch.json
+  -- and the adapter uses its own defaults. Sending unexpected values caused failures.
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
@@ -595,15 +585,13 @@ function M.publish_only(root)
       },
     }
 
-    -- Pass through ALL fields from the selected launch.json config unchanged —
-    -- this is exactly what VSCode does. Only override what we must:
-    --   • breakOnError/breakOnRecordWrite → boolean (C# deserialiser rejects strings)
-    --   • userName/password → injected for UserPassword auth
+    -- Pass through ALL fields from launch.json unchanged (deepcopy), then apply
+    -- only the transforms VSCode applies. Do NOT inject userName/password here —
+    -- VSCode does not include them in the DAP launch request; the adapter reads
+    -- credentials from the LSP credential store (populated by save_creds_to_lsp).
     local launch_cfg = vim.deepcopy(cfg)
     launch_cfg.type    = "al"
     launch_cfg.request = "launch"
-    if user then launch_cfg.userName = user end
-    if pass then launch_cfg.password = pass end
     -- On Linux/macOS: adapter's launchBrowser calls xdg-open (our no-op stub); open
     -- from Lua instead via the refreshExplorerObjects event listener below.
     -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
@@ -708,12 +696,12 @@ function M.launch(root)
     -- ── On-prem ───────────────────────────────────────────────────────────────
     local is_cloud = conn.is_cloud(cfg)
     if not is_cloud then
-      -- Pass through ALL fields; apply VSCode-computed defaults on top.
+      -- Deepcopy launch.json fields, then apply only VSCode's transforms.
+      -- userName/password are NOT injected — VSCode doesn't include them in the DAP
+      -- launch request; credentials are passed via save_creds_to_lsp instead.
       local launch_cfg = vim.deepcopy(cfg)
       launch_cfg.type    = "al"
       launch_cfg.request = "launch"
-      if user then launch_cfg.userName = user end
-      if pass then launch_cfg.password = pass end
       -- On Linux/macOS: adapter calls xdg-open (no-op stub); open from Lua instead.
       -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
       if not p.is_windows then
