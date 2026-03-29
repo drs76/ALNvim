@@ -602,6 +602,9 @@ function M.publish_only(root)
     -- Force "OnPrem" so the adapter uses on-prem routing, not cloud Entra auth.
     if not conn.is_cloud(cfg) then
       launch_cfg.environmentType = "OnPrem"
+      -- BCContainerHelper sets usePublicURLFromServer=true; causes adapter to call an
+      -- AAD-backed endpoint to resolve the public URL — fails on local containers.
+      launch_cfg.usePublicURLFromServer = false
     end
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
@@ -710,6 +713,10 @@ function M.launch(root)
       -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
       -- Force "OnPrem" so the adapter uses on-prem routing and auth, not cloud Entra.
       launch_cfg.environmentType = "OnPrem"
+      -- BCContainerHelper sets usePublicURLFromServer=true; this causes the adapter to call
+      -- an AAD-backed Azure endpoint to resolve the public URL, which returns HTTP 500 on
+      -- containers with conflicting AzureActiveDirectoryClientCertificateThumbprint / Secret.
+      launch_cfg.usePublicURLFromServer = false
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
