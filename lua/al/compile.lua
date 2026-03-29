@@ -50,52 +50,49 @@ local function parse_output(lines)
   return qf
 end
 
--- Open a floating window for build output. Returns (buf, win).
+-- Open a left vertical split for build output. Returns (buf, win).
+-- The right-hand window (where the file was) is used for <CR> jump-to-error.
 local function open_build_win(title)
+  -- Remember the current window — it becomes the right (file) pane after the split.
+  local right_win = vim.api.nvim_get_current_win()
+
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
 
-  local width  = math.max(80, math.floor(vim.o.columns * 0.8))
-  local height = math.max(10, math.floor(vim.o.lines   * 0.6))
-  local row    = math.floor((vim.o.lines   - height) / 2)
-  local col    = math.floor((vim.o.columns - width)  / 2)
+  -- Open a fixed-width left split and put the build buffer in it.
+  local split_width = math.max(60, math.floor(vim.o.columns * 0.40))
+  vim.cmd("topleft vsplit")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.api.nvim_win_set_width(win, split_width)
 
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative  = "editor",
-    width     = width,
-    height    = height,
-    row       = row,
-    col       = col,
-    style     = "minimal",
-    border    = "rounded",
-    title     = " " .. title .. " ",
-    title_pos = "center",
-  })
+  vim.wo[win].wrap        = false
+  vim.wo[win].cursorline  = true
+  vim.wo[win].number      = false
+  vim.wo[win].signcolumn  = "no"
+  vim.wo[win].winfixwidth = true
+  vim.wo[win].winbar      = "  " .. title .. "  (q to close, <CR> to open error)"
 
-  vim.wo[win].wrap       = false
-  vim.wo[win].cursorline = true
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
 
-  -- <CR> on a diagnostic line: open file behind the float, keep float open
+  -- <CR> on a diagnostic line: open file in the right pane, keep results visible.
   vim.keymap.set("n", "<CR>", function()
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
-    -- Find the first non-floating window to open the file in
-    local target
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if vim.api.nvim_win_get_config(w).relative == "" then
-        target = w
-        break
+    local target = vim.api.nvim_win_is_valid(right_win) and right_win or (function()
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then return w end
       end
-    end
+    end)()
     if not target then return end
     vim.api.nvim_win_call(target, function()
       vim.cmd("edit " .. vim.fn.fnameescape(file))
       pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
       vim.cmd("normal! zz")
     end)
+    vim.api.nvim_set_current_win(target)
   end, { buffer = buf, nowait = true, silent = true })
 
   return buf, win
