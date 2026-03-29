@@ -457,6 +457,12 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.directory == nil then
     cfg.directory = require("al.platform").native_path(root)
   end
+  -- Tell the adapter not to re-publish dependencies; the BC server already has the
+  -- Microsoft base apps installed. Without this the adapter attempts to publish every
+  -- package in .alpackages and fails with "An internal error" if any are missing.
+  if cfg.dependencyPublishingOption == nil then
+    cfg.dependencyPublishingOption = "Ignore"
+  end
   -- traceDap=true makes the adapter emit verbose output events — useful for diagnosing
   -- publish failures. Leave false in production once things are stable.
   if cfg.traceDap == nil then cfg.traceDap = true end
