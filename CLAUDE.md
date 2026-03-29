@@ -15,7 +15,7 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/ext.lua` | Auto-detects the newest MS AL VSCode extension directory (cached at startup) |
 | `lua/al/lsp.lua` | Helpers for finding project root and reading `app.json` |
 | `lua/al/connection.lua` | Shared BC connection utils: parse launch.json, build URLs, curl auth flags |
-| `lua/al/compile.lua` | Async `alc` compiler integration — floating output window + quickfix |
+| `lua/al/compile.lua` | Async `alc` compiler integration — vertical split output panel + quickfix |
 | `lua/al/symbols.lua` | Download `.app` symbol packages from BC dev endpoint |
 | `lua/al/publish.lua` | Compile then POST `.app` to BC dev endpoint |
 | `lua/al/debug.lua` | Snapshot debugging (BC API) + nvim-dap adapter config |
@@ -221,7 +221,17 @@ The `_al_completion_patched` guard prevents double-wrapping when `LspAttach` fir
 
 `:ALCompile [dir]` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` asynchronously. The project root is the nearest directory containing `app.json`. Extra flags are passed via `config.alc_extra_args`.
 
-**Output window:** a centered floating window opens immediately showing the full alc command and streaming all raw compiler output live. On completion a summary line is appended. Errors are highlighted red (`DiagnosticError`), warnings yellow (`DiagnosticWarn`), success green (`DiagnosticOk`). Press `q` or `<Esc>` to close.
+**Output panel:** a vertical split (~40% wide) opens on the configured side showing the full alc command and streaming all raw compiler output live. The editor file occupies the other pane. On completion a summary line is appended. Errors are highlighted red (`DiagnosticError`), warnings yellow (`DiagnosticWarn`), success green (`DiagnosticOk`).
+
+- **`<CR>`** on a diagnostic line — opens the file at the exact line/column in the opposite pane and moves focus there for immediate editing. The results panel stays open so you can step through multiple errors.
+- **`q` / `<Esc>`** — close the results panel.
+
+**Side:** controlled by `compile_side` in `setup()` — `"left"` (default) or `"right"`:
+```lua
+require("al").setup({
+  compile_side = "right",  -- results on right, file on left
+})
+```
 
 **Quickfix list** is also populated with parsed errors/warnings for jump-to-error via `<leader>aq`.
 
