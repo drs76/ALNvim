@@ -331,6 +331,17 @@ local function register_al_dap_events(dap)
   if _al_dap_events_registered then return end
   _al_dap_events_registered = true
 
+  -- Spoof VS Code's initialize handshake fields.
+  -- The AL adapter may switch code paths based on clientID/adapterID — VS Code always
+  -- sends adapterID="al", clientID="vscode", clientName="Visual Studio Code - Insiders".
+  -- nvim-dap sends adapterID="nvim-dap", clientID="neovim" which the adapter may not
+  -- recognise, potentially disabling or changing debug session registration.
+  dap.listeners.before.initialize["alnvim_vscode_compat"] = function(_, body)
+    body.adapterID  = "al"
+    body.clientID   = "vscode"
+    body.clientName = "Visual Studio Code - Insiders"
+  end
+
   -- Show all adapter output events in the floating window.
   dap.listeners.before["event_output"]["alnvim_output"] = function(_, body)
     if not (body and body.output) then return end
@@ -618,6 +629,10 @@ function M.publish_only(root)
     end
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
+    if not conn.is_cloud(cfg) and user and user ~= "" then
+      launch_cfg.userName = user
+      launch_cfg.password = pass
+    end
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -733,6 +748,13 @@ function M.launch(root)
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
+      -- Belt+suspenders: include credentials directly in the launch request so the
+      -- adapter has them available for debug session registration, even if the WCM
+      -- lookup by environmentType key produces a miss on first run.
+      if user and user ~= "" then
+        launch_cfg.userName = user
+        launch_cfg.password = pass
+      end
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
