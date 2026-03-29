@@ -351,9 +351,15 @@ This supports multi-project workspaces (e.g. App + Test app in one workspace fol
 - `Microsoft / Base Application` — version from `app.application` (**contains Customer, Vendor, etc.**)
 - `Microsoft / Application` — version from `app.application` (country/localization layer on top of Base Application)
 
-**Full BC 22+ chain:** `System` → `System Application` → `Business Foundation` → `Base Application` → `Application`. Each package depends on the one below it. All must be present or the AL server cannot resolve types.
+**Implicit base packages** (always added unless already in `app.json` dependencies):
+- `Microsoft / System` — version from `app.platform`
+- `Microsoft / System Application` — version from `app.application`
+- `Microsoft / Base Application` — version from `app.application` (contains Customer, Vendor, etc.)
+- `Microsoft / Application` — version from `app.application` (country/localization layer)
 
-Explicit dependencies are appended after these, with duplicates skipped.
+**NOT implicitly added:** `Business Foundation` (BC 22+) — only downloaded when listed in `app.json` `dependencies`. Older BC versions don't ship it and requesting it causes a 404 download error.
+
+Explicit dependencies are appended after the implicit packages, with duplicates skipped.
 
 ## AL project layout expected
 

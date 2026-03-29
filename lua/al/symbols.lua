@@ -45,24 +45,24 @@ function M.download(root)
   end
 
 
-  -- Always include the implicit Microsoft base packages, unless already listed
-  -- as an explicit dependency. "System" uses the platform version; the rest
-  -- use the application version.
-  -- BC 21+ splits the old monolithic Application into:
-  --   System Application → System Application
-  --   Business Foundation → new in BC 22, required by Application/Base Application
-  --   Application (or Base Application on some tenants) → contains Customer, Vendor, etc.
+  -- Build the download list from explicit dependencies plus a small set of
+  -- implicit Microsoft base packages that are always required for type resolution.
+  --
+  -- Implicit packages (added when not already in app.json dependencies):
+  --   System              — always needed (defines Label, Text, Integer, etc.)
+  --   System Application  — always needed
+  --   Base Application    — always needed (Customer, Vendor, and core tables)
+  --   Application         — always needed (country/localization layer)
+  --
+  -- NOT implicitly added:
+  --   Business Foundation — BC 22+ only; added only when listed in app.json dependencies.
+  --     Older BC versions (< 22) don't ship it and its presence causes a 404 download error.
   local deps = {}
-  -- Full BC 22+ implicit dependency chain (bottom to top):
-  --   System → System Application → Business Foundation → Base Application → Application
-  -- "Application" is the country/localization layer; "Base Application" is where
-  -- Customer, Vendor, and other core tables are defined.
   local base_pkgs = {
-    { publisher = "Microsoft", name = "System",              version = app.platform    or "0.0.0.0" },
-    { publisher = "Microsoft", name = "System Application",  version = app.application or "0.0.0.0" },
-    { publisher = "Microsoft", name = "Business Foundation", version = app.application or "0.0.0.0" },
-    { publisher = "Microsoft", name = "Base Application",    version = app.application or "0.0.0.0" },
-    { publisher = "Microsoft", name = "Application",         version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "System",             version = app.platform    or "0.0.0.0" },
+    { publisher = "Microsoft", name = "System Application", version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "Base Application",   version = app.application or "0.0.0.0" },
+    { publisher = "Microsoft", name = "Application",        version = app.application or "0.0.0.0" },
   }
   for _, bp in ipairs(base_pkgs) do
     local found = false
