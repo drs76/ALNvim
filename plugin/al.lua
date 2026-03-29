@@ -8,10 +8,13 @@ if not vim.g._al_user_colorscheme then
   vim.g._al_user_colorscheme = vim.g.colors_name or "default"
 end
 
--- Shared colorscheme-switch logic used by both WinEnter and BufWinEnter.
--- WinEnter handles switching between already-loaded windows.
--- BufWinEnter fires after FileType is set, catching the race where WinEnter fires
--- before the filetype is known (e.g. opening a file from neo-tree).
+-- WinEnter: apply bc_dark when focusing an AL window; restore user scheme for real
+-- non-AL file windows.  Uses vim.schedule so the check runs after FileType has fired —
+-- WinEnter can precede FileType when a new buffer is loaded (e.g. opening from neo-tree),
+-- and ft="" at that point would cause the wrong branch to run.
+-- BufWinEnter is intentionally NOT used: it fires when neo-tree swaps the editor's
+-- buffer during preview/navigation, before focus moves there, causing the scheme to
+-- change while the user is still in the tree ("jumping").
 local function al_colorscheme_check()
   local buf = vim.api.nvim_get_current_buf()
   local ft  = vim.bo[buf].filetype
@@ -31,9 +34,10 @@ local function al_colorscheme_check()
   -- bt ~= "": special buffer (neo-tree, quickfix, etc.) — keep current scheme.
 end
 
-local _cs_group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true })
-vim.api.nvim_create_autocmd("WinEnter",    { group = _cs_group, callback = al_colorscheme_check })
-vim.api.nvim_create_autocmd("BufWinEnter", { group = _cs_group, callback = al_colorscheme_check })
+vim.api.nvim_create_autocmd("WinEnter", {
+  group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true }),
+  callback = function() vim.schedule(al_colorscheme_check) end,
+})
 
 -- ── ALInstallExtension — always available, even before extension is installed ─
 vim.api.nvim_create_user_command("ALInstallExtension", function()
