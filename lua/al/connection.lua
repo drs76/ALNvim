@@ -103,6 +103,13 @@ end
 --   2. Port already present in cfg.server  (e.g. "server": "http://bc27:7049")
 --   3. Default: 7049  (BC NST dev service port — BCContainer and standard NST)
 function M.is_cloud(cfg)
+  -- UserPassword / NavUserPassword is never used on BC cloud — cloud always requires
+  -- MicrosoftEntraID. Seeing either auth type is an absolute on-prem indicator and
+  -- takes precedence over environmentType (BCContainerHelper sets environmentType=Sandbox
+  -- even for local containers).
+  local auth = cfg.authentication or ""
+  if auth == "UserPassword" or auth == "NavUserPassword" then return false end
+
   local cloud_type = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
   if not cloud_type then return false end
   -- If a server is explicitly set and points to a non-Microsoft host, treat as on-prem.

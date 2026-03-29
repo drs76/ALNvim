@@ -485,10 +485,11 @@ end
 -- @param boe        breakOnError boolean (already converted from string)
 -- @param borw       breakOnRecordWrite boolean (already converted from string)
 local function apply_vscode_defaults(cfg, root, boe, borw)
-  cfg.breakOnError               = boe
-  cfg.breakOnErrorBehaviour      = not boe   -- VSCode: ValueAsNotBoolean(breakOnError)
-  cfg.breakOnRecordWrite         = borw
-  cfg.breakOnRecordWriteBehaviour = not borw  -- VSCode: ValueAsNotBoolean(breakOnRecordWrite)
+  cfg.breakOnError       = boe
+  cfg.breakOnRecordWrite = borw
+  -- breakOnErrorBehaviour / breakOnRecordWriteBehaviour are VSCode-internal computed
+  -- fields (ValueAsNotBoolean) that are NOT in the public adapter schema.  Sending
+  -- them causes "An internal error" in 18.x if the C# deserialiser is strict.
   if cfg.schemaUpdateMode          == nil then cfg.schemaUpdateMode          = "synchronize" end
   if cfg.startupObjectType         == nil then cfg.startupObjectType         = "Page" end
   if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
@@ -503,9 +504,6 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.dependencyPublishingOption == nil then
     cfg.dependencyPublishingOption = "Ignore"
   end
-  -- traceDap=true makes the adapter emit verbose output events — useful for diagnosing
-  -- publish failures. Leave false in production once things are stable.
-  if cfg.traceDap == nil then cfg.traceDap = true end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
