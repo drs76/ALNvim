@@ -374,6 +374,30 @@ function M.setup_dap(root)
   end)
 end
 
+-- Apply the fields that VSCode computes and adds to every DAP launch request.
+-- These are NOT in launch.json; VSCode derives them from launch.json values or
+-- global settings. The 18.x adapter requires them — missing fields cause
+-- "An internal error has occurred" before any HTTP call is made.
+--
+-- @param cfg        the launch config table to mutate in place
+-- @param root       project root path (native separators on Windows)
+-- @param boe        breakOnError boolean (already converted from string)
+-- @param borw       breakOnRecordWrite boolean (already converted from string)
+local function apply_vscode_defaults(cfg, root, boe, borw)
+  cfg.breakOnError               = boe
+  cfg.breakOnErrorBehaviour      = not boe   -- VSCode: ValueAsNotBoolean(breakOnError)
+  cfg.breakOnRecordWrite         = borw
+  cfg.breakOnRecordWriteBehaviour = not borw  -- VSCode: ValueAsNotBoolean(breakOnRecordWrite)
+  if cfg.schemaUpdateMode          == nil then cfg.schemaUpdateMode          = "synchronize" end
+  if cfg.startupObjectType         == nil then cfg.startupObjectType         = "Page" end
+  if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
+  -- directory: where the adapter looks for the compiled .app.
+  -- VSCode sets this to the project output folder; default to native project root.
+  if cfg.directory == nil then
+    cfg.directory = require("al.platform").native_path(root)
+  end
+end
+
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
 -- Works on all BC versions (adapter handles the correct publish API internally).
 -- Falls back to direct HTTP publish if nvim-dap is not installed.
@@ -429,10 +453,8 @@ function M.publish_only(root)
     --   • userName/password → injected for UserPassword auth (VSCode reads from its
     --     secure credential store; we resolve via the same credential chain as curl_auth)
     local launch_cfg = vim.deepcopy(cfg)
-    launch_cfg.type               = "al"
-    launch_cfg.request            = "launch"
-    launch_cfg.breakOnError       = false
-    launch_cfg.breakOnRecordWrite = false
+    launch_cfg.type    = "al"
+    launch_cfg.request = "launch"
     if user then launch_cfg.userName = user end
     if pass then launch_cfg.password = pass end
     -- On Linux/macOS: adapter's launchBrowser calls xdg-open (our no-op stub); open
@@ -442,12 +464,12 @@ function M.publish_only(root)
       launch_cfg.launchBrowser = false
     end
     -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
-    -- Our is_cloud() correctly identifies this as on-prem, but the adapter only checks
-    -- environmentType and would switch to cloud (Entra) logic — causing "An internal
-    -- error has occurred". Force "OnPrem" so the adapter uses on-prem routing.
+    -- Force "OnPrem" so the adapter uses on-prem routing, not cloud Entra auth.
     if not conn.is_cloud(cfg) then
       launch_cfg.environmentType = "OnPrem"
     end
+    -- Publish-only: never break on errors (not a debug session).
+    apply_vscode_defaults(launch_cfg, root, false, false)
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -524,12 +546,10 @@ function M.launch(root)
     -- ── On-prem ───────────────────────────────────────────────────────────────
     local is_cloud = conn.is_cloud(cfg)
     if not is_cloud then
-      -- Pass through ALL fields; only fix types and inject credentials.
+      -- Pass through ALL fields; apply VSCode-computed defaults on top.
       local launch_cfg = vim.deepcopy(cfg)
-      launch_cfg.type               = "al"
-      launch_cfg.request            = "launch"
-      launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
-      launch_cfg.breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false)
+      launch_cfg.type    = "al"
+      launch_cfg.request = "launch"
       if user then launch_cfg.userName = user end
       if pass then launch_cfg.password = pass end
       -- On Linux/macOS: adapter calls xdg-open (no-op stub); open from Lua instead.
@@ -540,6 +560,9 @@ function M.launch(root)
       -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
       -- Force "OnPrem" so the adapter uses on-prem routing and auth, not cloud Entra.
       launch_cfg.environmentType = "OnPrem"
+      apply_vscode_defaults(launch_cfg, root,
+        to_break_bool(cfg.breakOnError, true),
+        to_break_bool(cfg.breakOnRecordWrite, false))
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
@@ -565,11 +588,12 @@ function M.launch(root)
     -- Pass through ALL fields; only fix types. launchBrowser=false because the
     -- debug-context URL comes from the al/openUri DAP event (handled below).
     local launch_cfg = vim.deepcopy(cfg)
-    launch_cfg.type               = "al"
-    launch_cfg.request            = "launch"
-    launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
-    launch_cfg.breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false)
-    launch_cfg.launchBrowser      = false  -- browser opened from Lua via al/openUri event
+    launch_cfg.type          = "al"
+    launch_cfg.request       = "launch"
+    launch_cfg.launchBrowser = false  -- browser opened from Lua via al/openUri event
+    apply_vscode_defaults(launch_cfg, root,
+      to_break_bool(cfg.breakOnError, true),
+      to_break_bool(cfg.breakOnRecordWrite, false))
     dap.configurations.al = { launch_cfg }
 
     require("al.compile").compile(root, nil, function()
