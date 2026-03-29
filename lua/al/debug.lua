@@ -530,6 +530,10 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.port == nil then cfg.port = 7049 end
   -- validateServerCertificate: VSCode sends r.validateServerCertificate ?? true.
   if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
+  -- usePublicURLFromServer: VSCode sends (r.usePublicURLFromServer ?? true) — defaults to true
+  -- when absent. For on-prem containers this resolves the public URL via a local BC OData call
+  -- (not Azure AAD), so true is safe and matches VSCode's behaviour exactly.
+  if cfg.usePublicURLFromServer == nil then cfg.usePublicURLFromServer = true end
   -- useMcpServerForDebugging: when true the adapter uses BC Management Services (port 7047)
   -- for BOTH publish and debug session registration instead of the dev endpoint (port 7049).
   -- AL 18.0 / VSCode defaults this to true. BCContainerHelper containers expose port 7047
@@ -624,12 +628,7 @@ function M.publish_only(root)
     if not p.is_windows then
       launch_cfg.launchBrowser = false
     end
-    -- Do NOT override environmentType (VSCode passes it through unchanged).
-    -- BCContainerHelper sets usePublicURLFromServer=true; override to false to prevent
-    -- the adapter calling an AAD-backed Azure endpoint that fails on local containers.
-    if not conn.is_cloud(cfg) then
-      launch_cfg.usePublicURLFromServer = false
-    end
+    -- Do NOT override environmentType or usePublicURLFromServer — pass through from launch.json.
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
 
@@ -738,13 +737,9 @@ function M.launch(root)
       if not p.is_windows then
         launch_cfg.launchBrowser = false
       end
-      -- Do NOT override environmentType — VSCode passes it through unchanged from launch.json.
-      -- BCContainerHelper sets "Sandbox"; the adapter uses this to select the correct debug
-      -- registration endpoint. Overriding to "OnPrem" sends the wrong endpoint → BC 500.
-      -- BCContainerHelper sets usePublicURLFromServer=true; override to false to prevent the
-      -- adapter from calling an AAD-backed Azure endpoint to resolve the public URL — that
-      -- call returns HTTP 500 on containers with conflicting AAD cert/secret settings.
-      launch_cfg.usePublicURLFromServer = false
+      -- Do NOT override environmentType or usePublicURLFromServer — VSCode passes them
+      -- through unchanged from launch.json, and the adapter (18.x) requires these to be
+      -- their native launch.json values to select the correct debug registration path.
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
