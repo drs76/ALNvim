@@ -510,6 +510,12 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- Embedding causes a double-port URL (e.g. http://bc27:7049:7049/BC) if the adapter
   -- constructs the URL as server + ":" + port + "/" + instance.
   if cfg.port == nil then cfg.port = 7049 end
+  -- AL 18.0+ adapter uses port 7047 (BC Management Services) for deployment by default.
+  -- VSCode always sends useMcpServerForDebugging=true and mcpServerPort=7047. Without
+  -- these fields the adapter C# model defaults to false and uses the old deploy path
+  -- which fails in the 18.x adapter with "An internal error has occurred".
+  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = true end
+  if cfg.mcpServerPort           == nil then cfg.mcpServerPort            = 7047 end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
