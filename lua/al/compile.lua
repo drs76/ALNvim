@@ -77,6 +77,17 @@ local function open_build_win(title)
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
 
+  -- <CR> on a diagnostic line: close float and jump to file/line
+  vim.keymap.set("n", "<CR>", function()
+    local line = vim.api.nvim_get_current_line()
+    local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
+    if not file then return end
+    vim.api.nvim_win_close(win, true)
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
+    vim.cmd("normal! zz")
+  end, { buffer = buf, nowait = true, silent = true })
+
   return buf, win
 end
 
