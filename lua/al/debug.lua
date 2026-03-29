@@ -534,14 +534,11 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- when absent. For on-prem containers this resolves the public URL via a local BC OData call
   -- (not Azure AAD), so true is safe and matches VSCode's behaviour exactly.
   if cfg.usePublicURLFromServer == nil then cfg.usePublicURLFromServer = true end
-  -- useMcpServerForDebugging: when true the adapter uses BC Management Services (port 7047)
-  -- for BOTH publish and debug session registration instead of the dev endpoint (port 7049).
-  -- AL 18.0 / VSCode defaults this to true. BCContainerHelper containers expose port 7047
-  -- by default (alongside 7049), so using true should work and matches VSCode behaviour.
-  -- BC's dev endpoint (7049) does not support live debug session registration in newer BC
-  -- versions — only port 7047 (MCP) does — which explains why false always fails.
-  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = true end
-  if cfg.mcpServerPort            == nil then cfg.mcpServerPort            = 7047 end
+  -- useMcpServerForDebugging / mcpServerPort: NOT defaulted here.
+  -- VSCode does NOT send these fields — the adapter decides internally whether to use
+  -- BC Management Services (port 7047) vs the dev endpoint (port 7049) based on server
+  -- version detection. Forcing useMcpServerForDebugging=true caused "An internal error"
+  -- on on-prem servers. Pass these through from launch.json only if the user sets them.
   -- directory: where the adapter looks for the compiled .app file.
   -- VSCode always sends this (as getAlParams().outFolder). Default to the project root.
   if cfg.directory == nil and root then
@@ -633,10 +630,7 @@ function M.publish_only(root)
     -- Do NOT override environmentType or usePublicURLFromServer — pass through from launch.json.
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
-    if user and user ~= "" then
-      launch_cfg.userName = user
-      launch_cfg.password = pass
-    end
+    -- Do NOT inject userName/password — VSCode never sends them in the DAP launch request.
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -749,14 +743,9 @@ function M.launch(root)
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
-      -- For UserPassword auth, pass credentials directly in the DAP request.
-      -- The adapter's Windows Credential Manager lookup key differs from what
-      -- al/saveUsernamePassword stores (different config shape), so the store
-      -- lookup fails. Providing them directly bypasses the credential store.
-      if user and user ~= "" then
-        launch_cfg.userName = user
-        launch_cfg.password = pass
-      end
+      -- Do NOT inject userName/password — VSCode never sends credentials in the DAP
+      -- launch request. The adapter reads them from Windows Credential Manager after
+      -- save_creds_to_lsp stores them via al/saveUsernamePassword.
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
