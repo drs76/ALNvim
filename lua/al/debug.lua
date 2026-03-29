@@ -530,9 +530,18 @@ function M.publish_only(root)
 
   -- Show success as soon as publish is confirmed (al/refreshExplorerObjects).
   -- One-shot: remove itself so subsequent ALLaunch sessions use the persistent handler.
+  -- Disconnect cleanly so BC releases the debug slot — otherwise a subsequent ALLaunch
+  -- would find the slot occupied and the adapter would exit with code 1 before any DAP
+  -- communication.
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
     dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
     vim.notify("AL: Published successfully", vim.log.levels.INFO)
+    -- Defer so the current event-processing loop completes before we send disconnect.
+    vim.schedule(function()
+      if dap.session() then
+        dap.disconnect({ terminateDebuggee = false })
+      end
+    end)
   end
 
   require("al.compile").compile(root, nil, function()
@@ -647,6 +656,13 @@ function M.launch(root)
     }
     dap.configurations.al = { launch_cfg }
 
+    -- Open the browser after the adapter signals publish-complete.
+    -- This ensures the new version is deployed before the user's BC client connects.
+    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
+      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
+      open_browser_onprem()
+    end
+
     require("al.compile").compile(root, nil, function()
       vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
       local bak = patch_launch_json(root, true)  -- true = on-prem: fix environmentType
@@ -657,6 +673,8 @@ function M.launch(root)
             restored = true
             dap.listeners.after.event_terminated["alnvim_restore_launch"] = nil
             dap.listeners.after.event_exited["alnvim_restore_launch"]     = nil
+            -- Clean up browser-open listener in case it never fired (publish failed)
+            dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
             restore_launch_json(root, bak)
           end
         end
@@ -665,7 +683,6 @@ function M.launch(root)
       end
       register_adapter()
       dap.run(launch_cfg)
-      open_browser_onprem()
     end)
     return
   end
