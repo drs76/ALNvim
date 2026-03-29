@@ -428,7 +428,7 @@ function M.publish_only(root)
     --   • breakOnError/breakOnRecordWrite → boolean (C# deserialiser rejects strings)
     --   • userName/password → injected for UserPassword auth (VSCode reads from its
     --     secure credential store; we resolve via the same credential chain as curl_auth)
-    local launch_cfg = vim.tbl_deep_copy(cfg)
+    local launch_cfg = vim.deepcopy(cfg)
     launch_cfg.type               = "al"
     launch_cfg.request            = "launch"
     launch_cfg.breakOnError       = false
@@ -518,7 +518,7 @@ function M.launch(root)
     local is_cloud = conn.is_cloud(cfg)
     if not is_cloud then
       -- Pass through ALL fields; only fix types and inject credentials.
-      local launch_cfg = vim.tbl_deep_copy(cfg)
+      local launch_cfg = vim.deepcopy(cfg)
       launch_cfg.type               = "al"
       launch_cfg.request            = "launch"
       launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
@@ -554,7 +554,7 @@ function M.launch(root)
     -- ── Cloud ─────────────────────────────────────────────────────────────────
     -- Pass through ALL fields; only fix types. launchBrowser=false because the
     -- debug-context URL comes from the al/openUri DAP event (handled below).
-    local launch_cfg = vim.tbl_deep_copy(cfg)
+    local launch_cfg = vim.deepcopy(cfg)
     launch_cfg.type               = "al"
     launch_cfg.request            = "launch"
     launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
