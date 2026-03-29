@@ -734,13 +734,13 @@ function M.launch(root)
       -- userName/password are NOT injected — VSCode doesn't include them in the DAP
       -- launch request; credentials are passed via save_creds_to_lsp instead.
       local launch_cfg = vim.deepcopy(cfg)
-      launch_cfg.type    = "al"
-      launch_cfg.request = "launch"
-      -- On Linux/macOS: adapter calls xdg-open (no-op stub); open from Lua instead.
-      -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
-      if not p.is_windows then
-        launch_cfg.launchBrowser = false
-      end
+      launch_cfg.type          = "al"
+      launch_cfg.request       = "launch"
+      -- Always set launchBrowser=false so the adapter fires al/openUri with the full
+      -- URL including the debuggingContext query parameter. Without debuggingContext
+      -- BC opens but never attaches the debugger. On Linux/macOS this also prevents
+      -- the adapter calling xdg-open (our no-op stub handles it from Lua instead).
+      launch_cfg.launchBrowser = false
       -- Do NOT override environmentType or usePublicURLFromServer — VSCode passes them
       -- through unchanged from launch.json, and the adapter (18.x) requires these to be
       -- their native launch.json values to select the correct debug registration path.
