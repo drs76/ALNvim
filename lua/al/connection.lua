@@ -23,21 +23,61 @@ local function strip_jsonc(text)
   return table.concat(out, "\n")
 end
 
--- Read .vscode/launch.json and return the first configuration with type = "al".
--- Returns nil if the file is missing or cannot be parsed.
-function M.read_launch(root)
-  if not root then return nil end
+-- Read all AL launch configurations from .vscode/launch.json.
+-- Returns a list (possibly empty) of configurations with type="al".
+function M.read_launches(root)
+  if not root then return {} end
   local path = root .. "/.vscode/launch.json"
   local f    = io.open(path, "r")
-  if not f then return nil end
+  if not f then return {} end
   local raw  = f:read("*a")
   f:close()
   local ok, data = pcall(vim.fn.json_decode, strip_jsonc(raw))
-  if not ok or type(data) ~= "table" then return nil end
+  if not ok or type(data) ~= "table" then return {} end
+  local out = {}
   for _, cfg in ipairs(data.configurations or {}) do
-    if cfg.type == "al" then return cfg end
+    if cfg.type == "al" then out[#out + 1] = cfg end
   end
-  return nil
+  return out
+end
+
+-- Read .vscode/launch.json and return the first configuration with type = "al".
+-- Returns nil if the file is missing or cannot be parsed.
+function M.read_launch(root)
+  local list = M.read_launches(root)
+  return list[1]
+end
+
+-- Present a picker when multiple AL configs exist, then call cb(cfg).
+-- If only one config exists, calls cb immediately without a picker.
+function M.pick_launch(root, cb)
+  local list = M.read_launches(root)
+  if #list == 0 then
+    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
+    return
+  end
+  if #list == 1 then cb(list[1]); return end
+  local names = {}
+  for _, cfg in ipairs(list) do names[#names + 1] = cfg.name or "(unnamed)" end
+  vim.ui.select(names, { prompt = "AL: Select launch configuration" }, function(_, idx)
+    if idx then cb(list[idx]) end
+  end)
+end
+
+-- Return userName and password strings for UserPassword/NavUserPassword auth.
+-- Uses the same credential resolution and caching as curl_auth.
+-- Returns nil, nil for other auth types.
+function M.user_password(cfg)
+  local auth = cfg.authentication or (M.is_cloud(cfg) and "MicrosoftEntraID" or "Windows")
+  if auth ~= "UserPassword" and auth ~= "NavUserPassword" then return nil, nil end
+  local args = M.curl_auth(cfg)   -- resolves & caches; returns {"-u","user:pass"}
+  if type(args) == "table" and args[1] == "-u" then
+    local cred = args[2] or ""
+    local u    = cred:match("^([^:]*)")
+    local p    = cred:match("^[^:]*:(.*)")
+    return u, p
+  end
+  return nil, nil
 end
 
 -- URL-encode a string (RFC 3986).

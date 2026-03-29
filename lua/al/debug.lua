@@ -153,95 +153,22 @@ end
 -- ArgumentException. We patch the file before launching and restore afterwards.
 -- Uses JSON parse+encode so the patch works regardless of whitespace/formatting.
 
--- Minimal JSONC comment stripper (single-line // only; preserves URLs).
-local function strip_jsonc(text)
-  local lines = {}
-  for line in text:gmatch("[^\n]*") do
-    lines[#lines + 1] = line:gsub("([^:/])//[^\n]*$", "%1")
-  end
-  return table.concat(lines, "\n")
-end
-
--- @param is_onprem  when true, also force environmentType → "OnPremises" so the
---                   adapter doesn't mistake a BCContainer (environmentType=Sandbox
---                   with a local server) for an Azure cloud environment.
-local function patch_launch_json(root, is_onprem)
+-- If a previous session left a backup of launch.json, restore it now.
+-- This is a one-time recovery for the no-longer-used patching approach.
+local function restore_bak_if_exists(root)
+  local bak  = root .. "/.vscode/launch.json.alnvim.bak"
   local path = root .. "/.vscode/launch.json"
-  local f = io.open(path, "r")
-  if not f then return nil end
-  local original = f:read("*a")
-  f:close()
-
-  -- Parse via JSON (stripping JSONC comments and trailing commas first)
-  local cleaned = strip_jsonc(original)
-  -- Remove trailing commas before ] and } (common in hand-edited launch.json)
-  cleaned = cleaned:gsub(",%s*([%]}])", "%1")
-  local ok, data = pcall(vim.fn.json_decode, cleaned)
-  if not ok or type(data) ~= "table" then
-    vim.notify("AL: Could not parse launch.json for patching: " .. tostring(data), vim.log.levels.WARN)
-    return nil
-  end
-
-  local changed = false
-  for _, cfg_entry in ipairs(data.configurations or {}) do
-    if cfg_entry.type == "al" then
-      -- breakOnError / breakOnRecordWrite: string enum → bool
-      for _, field in ipairs({ "breakOnError", "breakOnRecordWrite" }) do
-        local v = cfg_entry[field]
-        if type(v) == "string" then
-          cfg_entry[field] = (v == "All" or v == "ExcludeTry" or v == "ExcludeTemporary")
-          changed = true
-        end
-      end
-      -- launchBrowser: the adapter reads this from launch.json, not from the DAP
-      -- launch request. Set true so it waits for a BC client rather than failing
-      -- immediately with "Could not publish the package to the server".
-      if cfg_entry.launchBrowser ~= true then
-        cfg_entry.launchBrowser = true
-        changed = true
-      end
-      -- For on-prem (BCContainer): override environmentType so the adapter
-      -- uses the on-prem publish path regardless of what launch.json says.
-      if is_onprem and (cfg_entry.environmentType == "Sandbox"
-                     or cfg_entry.environmentType == "Production") then
-        cfg_entry.environmentType = "OnPremises"
-        changed = true
-      end
-    end
-  end
-
-  if not changed then return nil end
-
-  -- Write backup (preserves original with comments intact)
-  local bak = path .. ".alnvim.bak"
-  local fb = io.open(bak, "w")
-  if not fb then return nil end
-  fb:write(original)
+  local fb = io.open(bak, "r")
+  if not fb then return end
+  local content = fb:read("*a")
   fb:close()
-
-  -- Write patched JSON (comments stripped, but backup restores the original)
   local fw = io.open(path, "w")
-  if not fw then
-    vim.notify("AL: Could not write patched launch.json (check file permissions)", vim.log.levels.WARN)
+  if fw then
+    fw:write(content)
+    fw:close()
     os.remove(bak)
-    return nil
+    vim.notify("AL: Restored launch.json from backup (previous patching removed)", vim.log.levels.INFO)
   end
-  fw:write(vim.fn.json_encode(data))
-  fw:close()
-
-  return bak
-end
-
-local function restore_launch_json(root, bak)
-  if not bak then return end
-  local path = root .. "/.vscode/launch.json"
-  local f = io.open(bak, "r")
-  if not f then return end
-  local content = f:read("*a")
-  f:close()
-  local fw = io.open(path, "w")
-  if fw then fw:write(content) fw:close() end
-  os.remove(bak)
 end
 
 -- ── Launch (F5 equivalent) ────────────────────────────────────────────────────
@@ -384,67 +311,67 @@ function M.setup_dap(root)
   end
 
   root = root or lsp.get_root()
-  local cfg = conn.read_launch(root)
-  if not cfg then
-    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
-    return
-  end
+  conn.pick_launch(root, function(cfg)
+    patch_dap_nil_command(dap)
+    register_al_dap_events(dap)
 
-  patch_dap_nil_command(dap)
-  register_al_dap_events(dap)
+    local ext  = require("al").config.ext_path or require("al.ext").path
+    local p    = require("al.platform")
+    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
 
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local p    = require("al.platform")
-  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+    dap.adapters.al = {
+      type    = "executable",
+      command = host,
+      args    = { "/startDebugging", "/projectRoot:" .. root },
+      options = {
+        env      = make_adapter_env(),
+        detached = not p.is_windows,
+        initialize_timeout_sec = 30,
+      },
+    }
 
-  dap.adapters.al = {
-    type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env      = make_adapter_env(),
-      detached = not require("al.platform").is_windows,  -- false on Windows: prevents .NET Console handle error
-      initialize_timeout_sec = 30,
-    },
-  }
+    local base   = conn.base_url(cfg)
+    local tenant = cfg.tenant or "default"
+    local user, pass = conn.user_password(cfg)
 
-  local base   = conn.base_url(cfg)
-  local tenant = cfg.tenant or "default"
+    dap.configurations.al = {
+      {
+        type                          = "al",
+        request                       = "attach",
+        name                          = "AL: Attach to " .. (cfg.serverInstance or "BC"),
+        server                        = cfg.server or "http://localhost",
+        serverInstance                = cfg.serverInstance or "BC",
+        authentication                = cfg.authentication or "Windows",
+        userName                      = user,
+        password                      = pass,
+        tenant                        = tenant,
+        breakOnError                  = to_break_bool(cfg.breakOnError, true),
+        breakOnRecordWrite            = to_break_bool(cfg.breakOnRecordWrite, false),
+        breakOnNext                   = cfg.breakOnNext or "WebClient",
+        enableSqlInformationDebugger  = cfg.enableSqlInformationDebugger  ~= false,
+        enableLongRunningSqlStatements = cfg.enableLongRunningSqlStatements ~= false,
+        longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+        numberOfSqlStatements         = cfg.numberOfSqlStatements or 10,
+      },
+      {
+        type           = "al",
+        request        = "attach",
+        name           = "AL: Attach to Web Service client",
+        server         = cfg.server or "http://localhost",
+        serverInstance = cfg.serverInstance or "BC",
+        authentication = cfg.authentication or "Windows",
+        userName       = user,
+        password       = pass,
+        tenant         = tenant,
+        breakOnError   = to_break_bool(cfg.breakOnError, true),
+        breakOnNext    = "WebServiceClient",
+      },
+    }
 
-  -- Map the launch.json attach configuration to a nvim-dap configuration
-  dap.configurations.al = {
-    {
-      type                          = "al",
-      request                       = "attach",
-      name                          = "AL: Attach to " .. (cfg.serverInstance or "BC"),
-      server                        = cfg.server or "http://localhost",
-      serverInstance                = cfg.serverInstance or "BC",
-      authentication                = cfg.authentication or "Windows",
-      tenant                        = tenant,
-      breakOnError                  = to_break_bool(cfg.breakOnError, true),
-      breakOnRecordWrite            = to_break_bool(cfg.breakOnRecordWrite, false),
-      breakOnNext                   = cfg.breakOnNext or "WebClient",
-      enableSqlInformationDebugger  = cfg.enableSqlInformationDebugger  ~= false,
-      enableLongRunningSqlStatements = cfg.enableLongRunningSqlStatements ~= false,
-      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-      numberOfSqlStatements         = cfg.numberOfSqlStatements or 10,
-    },
-    {
-      type          = "al",
-      request       = "attach",
-      name          = "AL: Attach to Web Service client",
-      server        = cfg.server or "http://localhost",
-      serverInstance = cfg.serverInstance or "BC",
-      authentication = cfg.authentication or "Windows",
-      tenant        = tenant,
-      breakOnError  = to_break_bool(cfg.breakOnError, true),
-      breakOnNext   = "WebServiceClient",
-    },
-  }
-
-  vim.notify(
-    "AL: nvim-dap configured for " .. base .. "\nRun :DapContinue to attach.",
-    vim.log.levels.INFO)
+    vim.notify(
+      "AL: nvim-dap configured for " .. base .. "\nRun :DapContinue to attach.",
+      vim.log.levels.INFO)
+  end)
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
@@ -453,7 +380,6 @@ end
 function M.publish_only(root)
   local ok, dap = pcall(require, "dap")
   if not ok then
-    -- nvim-dap not available — fall back to direct HTTP publish
     require("al.publish").publish(root)
     return
   end
@@ -464,126 +390,103 @@ function M.publish_only(root)
     return
   end
 
-  local cfg = conn.read_launch(root)
-  if not cfg then
-    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
-    return
-  end
+  restore_bak_if_exists(root)
 
-  patch_dap_nil_command(dap)
-  register_al_dap_events(dap)
+  conn.pick_launch(root, function(cfg)
+    patch_dap_nil_command(dap)
+    register_al_dap_events(dap)
 
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local p    = require("al.platform")
-  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
-  local is_onprem = not conn.is_cloud(cfg)
+    local ext  = require("al").config.ext_path or require("al.ext").path
+    local p    = require("al.platform")
+    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+    local is_onprem = not conn.is_cloud(cfg)
+    local user, pass = conn.user_password(cfg)
 
-  dap.adapters.al = {
-    type    = "executable",
-    command = host,
-    args    = { "/startDebugging", "/projectRoot:" .. root },
-    options = {
-      env      = make_adapter_env(),
-      detached = not p.is_windows,
-      initialize_timeout_sec = 30,
-    },
-    reverse_request_handlers = {
-      ["al/launchDeviceLoginWindow"] = function(session, request)
-        local uri = ((request.arguments or {}).Uri or "")
-        if uri ~= "" then
-          require("al.platform").open_url(uri)
-          vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
-        end
-        session:response(request, {})
-      end,
-    },
-  }
+    dap.adapters.al = {
+      type    = "executable",
+      command = host,
+      args    = { "/startDebugging", "/projectRoot:" .. root },
+      options = {
+        env      = make_adapter_env(),
+        detached = not p.is_windows,
+        initialize_timeout_sec = 30,
+      },
+      reverse_request_handlers = {
+        ["al/launchDeviceLoginWindow"] = function(session, request)
+          local uri = ((request.arguments or {}).Uri or "")
+          if uri ~= "" then
+            require("al.platform").open_url(uri)
+            vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
+          end
+          session:response(request, {})
+        end,
+      },
+    }
 
-  -- noDebug=true tells the adapter to publish only — skip the debug session setup
-  -- that would otherwise fail with "Could not publish" when no BC client is running.
-  -- launchBrowser=true: the adapter waits for a BC client to connect rather than
-  -- failing immediately with "Could not publish". We send a clean disconnect after
-  -- al/refreshExplorerObjects so the adapter exits without starting a debug session.
-  -- On Windows the adapter opens the browser natively; on Linux/macOS our xdg-open
-  -- stub is a no-op so we open it from Lua in the alnvim_publish_only handler.
-  local launch_cfg = is_onprem and {
-    type               = "al",
-    request            = "launch",
-    name               = "AL: Publish (on-prem)",
-    server             = cfg.server,
-    serverInstance     = cfg.serverInstance,
-    authentication     = cfg.authentication or "Windows",
-    tenant             = cfg.tenant or "default",
-    schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-    breakOnError       = false,
-    breakOnRecordWrite = false,
-    breakOnNext        = cfg.breakOnNext or "WebClient",
-    enableSqlInformationDebugger      = false,
-    enableLongRunningSqlStatements    = false,
-    longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-    numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-    startupObjectType  = cfg.startupObjectType or "Page",
-    startupObjectId    = cfg.startupObjectId or 22,
-    launchBrowser      = true,
-  } or {
-    type                = "al",
-    request             = "launch",
-    name                = "AL: Publish (cloud)",
-    schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
-    environmentType     = cfg.environmentType,
-    environmentName     = cfg.environmentName,
-    tenant              = cfg.tenant,
-    primaryTenantDomain = cfg.primaryTenantDomain,
-    authentication      = cfg.authentication or "MicrosoftEntraID",
-    breakOnError        = false,
-    breakOnRecordWrite  = false,
-    breakOnNext         = cfg.breakOnNext or "WebClient",
-    startupObjectType   = cfg.startupObjectType or "Page",
-    startupObjectId     = cfg.startupObjectId or 22,
-    launchBrowser       = true,
-  }
+    -- Build DAP launch config directly from the selected launch.json entry.
+    -- breakOnError/breakOnRecordWrite are converted to booleans (the adapter's C#
+    -- deserialiser is strict and rejects the string enum values VSCode accepts).
+    -- userName/password are injected for UserPassword auth — VSCode gets these from
+    -- its secure credential store; we resolve them via the same order as curl_auth.
+    local launch_cfg = is_onprem and {
+      type               = "al",
+      request            = "launch",
+      name               = cfg.name or "AL: Publish (on-prem)",
+      server             = cfg.server,
+      serverInstance     = cfg.serverInstance,
+      authentication     = cfg.authentication or "Windows",
+      userName           = user,
+      password           = pass,
+      tenant             = cfg.tenant or "default",
+      schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+      breakOnError       = false,
+      breakOnRecordWrite = false,
+      breakOnNext        = cfg.breakOnNext or "WebClient",
+      enableSqlInformationDebugger      = false,
+      enableLongRunningSqlStatements    = false,
+      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+      numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+      startupObjectType  = cfg.startupObjectType or "Page",
+      startupObjectId    = cfg.startupObjectId or 22,
+      launchBrowser      = cfg.launchBrowser ~= false,
+      usePublicURLFromServer = cfg.usePublicURLFromServer,
+    } or {
+      type                = "al",
+      request             = "launch",
+      name                = cfg.name or "AL: Publish (cloud)",
+      schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
+      environmentType     = cfg.environmentType,
+      environmentName     = cfg.environmentName,
+      tenant              = cfg.tenant,
+      primaryTenantDomain = cfg.primaryTenantDomain,
+      authentication      = cfg.authentication or "MicrosoftEntraID",
+      breakOnError        = false,
+      breakOnRecordWrite  = false,
+      breakOnNext         = cfg.breakOnNext or "WebClient",
+      startupObjectType   = cfg.startupObjectType or "Page",
+      startupObjectId     = cfg.startupObjectId or 22,
+      launchBrowser       = cfg.launchBrowser ~= false,
+    }
 
-  -- Show success as soon as publish is confirmed (al/refreshExplorerObjects).
-  -- One-shot: remove itself so subsequent ALLaunch sessions use the persistent handler.
-  -- Disconnect cleanly so BC releases the debug slot — otherwise a subsequent ALLaunch
-  -- would find the slot occupied and the adapter would exit with code 1 before any DAP
-  -- communication.
-  dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
-    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
-    vim.notify("AL: Published successfully", vim.log.levels.INFO)
-    -- On Linux/macOS the adapter's xdg-open is a no-op stub so open from Lua.
-    -- On Windows, launchBrowser=true makes the adapter open the browser natively.
-    if not require("al.platform").is_windows then
-      require("al.platform").open_url(conn.webclient_url(cfg))
-    end
-    -- Disconnect cleanly so the adapter exits without starting a debug session.
-    -- Deferred so the current event-processing loop completes first.
-    vim.schedule(function()
-      if dap.session() then
-        dap.disconnect({ terminateDebuggee = false })
+    -- One-shot listener: fires when the adapter signals publish is complete.
+    -- Disconnect so the adapter exits cleanly without starting a debug session
+    -- (which would occupy the BC debug slot and block a subsequent ALLaunch).
+    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
+      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
+      vim.notify("AL: Published successfully", vim.log.levels.INFO)
+      -- On Linux/macOS: launchBrowser=true makes the adapter call xdg-open (our stub).
+      -- Open from Lua instead. On Windows: adapter opens the browser natively — skip.
+      if not p.is_windows then
+        require("al.platform").open_url(conn.webclient_url(cfg))
       end
+      vim.schedule(function()
+        if dap.session() then dap.disconnect({ terminateDebuggee = false }) end
+      end)
+    end
+
+    require("al.compile").compile(root, nil, function()
+      dap.run(launch_cfg)
     end)
-  end
-
-  require("al.compile").compile(root, nil, function()
-    local bak = patch_launch_json(root, is_onprem)
-    if bak then
-      local restored = false
-      local function restore()
-        if not restored then
-          restored = true
-          dap.listeners.after.event_terminated["alnvim_restore_pub"] = nil
-          dap.listeners.after.event_exited["alnvim_restore_pub"]     = nil
-          restore_launch_json(root, bak)
-        end
-      end
-      dap.listeners.after.event_terminated["alnvim_restore_pub"] = restore
-      dap.listeners.after.event_exited["alnvim_restore_pub"]     = restore
-      -- Safety net: if the adapter exits without sending DAP events (e.g. code 1),
-      -- restore launch.json once the session is gone.
-      vim.defer_fn(function() if not restored and not dap.session() then restore() end end, 10000)
-    end
-    dap.run(launch_cfg)
   end)
 end
 
@@ -603,70 +506,98 @@ function M.launch(root)
     return
   end
 
-  local cfg = conn.read_launch(root)
-  if not cfg then
-    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
-    return
-  end
+  restore_bak_if_exists(root)
 
-  patch_dap_nil_command(dap)
-  register_al_dap_events(dap)
+  conn.pick_launch(root, function(cfg)
+    patch_dap_nil_command(dap)
+    register_al_dap_events(dap)
 
-  local ext  = require("al").config.ext_path or require("al.ext").path
-  local p    = require("al.platform")
-  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+    local ext  = require("al").config.ext_path or require("al.ext").path
+    local p    = require("al.platform")
+    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+    local user, pass = conn.user_password(cfg)
 
-  local function register_adapter()
-    dap.adapters.al = {
-      type    = "executable",
-      command = host,
-      args    = { "/startDebugging", "/projectRoot:" .. root },
-      options = {
-        env      = make_adapter_env(),
-        detached = not require("al.platform").is_windows,  -- false on Windows: prevents .NET Console handle error
-        initialize_timeout_sec = 30,
-      },
-      -- al/launchDeviceLoginWindow is a server-initiated request asking us to
-      -- open the browser for OAuth2 device code login. Must send back a response.
-      reverse_request_handlers = {
-        ["al/launchDeviceLoginWindow"] = function(session, request)
-          local uri = ((request.arguments or {}).Uri or "")
-          if uri ~= "" then
-            require("al.platform").open_url(uri)
-            vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
-          end
-          session:response(request, {})
-        end,
-      },
-    }
-  end
+    local function register_adapter()
+      dap.adapters.al = {
+        type    = "executable",
+        command = host,
+        args    = { "/startDebugging", "/projectRoot:" .. root },
+        options = {
+          env      = make_adapter_env(),
+          detached = not p.is_windows,
+          initialize_timeout_sec = 30,
+        },
+        reverse_request_handlers = {
+          ["al/launchDeviceLoginWindow"] = function(session, request)
+            local uri = ((request.arguments or {}).Uri or "")
+            if uri ~= "" then
+              require("al.platform").open_url(uri)
+              vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
+            end
+            session:response(request, {})
+          end,
+        },
+      }
+    end
 
-  -- Open the BC web client after publish so the user can start a session.
-  -- Always opens for on-prem ALLaunch (the whole point is to start a debug session).
-  -- Cloud receives the real URL (with debug context) via al/openUri instead.
-  local function open_browser_onprem()
-    local url = conn.webclient_url(cfg)
-    require("al.platform").open_url(url)
-    vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
-  end
+    -- ── On-prem ───────────────────────────────────────────────────────────────
+    local is_cloud = conn.is_cloud(cfg)
+    if not is_cloud then
+      local launch_cfg = {
+        type               = "al",
+        request            = "launch",
+        name               = cfg.name or "AL: Launch (on-prem)",
+        server             = cfg.server,
+        serverInstance     = cfg.serverInstance,
+        authentication     = cfg.authentication or "Windows",
+        userName           = user,
+        password           = pass,
+        tenant             = cfg.tenant or "default",
+        schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+        breakOnError       = to_break_bool(cfg.breakOnError, true),
+        breakOnNext        = cfg.breakOnNext or "WebClient",
+        breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
+        enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
+        enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
+        longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+        numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+        startupObjectType  = cfg.startupObjectType or "Page",
+        startupObjectId    = cfg.startupObjectId or 22,
+        launchBrowser      = cfg.launchBrowser ~= false,
+        usePublicURLFromServer = cfg.usePublicURLFromServer,
+      }
+      dap.configurations.al = { launch_cfg }
 
-  -- ── On-prem: compile → DAP "launch" (adapter handles publish + attach) ───
-  -- BC 25+ changed the /dev/apps HTTP endpoint; direct octet-stream publish no
-  -- longer works. Use the adapter's "launch" request for all cases — the adapter
-  -- knows the correct publish protocol for each BC version.
-  -- launchBrowser=false suppresses the adapter's built-in browser open; we open
-  -- the BC web client from Lua after the session starts (open_browser_onprem).
-  local is_cloud = conn.is_cloud(cfg)
-  if not is_cloud then
+      -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
+      -- On Windows: adapter opens the browser natively via launchBrowser — skip here.
+      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
+        dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
+        if not p.is_windows then
+          local url = conn.webclient_url(cfg)
+          require("al.platform").open_url(url)
+          vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
+        end
+      end
+
+      require("al.compile").compile(root, nil, function()
+        vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
+        register_adapter()
+        dap.run(launch_cfg)
+      end)
+      return
+    end
+
+    -- ── Cloud ─────────────────────────────────────────────────────────────────
     local launch_cfg = {
       type               = "al",
       request            = "launch",
-      name               = "AL: Launch (on-prem)",
-      server             = cfg.server,
-      serverInstance     = cfg.serverInstance,
-      authentication     = cfg.authentication or "Windows",
-      tenant             = cfg.tenant or "default",
+      name               = cfg.name or "AL: Launch",
       schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+      environmentType    = cfg.environmentType,
+      environmentName    = cfg.environmentName,
+      tenant             = cfg.tenant,
+      primaryTenantDomain = cfg.primaryTenantDomain,
+      authentication     = cfg.authentication or "MicrosoftEntraID",
       breakOnError       = to_break_bool(cfg.breakOnError, true),
       breakOnNext        = cfg.breakOnNext or "WebClient",
       breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
@@ -674,103 +605,18 @@ function M.launch(root)
       enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
       longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
       numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+      launchBrowser      = false,
       startupObjectType  = cfg.startupObjectType or "Page",
       startupObjectId    = cfg.startupObjectId or 22,
-      -- launchBrowser=true: adapter waits for a BC client to connect (opens browser
-      -- natively on Windows). Without this flag it fails immediately ("Could not
-      -- publish") because no client is running yet.
-      launchBrowser      = true,
     }
     dap.configurations.al = { launch_cfg }
 
-    -- Open the browser after the adapter signals publish-complete.
-    -- On Linux/macOS: adapter's xdg-open stub is a no-op, so open from Lua.
-    -- On Windows: launchBrowser=true makes the adapter open the browser itself;
-    --             Lua opening here would create a duplicate tab so skip it.
-    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
-      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
-      if not require("al.platform").is_windows then
-        open_browser_onprem()
-      end
-    end
-
     require("al.compile").compile(root, nil, function()
       vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
-      local bak = patch_launch_json(root, true)  -- true = on-prem: fix environmentType
-      if bak then
-        local restored = false
-        local function restore()
-          if not restored then
-            restored = true
-            dap.listeners.after.event_terminated["alnvim_restore_launch"] = nil
-            dap.listeners.after.event_exited["alnvim_restore_launch"]     = nil
-            -- Clean up browser-open listener in case it never fired (publish failed)
-            dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
-            restore_launch_json(root, bak)
-          end
-        end
-        dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
-        dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
-        -- Safety net: if the adapter exits without sending DAP events (e.g. code 1),
-        -- restore launch.json once the session is gone.
-        vim.defer_fn(function() if not restored and not dap.session() then restore() end end, 10000)
-      end
       register_adapter()
       dap.run(launch_cfg)
+      -- Browser opened by al/openUri event (includes the debug-context URL).
     end)
-    return
-  end
-
-  -- ── Cloud: compile → DAP "launch" (adapter handles publish + attach) ─────
-  -- Cloud endpoints reject direct HTTP publish (HTTP 415), so we must use
-  -- the adapter's "launch" request.  We patch launch.json to suppress the
-  -- adapter's built-in browser-open (which also fails on Linux) and open
-  -- the URL from Lua instead.
-  local launch_cfg = {
-    type               = "al",
-    request            = "launch",
-    name               = "AL: Launch",
-    schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-    environmentType    = cfg.environmentType,
-    environmentName    = cfg.environmentName,
-    tenant             = cfg.tenant,
-    primaryTenantDomain = cfg.primaryTenantDomain,
-    authentication     = cfg.authentication or "MicrosoftEntraID",
-    breakOnError       = to_break_bool(cfg.breakOnError, true),
-    breakOnNext        = cfg.breakOnNext or "WebClient",
-    breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
-    enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
-    enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
-    longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-    numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-    launchBrowser      = false,
-    startupObjectType  = cfg.startupObjectType or "Page",
-    startupObjectId    = cfg.startupObjectId or 22,
-  }
-  dap.configurations.al = { launch_cfg }
-
-  require("al.compile").compile(root, nil, function()
-    vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
-
-    local bak = patch_launch_json(root)
-    if bak then
-      local restored = false
-      local function restore()
-        if not restored then
-          restored = true
-          dap.listeners.after.event_terminated["alnvim_restore_launch"] = nil
-          dap.listeners.after.event_exited["alnvim_restore_launch"]     = nil
-          restore_launch_json(root, bak)
-        end
-      end
-      dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
-      dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
-    end
-
-    register_adapter()
-    dap.run(launch_cfg)
-    -- Browser will be opened by the al/openUri event the adapter fires
-    -- after it finishes publishing (includes the debug-context in the URL).
   end)
 end
 
