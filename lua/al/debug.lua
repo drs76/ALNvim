@@ -201,6 +201,55 @@ local function ensure_xdg_stub()
   return dir
 end
 
+-- ── Adapter output floating window ───────────────────────────────────────────
+-- Shows all DAP "output" events from the adapter in a non-focused float.
+-- Useful for diagnosing publish failures ("An internal error has occurred" etc).
+local _out_buf = nil
+local _out_win = nil
+
+local function reset_output_win()
+  if _out_buf and vim.api.nvim_buf_is_valid(_out_buf) then
+    vim.api.nvim_buf_set_lines(_out_buf, 0, -1, false, {})
+  end
+  if _out_win and vim.api.nvim_win_is_valid(_out_win) then
+    return  -- reuse existing window
+  end
+  _out_buf = nil
+  _out_win = nil
+end
+
+local function ensure_output_win()
+  if _out_buf and vim.api.nvim_buf_is_valid(_out_buf)
+     and _out_win and vim.api.nvim_win_is_valid(_out_win) then
+    return _out_buf, _out_win
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "hide"
+  local w  = math.min(96, vim.o.columns - 4)
+  local h  = math.min(14, math.floor(vim.o.lines * 0.35))
+  local row = vim.o.lines - h - 3
+  local col = math.floor((vim.o.columns - w) / 2)
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative  = "editor",
+    width     = w,
+    height    = h,
+    row       = row,
+    col       = col,
+    style     = "minimal",
+    border    = "rounded",
+    title     = " AL: Adapter Output (q = close) ",
+    title_pos = "center",
+    noautocmd = true,
+  })
+  vim.wo[win].wrap = true
+  vim.keymap.set("n", "q", function()
+    pcall(vim.api.nvim_win_close, win, true)
+  end, { buffer = buf, nowait = true, silent = true })
+  _out_buf = buf
+  _out_win = win
+  return buf, win
+end
+
 -- Register listeners for custom AL DAP events the adapter fires.
 -- al/openUri              — real BC web client URL after publish (cloud / on-prem)
 -- al/deviceLogin          — OAuth2 device code flow
@@ -211,6 +260,18 @@ local _al_dap_events_registered = false
 local function register_al_dap_events(dap)
   if _al_dap_events_registered then return end
   _al_dap_events_registered = true
+
+  -- Show all adapter output events in the floating window.
+  dap.listeners.before["event_output"]["alnvim_output"] = function(_, body)
+    if not (body and body.output) then return end
+    local text = (body.output:gsub("\r\n", "\n"):gsub("\r", "\n"):gsub("\n$", ""))
+    if text == "" then return end
+    vim.schedule(function()
+      local buf, win = ensure_output_win()
+      vim.api.nvim_buf_set_lines(buf, -1, -1, false, vim.split(text, "\n", { plain = true }))
+      pcall(vim.api.nvim_win_set_cursor, win, { vim.api.nvim_buf_line_count(buf), 0 })
+    end)
+  end
 
   -- The AL adapter's setBreakpoints handler does an indexed lookup of the source
   -- file in the project. It can throw ArgumentOutOfRangeException when:
@@ -396,6 +457,9 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.directory == nil then
     cfg.directory = require("al.platform").native_path(root)
   end
+  -- traceDap=true makes the adapter emit verbose output events — useful for diagnosing
+  -- publish failures. Leave false in production once things are stable.
+  if cfg.traceDap == nil then cfg.traceDap = true end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
@@ -415,6 +479,7 @@ function M.publish_only(root)
   end
 
   restore_bak_if_exists(root)
+  reset_output_win()
 
   conn.pick_launch(root, function(cfg)
     patch_dap_nil_command(dap)
@@ -522,6 +587,7 @@ function M.launch(root)
   end
 
   restore_bak_if_exists(root)
+  reset_output_win()
 
   conn.pick_launch(root, function(cfg)
     patch_dap_nil_command(dap)
