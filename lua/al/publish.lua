@@ -14,6 +14,7 @@ local lsp   = require("al.lsp")
 
 -- Find the compiled .app in the project root.
 -- Tries the standard Publisher_Name_Version.app name first, then globs.
+-- Also exported as M.find_app so debug.lua can pre-flight check the .app exists.
 local function find_app_file(root, app_json)
   local function safe(s) return (s or ""):gsub("[/\\%?%%*:|\"<>]", "_") end
   local names = {
@@ -153,5 +154,7 @@ function M.publish(root, skip_compile, on_success)
     end)
   end)
 end
+
+M.find_app = find_app_file
 
 return M

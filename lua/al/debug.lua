@@ -431,6 +431,7 @@ function M.publish_only(root)
       args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
       options = {
         env      = make_adapter_env(),
+        cwd      = root,   -- adapter must run from project root to find the .app
         detached = not p.is_windows,
         initialize_timeout_sec = 30,
       },
@@ -488,6 +489,17 @@ function M.publish_only(root)
     end
 
     require("al.compile").compile(root, nil, function()
+      -- Verify the .app was produced before handing off to the adapter.
+      local app_json = require("al.lsp").read_app_json(root)
+      local app_file = app_json and require("al.publish").find_app(root, app_json)
+      if not app_file then
+        vim.notify(
+          "AL: Compile succeeded but no .app found in " .. root
+          .. "\nCheck that alc is producing output to the project root.",
+          vim.log.levels.ERROR)
+        return
+      end
+      vim.notify("AL: Publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …", vim.log.levels.INFO)
       dap.run(launch_cfg)
     end)
   end)
@@ -527,6 +539,7 @@ function M.launch(root)
         args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
         options = {
           env      = make_adapter_env(),
+          cwd      = root,   -- adapter must run from project root to find the .app
           detached = not p.is_windows,
           initialize_timeout_sec = 30,
         },
@@ -577,7 +590,18 @@ function M.launch(root)
       end
 
       require("al.compile").compile(root, nil, function()
-        vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
+        local app_json = require("al.lsp").read_app_json(root)
+        local app_file = app_json and require("al.publish").find_app(root, app_json)
+        if not app_file then
+          vim.notify(
+            "AL: Compile succeeded but no .app found in " .. root
+            .. "\nCheck that alc is producing output to the project root.",
+            vim.log.levels.ERROR)
+          return
+        end
+        vim.notify(
+          "AL: Compile succeeded — publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …",
+          vim.log.levels.INFO)
         register_adapter()
         dap.run(launch_cfg)
       end)
