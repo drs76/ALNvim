@@ -399,7 +399,6 @@ function M.publish_only(root)
     local ext  = require("al").config.ext_path or require("al.ext").path
     local p    = require("al.platform")
     local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
-    local is_onprem = not conn.is_cloud(cfg)
     local user, pass = conn.user_password(cfg)
 
     dap.adapters.al = {
@@ -423,50 +422,25 @@ function M.publish_only(root)
       },
     }
 
-    -- Build DAP launch config directly from the selected launch.json entry.
-    -- breakOnError/breakOnRecordWrite are converted to booleans (the adapter's C#
-    -- deserialiser is strict and rejects the string enum values VSCode accepts).
-    -- userName/password are injected for UserPassword auth — VSCode gets these from
-    -- its secure credential store; we resolve them via the same order as curl_auth.
-    local launch_cfg = is_onprem and {
-      type               = "al",
-      request            = "launch",
-      name               = cfg.name or "AL: Publish (on-prem)",
-      server             = cfg.server,
-      serverInstance     = cfg.serverInstance,
-      authentication     = cfg.authentication or "Windows",
-      userName           = user,
-      password           = pass,
-      tenant             = cfg.tenant or "default",
-      schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-      breakOnError       = false,
-      breakOnRecordWrite = false,
-      breakOnNext        = cfg.breakOnNext or "WebClient",
-      enableSqlInformationDebugger      = false,
-      enableLongRunningSqlStatements    = false,
-      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-      numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-      startupObjectType  = cfg.startupObjectType or "Page",
-      startupObjectId    = cfg.startupObjectId or 22,
-      launchBrowser      = cfg.launchBrowser ~= false,
-      usePublicURLFromServer = cfg.usePublicURLFromServer,
-    } or {
-      type                = "al",
-      request             = "launch",
-      name                = cfg.name or "AL: Publish (cloud)",
-      schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
-      environmentType     = cfg.environmentType,
-      environmentName     = cfg.environmentName,
-      tenant              = cfg.tenant,
-      primaryTenantDomain = cfg.primaryTenantDomain,
-      authentication      = cfg.authentication or "MicrosoftEntraID",
-      breakOnError        = false,
-      breakOnRecordWrite  = false,
-      breakOnNext         = cfg.breakOnNext or "WebClient",
-      startupObjectType   = cfg.startupObjectType or "Page",
-      startupObjectId     = cfg.startupObjectId or 22,
-      launchBrowser       = cfg.launchBrowser ~= false,
-    }
+    -- Pass through ALL fields from the selected launch.json config so nothing is
+    -- accidentally dropped (port, usePublicURLFromServer, future fields, etc.).
+    -- Only override what the adapter strictly requires:
+    --   • breakOnError/breakOnRecordWrite → boolean (C# deserialiser rejects strings)
+    --   • userName/password → injected for UserPassword auth (VSCode reads from its
+    --     secure credential store; we resolve via the same credential chain as curl_auth)
+    local launch_cfg = vim.tbl_deep_copy(cfg)
+    launch_cfg.type               = "al"
+    launch_cfg.request            = "launch"
+    launch_cfg.breakOnError       = false
+    launch_cfg.breakOnRecordWrite = false
+    if user then launch_cfg.userName = user end
+    if pass then launch_cfg.password = pass end
+    -- On Linux/macOS: adapter's launchBrowser calls xdg-open (our no-op stub); open
+    -- from Lua instead via the refreshExplorerObjects event listener below.
+    -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
+    if not p.is_windows then
+      launch_cfg.launchBrowser = false
+    end
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -543,29 +517,19 @@ function M.launch(root)
     -- ── On-prem ───────────────────────────────────────────────────────────────
     local is_cloud = conn.is_cloud(cfg)
     if not is_cloud then
-      local launch_cfg = {
-        type               = "al",
-        request            = "launch",
-        name               = cfg.name or "AL: Launch (on-prem)",
-        server             = cfg.server,
-        serverInstance     = cfg.serverInstance,
-        authentication     = cfg.authentication or "Windows",
-        userName           = user,
-        password           = pass,
-        tenant             = cfg.tenant or "default",
-        schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-        breakOnError       = to_break_bool(cfg.breakOnError, true),
-        breakOnNext        = cfg.breakOnNext or "WebClient",
-        breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
-        enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
-        enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
-        longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-        numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-        startupObjectType  = cfg.startupObjectType or "Page",
-        startupObjectId    = cfg.startupObjectId or 22,
-        launchBrowser      = cfg.launchBrowser ~= false,
-        usePublicURLFromServer = cfg.usePublicURLFromServer,
-      }
+      -- Pass through ALL fields; only fix types and inject credentials.
+      local launch_cfg = vim.tbl_deep_copy(cfg)
+      launch_cfg.type               = "al"
+      launch_cfg.request            = "launch"
+      launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
+      launch_cfg.breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false)
+      if user then launch_cfg.userName = user end
+      if pass then launch_cfg.password = pass end
+      -- On Linux/macOS: adapter calls xdg-open (no-op stub); open from Lua instead.
+      -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
+      if not p.is_windows then
+        launch_cfg.launchBrowser = false
+      end
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
@@ -588,27 +552,14 @@ function M.launch(root)
     end
 
     -- ── Cloud ─────────────────────────────────────────────────────────────────
-    local launch_cfg = {
-      type               = "al",
-      request            = "launch",
-      name               = cfg.name or "AL: Launch",
-      schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
-      environmentType    = cfg.environmentType,
-      environmentName    = cfg.environmentName,
-      tenant             = cfg.tenant,
-      primaryTenantDomain = cfg.primaryTenantDomain,
-      authentication     = cfg.authentication or "MicrosoftEntraID",
-      breakOnError       = to_break_bool(cfg.breakOnError, true),
-      breakOnNext        = cfg.breakOnNext or "WebClient",
-      breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
-      enableSqlInformationDebugger      = cfg.enableSqlInformationDebugger  ~= false,
-      enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
-      longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
-      numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-      launchBrowser      = false,
-      startupObjectType  = cfg.startupObjectType or "Page",
-      startupObjectId    = cfg.startupObjectId or 22,
-    }
+    -- Pass through ALL fields; only fix types. launchBrowser=false because the
+    -- debug-context URL comes from the al/openUri DAP event (handled below).
+    local launch_cfg = vim.tbl_deep_copy(cfg)
+    launch_cfg.type               = "al"
+    launch_cfg.request            = "launch"
+    launch_cfg.breakOnError       = to_break_bool(cfg.breakOnError, true)
+    launch_cfg.breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false)
+    launch_cfg.launchBrowser      = false  -- browser opened from Lua via al/openUri event
     dap.configurations.al = { launch_cfg }
 
     require("al.compile").compile(root, nil, function()
