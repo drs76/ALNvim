@@ -8,35 +8,52 @@ if not vim.g._al_user_colorscheme then
   vim.g._al_user_colorscheme = vim.g.colors_name or "default"
 end
 
--- WinEnter: apply bc_dark when focusing an AL window; restore user scheme for real
--- non-AL file windows.  Uses vim.schedule so the check runs after FileType has fired —
--- WinEnter can precede FileType when a new buffer is loaded (e.g. opening from neo-tree),
--- and ft="" at that point would cause the wrong branch to run.
--- BufWinEnter is intentionally NOT used: it fires when neo-tree swaps the editor's
--- buffer during preview/navigation, before focus moves there, causing the scheme to
--- change while the user is still in the tree ("jumping").
-local function al_colorscheme_check()
-  local buf = vim.api.nvim_get_current_buf()
-  local ft  = vim.bo[buf].filetype
-  local bt  = vim.bo[buf].buftype
+-- Two-event approach for colorscheme switching:
+--
+-- WinEnter  — handles switching between already-open windows. Filetype is known
+--             immediately so no deferral is needed. Ignored when ft="" (new buffer
+--             not yet loaded — FileType handles that case instead).
+--
+-- FileType  — handles new buffers being loaded (e.g. opening a file from neo-tree).
+--             Fires after the filetype is set, so ft is always correct here.
+--             Guards against neo-tree preview: only acts when the buffer whose
+--             filetype just changed IS the currently focused buffer (ev.buf ==
+--             current buf). When neo-tree shows a preview without moving focus,
+--             ev.buf is the preview buffer but current buf is still neo-tree —
+--             the guard prevents the scheme from changing in that case.
+
+local function al_apply(ft, bt)
   if ft == "al" then
-    if vim.g.colors_name ~= "bc_dark" then
-      vim.cmd("colorscheme bc_dark")
-    end
+    if vim.g.colors_name ~= "bc_dark" then vim.cmd("colorscheme bc_dark") end
   elseif bt == "" and ft ~= "" then
     if vim.g.colors_name == "bc_dark" then
-      local restore = vim.g._al_user_colorscheme or "default"
-      if restore ~= "bc_dark" then
-        vim.cmd("colorscheme " .. restore)
-      end
+      local r = vim.g._al_user_colorscheme or "default"
+      if r ~= "bc_dark" then vim.cmd("colorscheme " .. r) end
     end
   end
-  -- bt ~= "": special buffer (neo-tree, quickfix, etc.) — keep current scheme.
 end
 
+local _cs_group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true })
+
 vim.api.nvim_create_autocmd("WinEnter", {
-  group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true }),
-  callback = function() vim.schedule(al_colorscheme_check) end,
+  group = _cs_group,
+  callback = function()
+    local buf = vim.api.nvim_get_current_buf()
+    local ft  = vim.bo[buf].filetype
+    if ft == "" then return end   -- new buffer loading; FileType will handle it
+    al_apply(ft, vim.bo[buf].buftype)
+  end,
+})
+
+vim.api.nvim_create_autocmd("FileType", {
+  group = _cs_group,
+  callback = function(ev)
+    -- Only act when the buffer whose ft just changed is the focused buffer.
+    -- If neo-tree previews a file without moving focus, ev.buf is the preview
+    -- buffer but current buf is neo-tree — skip to avoid scheme jumping.
+    if vim.api.nvim_get_current_buf() ~= ev.buf then return end
+    al_apply(ev.match, vim.bo[ev.buf].buftype)
+  end,
 })
 
 -- ── ALInstallExtension — always available, even before extension is installed ─
