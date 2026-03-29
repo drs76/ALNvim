@@ -550,10 +550,12 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- schemaUpdateMode: how the adapter handles schema changes during publish.
   -- VSCode defaults to "synchronize". Absence causes nil publish body field.
   if cfg.schemaUpdateMode == nil then cfg.schemaUpdateMode = "synchronize" end
-  -- startupObjectType: paired with startupObjectId (default 22 = Customer List).
-  -- VSCode defaults to "Page". Missing this alongside startupObjectId can cause
-  -- a null-ref in the adapter when building the WebClient navigation URL.
+  -- startupObjectType / startupObjectId: paired defaults (Page 22 = Customer List).
+  -- VSCode defaults to "Page" / 22. Missing startupObjectId causes a NullReferenceException
+  -- in the adapter's on-prem WebClient URL builder (cloud uses al/openUri instead and
+  -- never hits this code path, which is why cloud works when on-prem does not).
   if cfg.startupObjectType == nil then cfg.startupObjectType = "Page" end
+  if cfg.startupObjectId   == nil then cfg.startupObjectId   = 22    end
   -- dependencyPublishingOption: controls how dependent apps are published.
   -- VSCode defaults to "default". Absence may cause adapter null-ref.
   if cfg.dependencyPublishingOption == nil then cfg.dependencyPublishingOption = "default" end
