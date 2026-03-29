@@ -45,9 +45,11 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
 
   -- Drop --fail so the BC error response body is captured; use -w to append the
   -- HTTP status as a sentinel line we can parse regardless of exit code.
+  -- BC 25+ requires application/zip; older versions accept application/octet-stream.
+  -- .app files are ZIP archives, so application/zip is more correct regardless.
   local cmd = {
     "curl", "-sL", "-X", "POST",
-    "-H", "Content-Type: application/octet-stream",
+    "-H", "Content-Type: application/zip",
     "--data-binary", "@" .. app_file,
     "-w", "\n__STATUS__%{http_code}",
   }
