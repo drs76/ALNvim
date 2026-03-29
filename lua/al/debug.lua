@@ -187,11 +187,10 @@ local function patch_launch_json(root, is_onprem)
           changed = true
         end
       end
-      -- launchBrowser: adapter's own browser open fails; handled from Lua
-      if cfg_entry.launchBrowser == true then
-        cfg_entry.launchBrowser = false
-        changed = true
-      end
+      -- launchBrowser: controlled via the DAP launch config, not via the file.
+      -- launchBrowser=true in the DAP config makes the adapter wait for a BC client
+      -- rather than failing immediately ("Could not publish"). We leave the file
+      -- value as-is so the adapter reads consistent settings from both sources.
       -- For on-prem (BCContainer): override environmentType so the adapter
       -- uses the on-prem publish path regardless of what launch.json says.
       if is_onprem and (cfg_entry.environmentType == "Sandbox"
@@ -489,10 +488,14 @@ function M.publish_only(root)
 
   -- noDebug=true tells the adapter to publish only — skip the debug session setup
   -- that would otherwise fail with "Could not publish" when no BC client is running.
+  -- launchBrowser=true: the adapter waits for a BC client to connect rather than
+  -- failing immediately with "Could not publish". We send a clean disconnect after
+  -- al/refreshExplorerObjects so the adapter exits without starting a debug session.
+  -- On Windows the adapter opens the browser natively; on Linux/macOS our xdg-open
+  -- stub is a no-op so we open it from Lua in the alnvim_publish_only handler.
   local launch_cfg = is_onprem and {
     type               = "al",
     request            = "launch",
-    noDebug            = true,
     name               = "AL: Publish (on-prem)",
     server             = cfg.server,
     serverInstance     = cfg.serverInstance,
@@ -508,11 +511,10 @@ function M.publish_only(root)
     numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
     startupObjectType  = cfg.startupObjectType or "Page",
     startupObjectId    = cfg.startupObjectId or 22,
-    launchBrowser      = false,
+    launchBrowser      = true,
   } or {
     type                = "al",
     request             = "launch",
-    noDebug             = true,
     name                = "AL: Publish (cloud)",
     schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
     environmentType     = cfg.environmentType,
@@ -525,7 +527,7 @@ function M.publish_only(root)
     breakOnNext         = cfg.breakOnNext or "WebClient",
     startupObjectType   = cfg.startupObjectType or "Page",
     startupObjectId     = cfg.startupObjectId or 22,
-    launchBrowser       = false,
+    launchBrowser       = true,
   }
 
   -- Show success as soon as publish is confirmed (al/refreshExplorerObjects).
@@ -536,7 +538,13 @@ function M.publish_only(root)
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
     dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
     vim.notify("AL: Published successfully", vim.log.levels.INFO)
-    -- Defer so the current event-processing loop completes before we send disconnect.
+    -- On Linux/macOS the adapter's xdg-open is a no-op stub so open from Lua.
+    -- On Windows, launchBrowser=true makes the adapter open the browser natively.
+    if not require("al.platform").is_windows then
+      require("al.platform").open_url(conn.webclient_url(cfg))
+    end
+    -- Disconnect cleanly so the adapter exits without starting a debug session.
+    -- Deferred so the current event-processing loop completes first.
     vim.schedule(function()
       if dap.session() then
         dap.disconnect({ terminateDebuggee = false })
@@ -652,15 +660,22 @@ function M.launch(root)
       numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
       startupObjectType  = cfg.startupObjectType or "Page",
       startupObjectId    = cfg.startupObjectId or 22,
-      launchBrowser      = false,
+      -- launchBrowser=true: adapter waits for a BC client to connect (opens browser
+      -- natively on Windows). Without this flag it fails immediately ("Could not
+      -- publish") because no client is running yet.
+      launchBrowser      = true,
     }
     dap.configurations.al = { launch_cfg }
 
     -- Open the browser after the adapter signals publish-complete.
-    -- This ensures the new version is deployed before the user's BC client connects.
+    -- On Linux/macOS: adapter's xdg-open stub is a no-op, so open from Lua.
+    -- On Windows: launchBrowser=true makes the adapter open the browser itself;
+    --             Lua opening here would create a duplicate tab so skip it.
     dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
       dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
-      open_browser_onprem()
+      if not require("al.platform").is_windows then
+        open_browser_onprem()
+      end
     end
 
     require("al.compile").compile(root, nil, function()
