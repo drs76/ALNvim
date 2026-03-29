@@ -25,6 +25,90 @@ local function safe_name(s)
   return (s or "Unknown"):gsub("[/\\%?%%*:|\"<>]", "_")
 end
 
+-- Open a floating window listing all packages with live status indicators.
+-- Returns (buf, win, first_pkg_line) where first_pkg_line is the 0-based line
+-- index of the first package entry (used to update individual rows).
+local function open_symbols_win(deps, base)
+  -- Header + blank line, then one line per package
+  local lines = { "  " .. base .. "  ", "" }
+  for _, dep in ipairs(deps) do
+    table.insert(lines, "  …  " .. (dep.publisher or "") .. " / " .. (dep.name or ""))
+  end
+
+  local width = 0
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 4) end
+  width = math.max(width, 52)
+  local height = #lines
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+  local ui  = vim.api.nvim_list_uis()[1]
+  local row = math.floor((ui.height - height) / 2)
+  local col = math.floor((ui.width  - width)  / 2)
+
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative  = "editor",
+    width     = width,
+    height    = height,
+    row       = row,
+    col       = col,
+    style     = "minimal",
+    border    = "rounded",
+    title     = " AL: Downloading Symbols ",
+    title_pos = "center",
+    noautocmd = true,
+  })
+  vim.wo[win].wrap = false
+
+  -- Highlight the header line dimly
+  local ns = vim.api.nvim_create_namespace("al_symbols")
+  vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+
+  return buf, win, ns
+end
+
+-- Update a single package row: replace spinner with ✓ or ✗ and apply highlight.
+local function set_pkg_status(buf, ns, line_idx, dep, ok)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local icon = ok and "✓" or "✗"
+  local text = "  " .. icon .. "  " .. (dep.publisher or "") .. " / " .. (dep.name or "")
+  vim.api.nvim_buf_set_lines(buf, line_idx, line_idx + 1, false, { text })
+  vim.api.nvim_buf_add_highlight(buf, ns, ok and "DiagnosticOk" or "DiagnosticError",
+    line_idx, 0, -1)
+end
+
+-- Append a summary line and close the window after a short delay.
+local function finish_win(buf, win, ns, failed_count)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local summary, hl
+  if failed_count == 0 then
+    summary = "  All packages downloaded successfully"
+    hl = "DiagnosticOk"
+  else
+    summary = string.format("  %d package(s) failed — see :messages", failed_count)
+    hl = "DiagnosticError"
+  end
+  vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", summary })
+  local last = vim.api.nvim_buf_line_count(buf)
+  vim.api.nvim_buf_add_highlight(buf, ns, hl, last - 1, 0, -1)
+  -- Resize window to fit the new line
+  if vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_set_height(win, last)
+  end
+  -- Auto-close after 3 s on success, leave open on failure so user can read it
+  if failed_count == 0 then
+    vim.defer_fn(function()
+      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    end, 3000)
+  else
+    -- Allow manual close with q / <Esc>
+    vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+  end
+end
+
 function M.download(root)
   root = root or lsp.get_root()
   if not root then
@@ -44,18 +128,8 @@ function M.download(root)
     return
   end
 
-
-  -- Build the download list from explicit dependencies plus a small set of
-  -- implicit Microsoft base packages that are always required for type resolution.
-  --
-  -- Implicit packages (added when not already in app.json dependencies):
-  --   System              — always needed (defines Label, Text, Integer, etc.)
-  --   System Application  — always needed
-  --   Base Application    — always needed (Customer, Vendor, and core tables)
-  --   Application         — always needed (country/localization layer)
-  --
-  -- NOT implicitly added:
-  --   (none — all five packages below are always required for full type resolution)
+  -- Build the download list from explicit dependencies plus implicit Microsoft
+  -- base packages that are always required for full type resolution.
   local deps = {}
   local base_pkgs = {
     { publisher = "Microsoft", name = "System",              version = app.platform    or "0.0.0.0" },
@@ -81,24 +155,24 @@ function M.download(root)
   vim.fn.mkdir(pkgdir, "p")
 
   local base   = conn.base_url(cfg)
-  -- Cloud launch.json uses primaryTenantDomain; on-prem uses tenant.
   local tenant = cfg.primaryTenantDomain or cfg.tenant or "default"
   local auth   = conn.curl_auth(cfg)
 
-  vim.notify(
-    string.format("AL: Downloading %d symbol package(s) from %s…", #deps, base),
-    vim.log.levels.INFO)
+  -- Open the progress float (header + blank + one row per package)
+  local buf, win, ns = open_symbols_win(deps, base)
+  -- Package rows start at line index 2 (0-based)
+  local PKG_LINE_OFFSET = 2
 
   local pending = #deps
   local failed  = {}
 
-  for _, dep in ipairs(deps) do
+  for idx, dep in ipairs(deps) do
     local url     = packages_url(base, dep, tenant)
     local outfile = string.format("%s/%s_%s_%s.app",
       pkgdir, safe_name(dep.publisher), safe_name(dep.name), dep.version or "0.0.0.0")
-    local label   = (dep.publisher or "") .. "_" .. (dep.name or "")
+    local line_idx = PKG_LINE_OFFSET + idx - 1  -- 0-based row for this package
 
-    -- -sS: silent progress but show errors; -L: follow redirects; --fail: non-zero on HTTP error
+    -- -sLS: silent progress but show errors; -L: follow redirects; --fail: non-zero on HTTP error
     local cmd = { "curl", "-sLS", "--fail" }
     vim.list_extend(cmd, auth)
     vim.list_extend(cmd, { "-o", outfile, url })
@@ -112,15 +186,17 @@ function M.download(root)
       end,
       on_exit = vim.schedule_wrap(function(_, code)
         pending = pending - 1
-        if code ~= 0 then
+        local ok = code == 0
+        set_pkg_status(buf, ns, line_idx, dep, ok)
+        if not ok then
+          local label  = (dep.publisher or "") .. " / " .. (dep.name or "")
           local detail = #err_buf > 0 and ("\n  " .. table.concat(err_buf, " ")) or ""
           table.insert(failed, label .. "\n  URL: " .. url .. detail)
           pcall(vim.uv.fs_unlink, outfile)
         end
         if pending == 0 then
-          if #failed == 0 then
-            vim.notify("AL: All symbol packages downloaded successfully", vim.log.levels.INFO)
-          else
+          finish_win(buf, win, ns, #failed)
+          if #failed > 0 then
             vim.notify(
               "AL: Failed to download:\n" .. table.concat(failed, "\n"),
               vim.log.levels.WARN)
