@@ -162,7 +162,10 @@ local function strip_jsonc(text)
   return table.concat(lines, "\n")
 end
 
-local function patch_launch_json(root)
+-- @param is_onprem  when true, also force environmentType → "OnPremises" so the
+--                   adapter doesn't mistake a BCContainer (environmentType=Sandbox
+--                   with a local server) for an Azure cloud environment.
+local function patch_launch_json(root, is_onprem)
   local path = root .. "/.vscode/launch.json"
   local f = io.open(path, "r")
   if not f then return nil end
@@ -187,6 +190,13 @@ local function patch_launch_json(root)
       -- launchBrowser: adapter's own browser open fails; handled from Lua
       if cfg_entry.launchBrowser == true then
         cfg_entry.launchBrowser = false
+        changed = true
+      end
+      -- For on-prem (BCContainer): override environmentType so the adapter
+      -- uses the on-prem publish path regardless of what launch.json says.
+      if is_onprem and (cfg_entry.environmentType == "Sandbox"
+                     or cfg_entry.environmentType == "Production") then
+        cfg_entry.environmentType = "OnPremises"
         changed = true
       end
     end
@@ -252,13 +262,12 @@ local function ensure_xdg_stub()
   return dir
 end
 
--- Register listeners for the two custom AL DAP events the adapter fires.
--- al/openUri   — adapter sends the real BC web client URL (with debug context)
---               after publishing; we open the browser here, not in open_browser().
--- al/deviceLogin — OAuth2 device code flow; adapter sends message + token + URI;
---               copy the code to clipboard and open the login URL.
--- al/launchDeviceLoginWindow — reverse request (server→client); adapter asks us
---               to open the browser for device login. Must send a response.
+-- Register listeners for custom AL DAP events the adapter fires.
+-- al/openUri              — real BC web client URL after publish (cloud / on-prem)
+-- al/deviceLogin          — OAuth2 device code flow
+-- al/launchDeviceLoginWindow — reverse request to open browser for device login
+-- al/refreshExplorerObjects — fired after a successful publish; used as the
+--                             publish-complete signal for the publish-only path
 local _al_dap_events_registered = false
 local function register_al_dap_events(dap)
   if _al_dap_events_registered then return end
@@ -288,6 +297,13 @@ local function register_al_dap_events(dap)
     if not (body and body.uri) then return end
     require("al.platform").open_url(body.uri)
     vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
+  end
+
+  -- Fired by the adapter after a successful publish on all environment types.
+  -- For publish-only mode a one-shot listener overrides this; here we just
+  -- notify so the user knows the deploy went through.
+  dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim"] = function()
+    vim.notify("AL: App published to BC successfully", vim.log.levels.INFO)
   end
 
   dap.listeners.before["event_al/deviceLogin"]["alnvim"] = function(_, body)
@@ -419,6 +435,98 @@ function M.setup_dap(root)
     vim.log.levels.INFO)
 end
 
+-- Publish the compiled .app to BC via the adapter without starting a debug session.
+-- Works on all BC versions (adapter handles the correct publish API internally).
+-- Falls back to direct HTTP publish if nvim-dap is not installed.
+function M.publish_only(root)
+  local ok, dap = pcall(require, "dap")
+  if not ok then
+    -- nvim-dap not available — fall back to direct HTTP publish
+    require("al.publish").publish(root)
+    return
+  end
+
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+
+  local cfg = conn.read_launch(root)
+  if not cfg then
+    vim.notify("AL: No AL launch config found in .vscode/launch.json", vim.log.levels.ERROR)
+    return
+  end
+
+  patch_dap_nil_command(dap)
+  register_al_dap_events(dap)
+
+  local ext  = require("al").config.ext_path or require("al.ext").path
+  local p    = require("al.platform")
+  local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+  local is_onprem = not conn.is_cloud(cfg)
+
+  dap.adapters.al = {
+    type    = "executable",
+    command = host,
+    args    = { "/startDebugging", "/projectRoot:" .. root },
+    options = {
+      env      = make_adapter_env(),
+      detached = not p.is_windows,
+      initialize_timeout_sec = 30,
+    },
+  }
+
+  local launch_cfg = is_onprem and {
+    type             = "al",
+    request          = "launch",
+    name             = "AL: Publish (on-prem)",
+    server           = cfg.server,
+    serverInstance   = cfg.serverInstance,
+    authentication   = cfg.authentication or "Windows",
+    tenant           = cfg.tenant or "default",
+    schemaUpdateMode = cfg.schemaUpdateMode or "synchronize",
+    launchBrowser    = false,
+  } or {
+    type                = "al",
+    request             = "launch",
+    name                = "AL: Publish (cloud)",
+    schemaUpdateMode    = cfg.schemaUpdateMode or "synchronize",
+    environmentType     = cfg.environmentType,
+    environmentName     = cfg.environmentName,
+    tenant              = cfg.tenant,
+    primaryTenantDomain = cfg.primaryTenantDomain,
+    authentication      = cfg.authentication or "MicrosoftEntraID",
+    launchBrowser       = false,
+  }
+
+  -- Disconnect as soon as publish is confirmed (al/refreshExplorerObjects).
+  -- Override the persistent handler just for this session.
+  dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
+    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
+    vim.notify("AL: Published successfully", vim.log.levels.INFO)
+    vim.defer_fn(function() pcall(dap.disconnect) end, 200)
+  end
+
+  require("al.compile").compile(root, nil, function()
+    local bak = patch_launch_json(root, is_onprem)
+    if bak then
+      local restored = false
+      local function restore()
+        if not restored then
+          restored = true
+          dap.listeners.after.event_terminated["alnvim_restore_pub"] = nil
+          dap.listeners.after.event_exited["alnvim_restore_pub"]     = nil
+          restore_launch_json(root, bak)
+        end
+      end
+      dap.listeners.after.event_terminated["alnvim_restore_pub"] = restore
+      dap.listeners.after.event_exited["alnvim_restore_pub"]     = restore
+    end
+    dap.run(launch_cfg)
+  end)
+end
+
 function M.launch(root)
   local ok, dap = pcall(require, "dap")
   if not ok then
@@ -473,10 +581,10 @@ function M.launch(root)
     }
   end
 
-  -- For on-prem "attach" path only: open the BC web client after HTTP publish
-  -- so the user can start a session. Cloud uses al/openUri from the adapter instead.
+  -- Open the BC web client after publish so the user can start a session.
+  -- Always opens for on-prem ALLaunch (the whole point is to start a debug session).
+  -- Cloud receives the real URL (with debug context) via al/openUri instead.
   local function open_browser_onprem()
-    if not cfg.launchBrowser then return end
     local url = conn.webclient_url(cfg)
     require("al.platform").open_url(url)
     vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
@@ -514,7 +622,7 @@ function M.launch(root)
 
     require("al.compile").compile(root, nil, function()
       vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
-      local bak = patch_launch_json(root)
+      local bak = patch_launch_json(root, true)  -- true = on-prem: fix environmentType
       if bak then
         local restored = false
         local function restore()

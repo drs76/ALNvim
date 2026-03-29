@@ -304,15 +304,17 @@ end, {
 })
 
 vim.api.nvim_create_user_command("ALPublish", function(opts)
-  require("al.publish").publish(opts.args ~= "" and opts.args or nil)
+  -- Uses the adapter for publishing (all BC versions). Falls back to direct
+  -- HTTP publish if nvim-dap is not installed (works on BC < 25 only).
+  require("al.debug").publish_only(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
   complete = "dir",
-  desc  = "Compile then publish the AL app to Business Central",
+  desc  = "Compile then publish the AL app to Business Central (all BC versions)",
 })
 
 vim.api.nvim_create_user_command("ALPublishOnly", function(opts)
-  require("al.publish").publish(opts.args ~= "" and opts.args or nil, true)
+  require("al.debug").publish_only(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
   complete = "dir",
