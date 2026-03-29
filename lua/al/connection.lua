@@ -62,7 +62,7 @@ end
 --   1. cfg.port field in launch.json  (e.g. "port": 7049)
 --   2. Port already present in cfg.server  (e.g. "server": "http://bc27:7049")
 --   3. Default: 7049  (BC NST dev service port — BCContainer and standard NST)
-function M.M.is_cloud(cfg)
+function M.is_cloud(cfg)
   local cloud_type = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
   if not cloud_type then return false end
   -- If a server is explicitly set and points to a non-Microsoft host, treat as on-prem.
