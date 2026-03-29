@@ -631,6 +631,10 @@ function M.publish_only(root)
     -- Do NOT override environmentType or usePublicURLFromServer — pass through from launch.json.
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
+    if user and user ~= "" then
+      launch_cfg.userName = user
+      launch_cfg.password = pass
+    end
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -743,6 +747,14 @@ function M.launch(root)
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
+      -- For UserPassword auth, pass credentials directly in the DAP request.
+      -- The adapter's Windows Credential Manager lookup key differs from what
+      -- al/saveUsernamePassword stores (different config shape), so the store
+      -- lookup fails. Providing them directly bypasses the credential store.
+      if user and user ~= "" then
+        launch_cfg.userName = user
+        launch_cfg.password = pass
+      end
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
