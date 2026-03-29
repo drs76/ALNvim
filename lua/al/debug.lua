@@ -331,17 +331,6 @@ local function register_al_dap_events(dap)
   if _al_dap_events_registered then return end
   _al_dap_events_registered = true
 
-  -- Spoof VS Code's initialize handshake fields.
-  -- The AL adapter may switch code paths based on clientID/adapterID — VS Code always
-  -- sends adapterID="al", clientID="vscode", clientName="Visual Studio Code - Insiders".
-  -- nvim-dap sends adapterID="nvim-dap", clientID="neovim" which the adapter may not
-  -- recognise, potentially disabling or changing debug session registration.
-  dap.listeners.before.initialize["alnvim_vscode_compat"] = function(_, body)
-    body.adapterID  = "al"
-    body.clientID   = "vscode"
-    body.clientName = "Visual Studio Code - Insiders"
-  end
-
   -- Show all adapter output events in the floating window.
   dap.listeners.before["event_output"]["alnvim_output"] = function(_, body)
     if not (body and body.output) then return end
@@ -585,6 +574,7 @@ function M.publish_only(root)
 
     dap.adapters.al = {
       type    = "executable",
+      id      = "al",     -- nvim-dap sends this as adapterID in DAP initialize
       command = host,
       args    = { "/startDebugging", "/logLevel:Verbose",
                   "/projectRoot:" .. require("al.platform").native_path(root) },
@@ -702,6 +692,7 @@ function M.launch(root)
     local function register_adapter()
       dap.adapters.al = {
         type    = "executable",
+        id      = "al",     -- nvim-dap sends this as adapterID in DAP initialize
         command = host,
         args    = { "/startDebugging", "/logLevel:Verbose",
                     "/projectRoot:" .. require("al.platform").native_path(root) },
