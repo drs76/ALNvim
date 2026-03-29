@@ -557,11 +557,12 @@ function M.publish_only(root)
     }
 
     -- Pass through ALL fields from the selected launch.json config so nothing is
-    -- accidentally dropped (port, usePublicURLFromServer, future fields, etc.).
-    -- Only override what the adapter strictly requires:
+    -- accidentally dropped (port, future fields, etc.).
+    -- Override only what the adapter strictly requires or what BCContainerHelper
+    -- sets incorrectly for local containers:
     --   • breakOnError/breakOnRecordWrite → boolean (C# deserialiser rejects strings)
-    --   • userName/password → injected for UserPassword auth (VSCode reads from its
-    --     secure credential store; we resolve via the same credential chain as curl_auth)
+    --   • userName/password → injected for UserPassword auth
+    --   • usePublicURLFromServer → forced false for on-prem (see below)
     local launch_cfg = vim.deepcopy(cfg)
     launch_cfg.type    = "al"
     launch_cfg.request = "launch"
@@ -576,7 +577,14 @@ function M.publish_only(root)
     -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
     -- Force "OnPrem" so the adapter uses on-prem routing, not cloud Entra auth.
     if not conn.is_cloud(cfg) then
-      launch_cfg.environmentType = "OnPrem"
+      launch_cfg.environmentType       = "OnPrem"
+      -- BCContainerHelper sets usePublicURLFromServer=true which causes the adapter
+      -- to ask BC for its Azure-hosted public URL before publishing. On a local
+      -- container that request triggers AAD configuration validation — even when the
+      -- container isn't connected to AAD — and BC returns HTTP 500 if the AAD settings
+      -- conflict (e.g. both CertificateThumbprint and ClientSecret are set).
+      -- Force false so the web client URL is derived locally from server+serverInstance.
+      launch_cfg.usePublicURLFromServer = false
     end
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
@@ -682,7 +690,14 @@ function M.launch(root)
       end
       -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
       -- Force "OnPrem" so the adapter uses on-prem routing and auth, not cloud Entra.
-      launch_cfg.environmentType = "OnPrem"
+      launch_cfg.environmentType       = "OnPrem"
+      -- BCContainerHelper sets usePublicURLFromServer=true which causes the adapter to
+      -- ask BC for its Azure-hosted public URL before publishing. On a local container
+      -- this triggers AAD config validation and returns HTTP 500 if both
+      -- AzureActiveDirectoryClientCertificateThumbprint and AzureActiveDirectoryClientSecret
+      -- are set (a common BCContainerHelper default). Force false so the web client URL
+      -- is built locally from server+serverInstance — matching VSCode's on-prem behaviour.
+      launch_cfg.usePublicURLFromServer = false
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
