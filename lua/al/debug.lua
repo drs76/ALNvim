@@ -441,6 +441,13 @@ function M.publish_only(root)
     if not p.is_windows then
       launch_cfg.launchBrowser = false
     end
+    -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
+    -- Our is_cloud() correctly identifies this as on-prem, but the adapter only checks
+    -- environmentType and would switch to cloud (Entra) logic — causing "An internal
+    -- error has occurred". Force "OnPrem" so the adapter uses on-prem routing.
+    if not conn.is_cloud(cfg) then
+      launch_cfg.environmentType = "OnPrem"
+    end
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
@@ -530,6 +537,9 @@ function M.launch(root)
       if not p.is_windows then
         launch_cfg.launchBrowser = false
       end
+      -- BCContainer launch.json uses environmentType="Sandbox" with a custom server URL.
+      -- Force "OnPrem" so the adapter uses on-prem routing and auth, not cloud Entra.
+      launch_cfg.environmentType = "OnPrem"
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
