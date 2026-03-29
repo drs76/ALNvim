@@ -82,6 +82,16 @@ function M.glob_al_files(root)
   end, files)
 end
 
+-- Convert a path to the OS-native separator.
+-- On Windows, replaces forward slashes with backslashes.
+-- On Linux/macOS, returns the path unchanged.
+function M.native_path(path)
+  if M.is_windows then
+    return (path:gsub("/", "\\"))
+  end
+  return path
+end
+
 -- Stderr null-redirect suitable for the current shell.
 -- Use by appending to a string passed to vim.fn.system(), not to table-form jobstart.
 function M.devnull()

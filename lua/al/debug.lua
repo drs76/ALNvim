@@ -322,7 +322,7 @@ function M.setup_dap(root)
     dap.adapters.al = {
       type    = "executable",
       command = host,
-      args    = { "/startDebugging", "/projectRoot:" .. root },
+      args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
       options = {
         env      = make_adapter_env(),
         detached = not p.is_windows,
@@ -404,7 +404,7 @@ function M.publish_only(root)
     dap.adapters.al = {
       type    = "executable",
       command = host,
-      args    = { "/startDebugging", "/projectRoot:" .. root },
+      args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
       options = {
         env      = make_adapter_env(),
         detached = not p.is_windows,
@@ -495,7 +495,7 @@ function M.launch(root)
       dap.adapters.al = {
         type    = "executable",
         command = host,
-        args    = { "/startDebugging", "/projectRoot:" .. root },
+        args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
         options = {
           env      = make_adapter_env(),
           detached = not p.is_windows,
