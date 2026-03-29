@@ -374,7 +374,8 @@ function M.setup_dap(root)
     command = host,
     args    = { "/startDebugging", "/projectRoot:" .. root },
     options = {
-      env = make_adapter_env(),
+      env      = make_adapter_env(),
+      detached = not require("al.platform").is_windows,  -- false on Windows: prevents .NET Console handle error
       initialize_timeout_sec = 30,
     },
   }
@@ -453,7 +454,8 @@ function M.launch(root)
       command = host,
       args    = { "/startDebugging", "/projectRoot:" .. root },
       options = {
-        env = make_adapter_env(),
+        env      = make_adapter_env(),
+        detached = not require("al.platform").is_windows,  -- false on Windows: prevents .NET Console handle error
         initialize_timeout_sec = 30,
       },
       -- al/launchDeviceLoginWindow is a server-initiated request asking us to
