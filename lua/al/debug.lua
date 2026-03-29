@@ -204,29 +204,24 @@ end
 -- ── Adapter output floating window ───────────────────────────────────────────
 -- Shows all DAP "output" events from the adapter in a non-focused float.
 -- Useful for diagnosing publish failures ("An internal error has occurred" etc).
-local _out_buf = nil
-local _out_win = nil
+-- The buffer is kept alive across window closes (bufhidden=hide) so previous
+-- output is always visible when the window is reopened (manually or on new output).
+local _out_buf     = nil   -- persists for the lifetime of the Neovim session
+local _out_win     = nil   -- nil when closed; recreated by ensure_output_win()
+local _out_win_auid = nil  -- autocmd id watching for WinClosed
 
 local function reset_output_win()
+  -- Clear content for the new launch; keep the buffer alive for reuse.
   if _out_buf and vim.api.nvim_buf_is_valid(_out_buf) then
     vim.api.nvim_buf_set_lines(_out_buf, 0, -1, false, {})
+    return  -- window (if still open) is reused as-is
   end
-  if _out_win and vim.api.nvim_win_is_valid(_out_win) then
-    return  -- reuse existing window
-  end
-  _out_buf = nil
-  _out_win = nil
+  _out_buf = nil  -- buffer was deleted externally; will be re-created on demand
 end
 
-local function ensure_output_win()
-  if _out_buf and vim.api.nvim_buf_is_valid(_out_buf)
-     and _out_win and vim.api.nvim_win_is_valid(_out_win) then
-    return _out_buf, _out_win
-  end
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "hide"
-  local w  = math.min(96, vim.o.columns - 4)
-  local h  = math.min(14, math.floor(vim.o.lines * 0.35))
+local function open_output_win(buf)
+  local w   = math.min(96, vim.o.columns - 4)
+  local h   = math.min(14, math.floor(vim.o.lines * 0.35))
   local row = vim.o.lines - h - 3
   local col = math.floor((vim.o.columns - w) / 2)
   local win = vim.api.nvim_open_win(buf, false, {
@@ -245,9 +240,54 @@ local function ensure_output_win()
   vim.keymap.set("n", "q", function()
     pcall(vim.api.nvim_win_close, win, true)
   end, { buffer = buf, nowait = true, silent = true })
-  _out_buf = buf
   _out_win = win
+  -- Watch for the window being closed by anything (DapLog, :q, etc.) and
+  -- update _out_win so the next ensure_output_win() recreates it correctly.
+  if _out_win_auid then pcall(vim.api.nvim_del_autocmd, _out_win_auid) end
+  _out_win_auid = vim.api.nvim_create_autocmd("WinClosed", {
+    pattern  = tostring(win),
+    once     = true,
+    callback = function()
+      _out_win     = nil
+      _out_win_auid = nil
+    end,
+  })
+  return win
+end
+
+local function ensure_output_win()
+  -- Fast path: both buffer and window are still alive.
+  if _out_buf and vim.api.nvim_buf_is_valid(_out_buf)
+     and _out_win and vim.api.nvim_win_is_valid(_out_win) then
+    return _out_buf, _out_win
+  end
+  -- Reuse the existing buffer (content preserved) or create a fresh one.
+  local buf
+  if _out_buf and vim.api.nvim_buf_is_valid(_out_buf) then
+    buf = _out_buf
+  else
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "hide"
+    _out_buf = buf
+  end
+  local win = open_output_win(buf)
   return buf, win
+end
+
+-- Show (or reopen) the adapter output window. Exported as M.show_output().
+local function show_output_win()
+  if not (_out_buf and vim.api.nvim_buf_is_valid(_out_buf))
+     or vim.api.nvim_buf_line_count(_out_buf) == 0 then
+    vim.notify("AL: No adapter output yet (run :ALLaunch first)", vim.log.levels.WARN)
+    return
+  end
+  if _out_win and vim.api.nvim_win_is_valid(_out_win) then
+    vim.api.nvim_set_current_win(_out_win)
+    return
+  end
+  open_output_win(_out_buf)
+  pcall(vim.api.nvim_win_set_cursor, _out_win,
+    { vim.api.nvim_buf_line_count(_out_buf), 0 })
 end
 
 -- Register listeners for custom AL DAP events the adapter fires.
@@ -700,5 +740,7 @@ function M.launch(root)
     end)
   end)
 end
+
+M.show_output = show_output_win
 
 return M

@@ -349,6 +349,10 @@ end, {
   desc  = "Compile, publish and attach debugger (F5 equivalent)",
 })
 
+vim.api.nvim_create_user_command("ALDapOutput", function()
+  require("al.debug").show_output()
+end, { desc = "Show (or reopen) the AL adapter output floating window" })
+
 vim.api.nvim_create_user_command("ALOpenAppJson", function()
   require("al.compile").open_app_json()
 end, { desc = "Open the project's app.json" })
