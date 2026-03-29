@@ -475,18 +475,37 @@ function M.publish_only(root)
       detached = not p.is_windows,
       initialize_timeout_sec = 30,
     },
+    reverse_request_handlers = {
+      ["al/launchDeviceLoginWindow"] = function(session, request)
+        local uri = ((request.arguments or {}).Uri or "")
+        if uri ~= "" then
+          require("al.platform").open_url(uri)
+          vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
+        end
+        session:response(request, {})
+      end,
+    },
   }
 
   local launch_cfg = is_onprem and {
-    type             = "al",
-    request          = "launch",
-    name             = "AL: Publish (on-prem)",
-    server           = cfg.server,
-    serverInstance   = cfg.serverInstance,
-    authentication   = cfg.authentication or "Windows",
-    tenant           = cfg.tenant or "default",
-    schemaUpdateMode = cfg.schemaUpdateMode or "synchronize",
-    launchBrowser    = false,
+    type               = "al",
+    request            = "launch",
+    name               = "AL: Publish (on-prem)",
+    server             = cfg.server,
+    serverInstance     = cfg.serverInstance,
+    authentication     = cfg.authentication or "Windows",
+    tenant             = cfg.tenant or "default",
+    schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
+    breakOnError       = false,
+    breakOnRecordWrite = false,
+    breakOnNext        = cfg.breakOnNext or "WebClient",
+    enableSqlInformationDebugger      = false,
+    enableLongRunningSqlStatements    = false,
+    longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
+    numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
+    startupObjectType  = cfg.startupObjectType or "Page",
+    startupObjectId    = cfg.startupObjectId or 22,
+    launchBrowser      = false,
   } or {
     type                = "al",
     request             = "launch",
@@ -497,6 +516,11 @@ function M.publish_only(root)
     tenant              = cfg.tenant,
     primaryTenantDomain = cfg.primaryTenantDomain,
     authentication      = cfg.authentication or "MicrosoftEntraID",
+    breakOnError        = false,
+    breakOnRecordWrite  = false,
+    breakOnNext         = cfg.breakOnNext or "WebClient",
+    startupObjectType   = cfg.startupObjectType or "Page",
+    startupObjectId     = cfg.startupObjectId or 22,
     launchBrowser       = false,
   }
 
