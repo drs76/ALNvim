@@ -542,6 +542,20 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.directory == nil and root then
     cfg.directory = require("al.platform").native_path(root)
   end
+  -- breakOnNext: which BC client type to break on when a session connects.
+  -- VSCode defaults to "WebClient" when not set. BC debug registration requires
+  -- this field — a nil value causes BC to return "An internal error has occurred".
+  if cfg.breakOnNext == nil then cfg.breakOnNext = "WebClient" end
+  -- schemaUpdateMode: how the adapter handles schema changes during publish.
+  -- VSCode defaults to "synchronize". Absence causes nil publish body field.
+  if cfg.schemaUpdateMode == nil then cfg.schemaUpdateMode = "synchronize" end
+  -- startupObjectType: paired with startupObjectId (default 22 = Customer List).
+  -- VSCode defaults to "Page". Missing this alongside startupObjectId can cause
+  -- a null-ref in the adapter when building the WebClient navigation URL.
+  if cfg.startupObjectType == nil then cfg.startupObjectType = "Page" end
+  -- dependencyPublishingOption: controls how dependent apps are published.
+  -- VSCode defaults to "default". Absence may cause adapter null-ref.
+  if cfg.dependencyPublishingOption == nil then cfg.dependencyPublishingOption = "default" end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
@@ -739,13 +753,6 @@ function M.launch(root)
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
-      -- Belt+suspenders: include credentials directly in the launch request so the
-      -- adapter has them available for debug session registration, even if the WCM
-      -- lookup by environmentType key produces a miss on first run.
-      if user and user ~= "" then
-        launch_cfg.userName = user
-        launch_cfg.password = pass
-      end
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
