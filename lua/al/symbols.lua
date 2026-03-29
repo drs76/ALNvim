@@ -44,6 +44,19 @@ function M.download(root)
     return
   end
 
+  -- Warn early if the launch.json looks like a cloud template used against on-prem.
+  -- Sandbox/Production without a real tenant domain routes to api.businesscentral.dynamics.com
+  -- which returns 400 for BCContainer/on-prem setups.
+  local is_cloud_type = cfg.environmentType == "Sandbox" or cfg.environmentType == "Production"
+  local has_tenant    = cfg.primaryTenantDomain and cfg.primaryTenantDomain ~= ""
+  if is_cloud_type and not has_tenant then
+    vim.notify(
+      "AL: launch.json has environmentType=\"" .. cfg.environmentType .. "\" but no primaryTenantDomain.\n"
+      .. "For BCContainer/on-prem: remove environmentType (or set to \"OnPrem\") and add \"port\": 7049.\n"
+      .. "Attempting download anyway — expect 400 errors if this is not a cloud environment.",
+      vim.log.levels.WARN)
+  end
+
   -- Always include the implicit Microsoft base packages, unless already listed
   -- as an explicit dependency. "System" uses the platform version; the rest
   -- use the application version.
