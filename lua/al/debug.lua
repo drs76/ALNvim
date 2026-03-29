@@ -531,21 +531,18 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- validateServerCertificate: VSCode sends r.validateServerCertificate ?? true.
   if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
   -- useMcpServerForDebugging: when true the adapter uses BC Management Services (port 7047)
-  -- for publishing instead of the dev endpoint (port 7049). BCContainerHelper containers
-  -- do not expose port 7047, so this must be false for on-prem. Cloud adapters handle it
-  -- differently and this field is irrelevant there (cloud uses Entra auth flow).
-  -- The AL 18.0 extension defaults this to true — we override to false for on-prem.
-  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = false end
+  -- for BOTH publish and debug session registration instead of the dev endpoint (port 7049).
+  -- AL 18.0 / VSCode defaults this to true. BCContainerHelper containers expose port 7047
+  -- by default (alongside 7049), so using true should work and matches VSCode behaviour.
+  -- BC's dev endpoint (7049) does not support live debug session registration in newer BC
+  -- versions — only port 7047 (MCP) does — which explains why false always fails.
+  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = true end
   if cfg.mcpServerPort            == nil then cfg.mcpServerPort            = 7047 end
   -- directory: where the adapter looks for the compiled .app file.
   -- VSCode always sends this (as getAlParams().outFolder). Default to the project root.
   if cfg.directory == nil and root then
     cfg.directory = require("al.platform").native_path(root)
   end
-  -- breakOnNext: which BC client type to break on when a session connects.
-  -- VSCode defaults to "WebClient" when not set. BC debug registration requires
-  -- this field — a nil value causes BC to return "An internal error has occurred".
-  if cfg.breakOnNext == nil then cfg.breakOnNext = "WebClient" end
   -- schemaUpdateMode: how the adapter handles schema changes during publish.
   -- VSCode defaults to "synchronize". Absence causes nil publish body field.
   if cfg.schemaUpdateMode == nil then cfg.schemaUpdateMode = "synchronize" end
@@ -633,10 +630,6 @@ function M.publish_only(root)
     end
     -- Publish-only: never break on errors (not a debug session).
     apply_vscode_defaults(launch_cfg, root, false, false)
-    if not conn.is_cloud(cfg) and user and user ~= "" then
-      launch_cfg.userName = user
-      launch_cfg.password = pass
-    end
 
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
