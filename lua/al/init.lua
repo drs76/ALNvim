@@ -22,6 +22,9 @@ M.defaults = {
   -- Relative path inside the project root where symbol packages are cached
   packagecachepath = ".alpackages",
 
+  -- Side the compile results panel opens on: "left" or "right"
+  compile_side = "left",
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

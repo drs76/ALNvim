@@ -53,15 +53,17 @@ end
 -- Open a left vertical split for build output. Returns (buf, win).
 -- The right-hand window (where the file was) is used for <CR> jump-to-error.
 local function open_build_win(title)
-  -- Remember the current window — it becomes the right (file) pane after the split.
-  local right_win = vim.api.nvim_get_current_win()
+  -- Remember the current window — it becomes the file pane after the split.
+  local file_win = vim.api.nvim_get_current_win()
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
 
-  -- Open a fixed-width left split and put the build buffer in it.
+  -- Open a fixed-width split on the configured side.
+  local side = (require("al").config.compile_side or "left")
+  local split_cmd = side == "right" and "botright vsplit" or "topleft vsplit"
   local split_width = math.max(60, math.floor(vim.o.columns * 0.40))
-  vim.cmd("topleft vsplit")
+  vim.cmd(split_cmd)
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)
   vim.api.nvim_win_set_width(win, split_width)
@@ -81,7 +83,7 @@ local function open_build_win(title)
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
-    local target = vim.api.nvim_win_is_valid(right_win) and right_win or (function()
+    local target = vim.api.nvim_win_is_valid(file_win) and file_win or (function()
       for _, w in ipairs(vim.api.nvim_list_wins()) do
         if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then return w end
       end
