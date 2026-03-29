@@ -77,15 +77,25 @@ local function open_build_win(title)
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
 
-  -- <CR> on a diagnostic line: close float and jump to file/line
+  -- <CR> on a diagnostic line: open file behind the float, keep float open
   vim.keymap.set("n", "<CR>", function()
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
-    vim.api.nvim_win_close(win, true)
-    vim.cmd("edit " .. vim.fn.fnameescape(file))
-    pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
-    vim.cmd("normal! zz")
+    -- Find the first non-floating window to open the file in
+    local target
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_win_get_config(w).relative == "" then
+        target = w
+        break
+      end
+    end
+    if not target then return end
+    vim.api.nvim_win_call(target, function()
+      vim.cmd("edit " .. vim.fn.fnameescape(file))
+      pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
+      vim.cmd("normal! zz")
+    end)
   end, { buffer = buf, nowait = true, silent = true })
 
   return buf, win
