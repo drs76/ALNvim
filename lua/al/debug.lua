@@ -505,15 +505,11 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   if cfg.dependencyPublishingOption == nil then
     cfg.dependencyPublishingOption = "Ignore"
   end
-  -- Embed port in the server URL when absent so the adapter can't possibly miss it.
-  -- Different adapter versions handle the separate 'port' field inconsistently; the
-  -- server URL with an explicit port is always unambiguous.
-  -- BCContainerHelper and standard NST use 7049 — same default as connection.base_url().
+  -- Ensure the port field is set so the adapter knows which port to use.
+  -- Do NOT embed port into the server URL — VSCode passes server as-is and port separately.
+  -- Embedding causes a double-port URL (e.g. http://bc27:7049:7049/BC) if the adapter
+  -- constructs the URL as server + ":" + port + "/" + instance.
   if cfg.port == nil then cfg.port = 7049 end
-  local srv = cfg.server or ""
-  if srv ~= "" and not srv:match(":%d+") then
-    cfg.server = srv .. ":" .. tostring(cfg.port)
-  end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
