@@ -25,6 +25,33 @@ end
 local conn  = require("al.connection")
 local lsp   = require("al.lsp")
 
+-- Save UserPassword credentials to the AL LSP credential store before launching.
+-- VSCode calls al/saveUsernamePassword on the LSP server before starting the debug
+-- adapter; the adapter reads credentials from the store (Windows Credential Manager)
+-- rather than from the DAP launch request. Without this call the credential store
+-- is empty and the adapter cannot authenticate with BC.
+-- Calls cb() immediately if UserPassword auth is not in use or no LSP client exists.
+local function save_creds_to_lsp(cfg, user, pass, cb)
+  if not user or user == "" then cb(); return end
+  local auth = cfg.authentication or ""
+  if auth ~= "UserPassword" and auth ~= "NavUserPassword" then cb(); return end
+  local clients = vim.lsp.get_clients({ name = "al_language_server" })
+  if #clients == 0 then cb(); return end
+  local client = clients[1]
+  local attached = vim.lsp.get_buffers_by_client_id(client.id)
+  local bufnr = (attached and #attached > 0) and attached[1] or 0
+  client:request("al/saveUsernamePassword", {
+    configuration = cfg,
+    credentials   = { username = user, password = pass },
+  }, function(err)
+    if err then
+      vim.notify("AL: Warning — could not save credentials to LSP: " .. tostring(err.message or err),
+        vim.log.levels.WARN)
+    end
+    cb()
+  end, bufnr)
+end
+
 -- ── Snapshot debugging ────────────────────────────────────────────────────────
 
 -- BC dev snapshot API endpoints (on-prem):
@@ -619,7 +646,9 @@ function M.publish_only(root)
         return
       end
       vim.notify("AL: Publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …", vim.log.levels.INFO)
-      dap.run(launch_cfg)
+      save_creds_to_lsp(cfg, user, pass, function()
+        dap.run(launch_cfg)
+      end)
     end)
   end)
 end
@@ -722,8 +751,12 @@ function M.launch(root)
         vim.notify(
           "AL: Compile succeeded — publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …",
           vim.log.levels.INFO)
-        register_adapter()
-        dap.run(launch_cfg)
+        -- Save credentials to LSP store before starting the adapter.
+        -- The adapter reads credentials from there, not from the DAP launch request.
+        save_creds_to_lsp(cfg, user, pass, function()
+          register_adapter()
+          dap.run(launch_cfg)
+        end)
       end)
       return
     end
