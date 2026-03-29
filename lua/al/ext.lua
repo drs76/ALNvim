@@ -41,8 +41,8 @@ local function find()
   local searched = {}
 
   for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
-    -- expand "~/.vscode" etc. — no wildcard so no double-expansion (see CLAUDE.md)
-    local base = vim.fn.expand("~/" .. subdir) .. "/extensions"
+    -- Expand only "~" then concatenate (see CLAUDE.md glob pitfall note).
+    local base = vim.fn.expand("~") .. "/" .. subdir .. "/extensions"
     table.insert(searched, base)
     local matched = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
     for _, d in ipairs(matched) do

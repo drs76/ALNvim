@@ -172,9 +172,15 @@ local function patch_launch_json(root, is_onprem)
   local original = f:read("*a")
   f:close()
 
-  -- Parse via JSON (stripping JSONC comments first)
-  local ok, data = pcall(vim.fn.json_decode, strip_jsonc(original))
-  if not ok or type(data) ~= "table" then return nil end
+  -- Parse via JSON (stripping JSONC comments and trailing commas first)
+  local cleaned = strip_jsonc(original)
+  -- Remove trailing commas before ] and } (common in hand-edited launch.json)
+  cleaned = cleaned:gsub(",%s*([%]}])", "%1")
+  local ok, data = pcall(vim.fn.json_decode, cleaned)
+  if not ok or type(data) ~= "table" then
+    vim.notify("AL: Could not parse launch.json for patching: " .. tostring(data), vim.log.levels.WARN)
+    return nil
+  end
 
   local changed = false
   for _, cfg_entry in ipairs(data.configurations or {}) do
@@ -215,7 +221,11 @@ local function patch_launch_json(root, is_onprem)
 
   -- Write patched JSON (comments stripped, but backup restores the original)
   local fw = io.open(path, "w")
-  if not fw then os.remove(bak) return nil end
+  if not fw then
+    vim.notify("AL: Could not write patched launch.json (check file permissions)", vim.log.levels.WARN)
+    os.remove(bak)
+    return nil
+  end
   fw:write(vim.fn.json_encode(data))
   fw:close()
 
