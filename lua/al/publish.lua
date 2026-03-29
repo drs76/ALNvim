@@ -45,11 +45,12 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
 
   -- Drop --fail so the BC error response body is captured; use -w to append the
   -- HTTP status as a sentinel line we can parse regardless of exit code.
-  -- BC 25+ requires application/zip; older versions accept application/octet-stream.
-  -- .app files are ZIP archives, so application/zip is more correct regardless.
+  -- BC 25+ changed the /dev/apps publish endpoint; direct HTTP upload may return
+  -- 415 on newer versions. For debugging use :ALLaunch — the adapter handles
+  -- publishing internally for all BC versions. :ALPublish works on BC < 25.
   local cmd = {
     "curl", "-sL", "-X", "POST",
-    "-H", "Content-Type: application/zip",
+    "-H", "Content-Type: application/octet-stream",
     "--data-binary", "@" .. app_file,
     "-w", "\n__STATUS__%{http_code}",
   }

@@ -482,21 +482,23 @@ function M.launch(root)
     vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
   end
 
-  -- ── On-prem: compile → HTTP publish → DAP "attach" ───────────────────────
-  -- Treat any non-cloud environmentType (nil, "OnPrem", etc.) as on-prem.
-  -- Cloud is only "Sandbox" or "Production" (Azure BC).
-  -- The DAP "launch" request triggers a browser-open inside the adapter that
-  -- fails on Linux; for on-prem we publish via HTTP ourselves and use "attach".
+  -- ── On-prem: compile → DAP "launch" (adapter handles publish + attach) ───
+  -- BC 25+ changed the /dev/apps HTTP endpoint; direct octet-stream publish no
+  -- longer works. Use the adapter's "launch" request for all cases — the adapter
+  -- knows the correct publish protocol for each BC version.
+  -- launchBrowser=false suppresses the adapter's built-in browser open; we open
+  -- the BC web client from Lua after the session starts (open_browser_onprem).
   local is_cloud = conn.is_cloud(cfg)
   if not is_cloud then
-    local attach_cfg = {
+    local launch_cfg = {
       type               = "al",
-      request            = "attach",
-      name               = "AL: Attach (after publish)",
+      request            = "launch",
+      name               = "AL: Launch (on-prem)",
       server             = cfg.server,
       serverInstance     = cfg.serverInstance,
       authentication     = cfg.authentication or "Windows",
       tenant             = cfg.tenant or "default",
+      schemaUpdateMode   = cfg.schemaUpdateMode or "synchronize",
       breakOnError       = to_break_bool(cfg.breakOnError, true),
       breakOnNext        = cfg.breakOnNext or "WebClient",
       breakOnRecordWrite = to_break_bool(cfg.breakOnRecordWrite, false),
@@ -504,16 +506,14 @@ function M.launch(root)
       enableLongRunningSqlStatements    = cfg.enableLongRunningSqlStatements ~= false,
       longRunningSqlStatementsThreshold = cfg.longRunningSqlStatementsThreshold or 500,
       numberOfSqlStatements             = cfg.numberOfSqlStatements or 10,
-      -- Adapter reads launch.json AND DAP request for launchBrowser; set false
-      -- in both places so it never tries to invoke xdg-open itself.
+      startupObjectType  = cfg.startupObjectType or "Page",
+      startupObjectId    = cfg.startupObjectId or 22,
       launchBrowser      = false,
     }
-    dap.configurations.al = { attach_cfg }
+    dap.configurations.al = { launch_cfg }
 
     require("al.compile").compile(root, nil, function()
-      vim.notify("AL: Compile succeeded — uploading to BC…", vim.log.levels.INFO)
-      -- Patch launch.json so the adapter sees launchBrowser=false even if it
-      -- reads the file directly (which it does for both launch and attach).
+      vim.notify("AL: Compile succeeded — adapter is publishing and attaching…", vim.log.levels.INFO)
       local bak = patch_launch_json(root)
       if bak then
         local restored = false
@@ -528,13 +528,9 @@ function M.launch(root)
         dap.listeners.after.event_terminated["alnvim_restore_launch"] = restore
         dap.listeners.after.event_exited["alnvim_restore_launch"]     = restore
       end
-      -- skip_compile=true: upload whatever .app the compile just produced.
-      require("al.publish").publish(root, true, function()
-        vim.notify("AL: Published — attaching debugger…", vim.log.levels.INFO)
-        register_adapter()
-        dap.run(attach_cfg)
-        open_browser_onprem()
-      end)
+      register_adapter()
+      dap.run(launch_cfg)
+      open_browser_onprem()
     end)
     return
   end
