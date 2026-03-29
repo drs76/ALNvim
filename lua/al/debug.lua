@@ -511,8 +511,8 @@ end
 -- @param root       project root path (native separators on Windows)
 -- @param boe        breakOnError boolean (already converted from string)
 -- @param borw       breakOnRecordWrite boolean (already converted from string)
--- @param root unused (kept for call-site compatibility)
-local function apply_vscode_defaults(cfg, _root, boe, borw)
+-- @param root   project root (native path) — used to set directory field
+local function apply_vscode_defaults(cfg, root, boe, borw)
   -- Boolean conversions — C# deserialiser rejects string enum values ("All", "None").
   cfg.breakOnError                = boe
   cfg.breakOnRecordWrite          = borw
@@ -527,12 +527,18 @@ local function apply_vscode_defaults(cfg, _root, boe, borw)
   if cfg.port == nil then cfg.port = 7049 end
   -- validateServerCertificate: VSCode sends r.validateServerCertificate ?? true.
   if cfg.validateServerCertificate == nil then cfg.validateServerCertificate = true end
-  -- AL 18.0 extension sends useMcpServerForDebugging and mcpServerPort by default.
-  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = true end
+  -- useMcpServerForDebugging: when true the adapter uses BC Management Services (port 7047)
+  -- for publishing instead of the dev endpoint (port 7049). BCContainerHelper containers
+  -- do not expose port 7047, so this must be false for on-prem. Cloud adapters handle it
+  -- differently and this field is irrelevant there (cloud uses Entra auth flow).
+  -- The AL 18.0 extension defaults this to true — we override to false for on-prem.
+  if cfg.useMcpServerForDebugging == nil then cfg.useMcpServerForDebugging = false end
   if cfg.mcpServerPort            == nil then cfg.mcpServerPort            = 7047 end
-  -- NOTE: directory, schemaUpdateMode, startupObjectType, dependencyPublishingOption
-  -- are intentionally NOT defaulted here — VSCode omits them when not in launch.json
-  -- and the adapter uses its own defaults. Sending unexpected values caused failures.
+  -- directory: where the adapter looks for the compiled .app file.
+  -- VSCode always sends this (as getAlParams().outFolder). Default to the project root.
+  if cfg.directory == nil and root then
+    cfg.directory = require("al.platform").native_path(root)
+  end
 end
 
 -- Publish the compiled .app to BC via the adapter without starting a debug session.
