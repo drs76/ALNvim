@@ -412,7 +412,8 @@ vim.api.nvim_create_user_command("ALGuidelines", function()
 end, { desc = "Open AL Code Guidelines in browser" })
 
 vim.api.nvim_create_user_command("ALInfo", function()
-  local lsp = require("al.lsp")
+  local lsp  = require("al.lsp")
+  local conn = require("al.connection")
   local root = lsp.get_root()
   local app  = lsp.read_app_json(root)
   local lines = {
@@ -425,6 +426,18 @@ vim.api.nvim_create_user_command("ALInfo", function()
   if app then
     table.insert(lines, string.format("App       : %s – %s (v%s)",
       app.publisher or "?", app.name or "?", app.version or "?"))
+  end
+  -- Show launch.json connection details for diagnosing URL issues
+  local cfg = root and conn.read_launch(root)
+  if cfg then
+    table.insert(lines, "──────────────────────────────────")
+    table.insert(lines, "launch.json:")
+    table.insert(lines, "  server         : " .. (cfg.server or "(not set)"))
+    table.insert(lines, "  serverInstance : " .. (cfg.serverInstance or "(not set)"))
+    table.insert(lines, "  port           : " .. tostring(cfg.port or "(not set)"))
+    table.insert(lines, "  environmentType: " .. (cfg.environmentType or "(not set)"))
+    table.insert(lines, "  authentication : " .. (cfg.authentication or "(not set)"))
+    table.insert(lines, "  → dev base URL : " .. conn.base_url(cfg))
   end
   print(table.concat(lines, "\n"))
 end, { desc = "Show ALNvim / project information" })
