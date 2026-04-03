@@ -283,6 +283,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>aG` | n | `:ALGuidelines` — open alguidelines.dev in browser |
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>aw` | n | `:ALReportLayout` — generate Word/Excel layout from report dataset |
+| `<leader>aW` | n | `:ALOpenLayout` — open existing .docx/.xlsx layout in default app |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
 | `<leader>ag` | n | `:ALSearch` — live grep across all AL files |
@@ -322,6 +323,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALGuidelines` | Open alguidelines.dev in browser |
 | `:ALNewObject [dir]` | AL Object Wizard: interactively create a new AL object file |
 | `:ALReportLayout` | Generate Word (.docx) or Excel (.xlsx) layout from the current AL report's dataset columns |
+| `:ALOpenLayout` | Open an existing .docx or .xlsx layout file near the current AL file in the system default app |
 | `:ALExplorer [dir]` | Browse all AL objects across project + symbol packages |
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
 | `:ALSearch [dir]` | Live grep across all AL files (project + symbol packages) |

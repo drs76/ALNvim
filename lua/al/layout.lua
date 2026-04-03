@@ -398,4 +398,69 @@ function M.generate()
   end)
 end
 
+-- ── Open existing layout ──────────────────────────────────────────────────────
+
+-- Find .docx / .xlsx layout files associated with the current AL buffer.
+-- Searches in:
+--   1. The same directory as the AL file
+--   2. A "layouts/" subdirectory inside the project root
+-- Opens the file in the system default application (LibreOffice, Word, Excel, etc.).
+function M.open_layout()
+  local bufnr   = vim.api.nvim_get_current_buf()
+  local buf_path = vim.api.nvim_buf_get_name(bufnr)
+  if buf_path == "" then
+    vim.notify("ALOpenLayout: buffer has no file path", vim.log.levels.WARN)
+    return
+  end
+
+  local buf_dir = vim.fn.fnamemodify(buf_path, ":p:h")
+  local lsp_mod = require("al.lsp")
+  local root    = lsp_mod.get_root(bufnr)
+
+  -- Collect candidate directories: file dir first, then project layouts/ subdir.
+  local search_dirs = { buf_dir }
+  if root and root ~= buf_dir then
+    local layouts_dir = root .. "/layouts"
+    if vim.fn.isdirectory(layouts_dir) == 1 then
+      table.insert(search_dirs, layouts_dir)
+    end
+  end
+
+  -- Glob for .docx and .xlsx in each directory (non-recursive, immediate files only).
+  local found = {}
+  local seen  = {}
+  for _, dir in ipairs(search_dirs) do
+    for _, pat in ipairs({ "/*.docx", "/*.xlsx" }) do
+      for _, f in ipairs(vim.fn.glob(dir .. pat, false, true)) do
+        if not seen[f] then
+          seen[f] = true
+          table.insert(found, f)
+        end
+      end
+    end
+  end
+
+  if #found == 0 then
+    vim.notify("ALOpenLayout: no .docx or .xlsx files found near this file", vim.log.levels.WARN)
+    return
+  end
+
+  local function open_it(path)
+    platform.open_url(path)
+    vim.notify("ALOpenLayout: opening " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
+  end
+
+  if #found == 1 then
+    open_it(found[1])
+  else
+    local labels = vim.tbl_map(function(f) return vim.fn.fnamemodify(f, ":~") end, found)
+    vim.ui.select(labels, { prompt = "Open layout:" }, function(choice)
+      if not choice then return end
+      for _, f in ipairs(found) do
+        if vim.fn.fnamemodify(f, ":~") == choice then open_it(f); return end
+      end
+    end)
+  end
+end
+
 return M

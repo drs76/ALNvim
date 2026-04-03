@@ -395,6 +395,10 @@ vim.api.nvim_create_user_command("ALReportLayout", function()
   require("al.layout").generate()
 end, { desc = "Generate Word (.docx) or Excel (.xlsx) layout from AL report dataset" })
 
+vim.api.nvim_create_user_command("ALOpenLayout", function()
+  require("al.layout").open_layout()
+end, { desc = "Open an existing report layout (.docx/.xlsx) in the system default app" })
+
 vim.api.nvim_create_user_command("ALSearch", function(opts)
   require("al.explorer").search(opts.args ~= "" and opts.args or nil)
 end, {
