@@ -10,13 +10,13 @@ Provides:
 - One-step publish to Business Central (compile → POST `.app` to BC dev endpoint)
 - Symbol package download from BC dev endpoint (all base + explicit dependencies)
 - Snapshot debugging and live attach debugging via nvim-dap
-- AL Help panel — browse MS Learn AL docs inside Neovim, rendered by `smd` (ANSI) or render-markdown
+- AL Help — open MS Learn AL docs and alguidelines.dev directly in the default browser
 - AL Explorer — Telescope pickers for all AL objects across project + symbol packages, with live grep
 - AL Object Wizard — interactive new-object creation with ID suggestion, extends picker, file naming
 - Object ID completion — suggests next free IDs from `app.json` idRanges in insert mode
 - Automatic file organiser — moves saved AL files to the correct `src/<type>/` folder on write
 - 40+ LuaSnip snippets (object templates, control flow, events, HTTP, JSON)
-- BC Dark colour scheme applied per-buffer for AL files
+- BC Dark / bc_yellow colour scheme — one global scheme, consistent across all windows
 - Text objects — `daf`/`vif` for procedures/triggers, `daF`/`viF` for begin/end blocks
 - Buffer-local keymaps and editor settings for AL files
 
@@ -38,10 +38,9 @@ Provides:
 
 | Requirement | Feature |
 |---|---|
-| [`smd`](https://codeberg.org/johann1764/smd) | ANSI-rendered AL Help panel (falls back to render-markdown without it) |
 | [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) | AL Explorer, Procedure picker, Search |
 | [nvim-dap](https://github.com/mfussenegger/nvim-dap) | Live attach debugging |
-| [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) | AL Help fallback rendering when `smd` is absent |
+| `python3` | Report Layout Wizard (Word/Excel .docx/.xlsx generation) |
 
 ---
 
@@ -159,34 +158,14 @@ sequenceDiagram
 
 ---
 
-## AL Help Panel
+## AL Help
 
-`:ALHelp` (`<leader>ah`) opens a 85-column left split showing MS Learn AL documentation
-fetched from the MicrosoftDocs GitHub repository. `:ALHelpTopics` (`<leader>aH`) opens a
-topic picker with 35 curated AL topics.
+`:ALHelp` (`<leader>ah`) opens MS Learn AL documentation directly in the default browser.
+`:ALHelpTopics` (`<leader>aH`) shows a picker with 35 curated AL topics to open.
+`:ALGuidelines` (`<leader>aG`) opens [alguidelines.dev](https://alguidelines.dev/).
 
-### Rendering
-
-The panel auto-detects what is available:
-
-| Condition | Rendering |
-|---|---|
-| [`smd`](https://codeberg.org/johann1764/smd) on `$PATH` | ANSI-styled terminal buffer — headings, code blocks, colours |
-| `smd` absent | `nofile` buffer with `filetype=markdown`; styled by render-markdown.nvim if installed |
-| Neither present | Plain markdown text |
-
-### Panel keymaps
-
-| Key | Action |
-|---|---|
-| `<CR>` | Follow link (navigates to linked page — links shown as `text (→devenv-slug)`) |
-| `u` / `<BS>` | Go back (history stack) |
-| `r` | Reload current page |
-| `t` | Open topic picker |
-| `q` | Close panel |
-
-`:ALHelp` accepts a full MS Learn URL or a bare `devenv-*` slug as an argument to jump
-directly to a page.
+`:ALHelp` accepts a full MS Learn URL or a bare `devenv-*` slug as an optional argument to
+jump directly to a specific page.
 
 ---
 
@@ -219,6 +198,39 @@ Query, XmlPort, Enum, EnumExtension, Interface, PermissionSet.
 - Files are placed in `src/<type>/` following CRS naming conventions
 - The **File Organiser** runs automatically on every `:w` — if an AL file is saved outside
   its correct `src/<type>/` folder, it is moved there transparently
+
+---
+
+## Report Layout Wizard
+
+`:ALReportLayout` (`<leader>aw`) parses the `column()` declarations in the current AL
+report buffer and generates a starter Word (`.docx`) or Excel (`.xlsx`) layout file placed
+next to the AL source file. The file is opened in the default application immediately.
+
+`:ALOpenLayout` (`<leader>aW`) searches for existing `.docx`/`.xlsx` layout files in the
+same directory as the current AL file and in a `layouts/` subdirectory at the project root.
+If one is found it opens immediately; if multiple are found a picker is shown.
+
+### How it works
+
+Both formats are ZIP archives of Office Open XML. The wizard generates all XML in Lua and
+uses Python 3's built-in `zipfile` module to produce the archive — no external `zip` tool
+required (important for Windows).
+
+| Format | BC runtime mapping |
+|---|---|
+| Word (`.docx`) | Each dataset column maps to a Word content control whose `<w:tag>` matches the AL column name exactly |
+| Excel (`.xlsx`) | Sheet name = AL dataitem name; row 1 header cells = AL column names (exact match required) |
+
+The resulting file can be opened in LibreOffice or sent to a Windows machine for styling.
+
+### Wizard flow
+
+1. Parse the report buffer for `dataitem()` and `column()` declarations
+2. If the report has more than one dataitem, pick which one to use
+3. Pick format: Word or Excel
+4. If the output file already exists, confirm overwrite
+5. Generate XML → ZIP → open in default app
 
 ---
 
@@ -429,18 +441,21 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 
 | Command | Key | Description |
 |---|---|---|
-| `:ALHelp [url\|slug]` | `<leader>ah` | Toggle AL Help panel (MS Learn AL docs) |
+| `:ALHelp [url\|slug]` | `<leader>ah` | Open AL docs in browser (MS Learn) |
 | `:ALHelpTopics` | `<leader>aH` | Open AL Help topic picker |
+| `:ALGuidelines` | `<leader>aG` | Open alguidelines.dev in browser |
 | `:ALExplorer [dir]` | `<leader>ae` | Telescope: browse all AL objects (project + symbols) |
 | `:ALExplorerProcs` | `<leader>af` | Telescope: browse procedures in current file |
 | `:ALSearch [dir]` | `<leader>ag` | Live grep across all AL files |
 | `:ALNextId` | — | Show next free object ID for type on current line |
 
-### Object Creation
+### Object Creation & Layouts
 
 | Command | Key | Description |
 |---|---|---|
 | `:ALNewObject [dir]` | `<leader>an` | Interactive wizard to create a new AL object file |
+| `:ALReportLayout` | `<leader>aw` | Generate Word (.docx) or Excel (.xlsx) layout from AL report dataset |
+| `:ALOpenLayout` | `<leader>aW` | Open existing report layout file in the default app |
 
 ### Debugging
 

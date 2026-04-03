@@ -23,14 +23,16 @@ ALNvim is a Neovim plugin (Lua) that adds Business Central AL language support, 
 | `lua/al/ids.lua` | Object ID completion — suggests next free IDs from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector — per-project cop config, Telescope/fallback picker, live apply via `al/setActiveWorkspace` |
 | `lua/al/wizard.lua` | AL Object Wizard — interactive prompt flow to create new AL object files |
+| `lua/al/layout.lua` | Report Layout Wizard — parses AL report columns, generates Word/Excel layout file |
 | `lua/al/help.lua` | AL Help — opens MS Learn AL docs or alguidelines.dev in the default browser |
 | `lua/al/status.lua` | AL statusline state store — aggregates LSP, project, compile, and publish status |
-| `lua/al/platform.lua` | OS detection and all platform-specific operations (binary paths, chmod, browser open, zip extraction) |
+| `lua/al/platform.lua` | OS detection and all platform-specific operations (binary paths, chmod, browser open, zip extraction/creation) |
 | `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip via the VSCode loader |
 | `ftdetect/al.vim` | Sets `filetype=al` for `*.al` and `*.dal` files |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps for AL files |
 | `syntax/al.vim` | Vim syntax highlighting derived from `alsyntax.tmlanguage` |
-| `colors/bc_dark.lua` | BC Dark colorscheme (applied when focusing an AL window, restored on WinEnter to non-AL windows) |
+| `colors/bc_dark.lua` | BC Dark colorscheme |
+| `colors/bc_yellow.lua` | Alias for bc_dark with a different `colors_name` — set as the global default in `init.lua` |
 | `snippets/al.json` | VSCode-format snippets (object templates + control flow) |
 | `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
 
@@ -143,11 +145,13 @@ client:request("al/setActiveWorkspace", {
     },
     setActiveWorkspace                  = true,
     dependencyParentWorkspacePath       = vim.NIL,  -- null
-    expectedProjectReferenceDefinitions = proj_refs, -- array of {appId,name,publisher,version}
+    expectedProjectReferenceDefinitions = proj_refs, -- array of {appId,name,publisher,version} — implicit Microsoft base packages always prepended
     activeWorkspaceClosure              = {},
   },
 }, callback, bufnr)
 ```
+
+**`expectedProjectReferenceDefinitions`** — implicit Microsoft base packages are always prepended (System, System Application, Business Foundation, Base Application, Application) using stable GUIDs even when `app.json` has `"dependencies": []`. Without these the AL server never loads standard symbol tables (`"Sales Header"`, `"Customer"`, etc.) and reports false errors on all table references. Versions taken from `app.json`'s `platform` and `application` fields. Explicit `app.json` dependencies are appended after, with duplicates skipped.
 
 **`assemblyProbingPaths` must be a non-null JSON array.** Omitting it causes `ArgumentNullException("path")` crash. The VSCode default `['./.netpackages']` hangs indefinitely on network-mounted (CIFS/SMB) paths — use `{}`.
 
@@ -649,6 +653,26 @@ Handles both quoted (`"Name"`) and unquoted (`Name`) AL object identifiers.
 
 Uses `ids.M.next_id(root, obj_type)` which is a thin wrapper around the existing local helpers
 `get_ranges` / `get_used_ids` / `free_ids` in `ids.lua`.
+
+## Report Layout Wizard (`lua/al/layout.lua`)
+
+`:ALReportLayout` / `<leader>aw` — parses the current AL report buffer's `column()` declarations and generates a starter `.docx` (Word) or `.xlsx` (Excel) layout file placed next to the AL file, then opens it in the default application immediately.
+
+`:ALOpenLayout` / `<leader>aW` — searches for existing `.docx`/`.xlsx` files in the current AL file's directory and a project-level `layouts/` subdirectory. One file → opens immediately; multiple → picker; none → warning.
+
+### BC-specific mapping rules
+
+- **Word**: each data cell in the generated table contains an inline SDT (Structured Document Tag) where `<w:sdtPr><w:tag w:val="ColumnName"/></w:sdtPr>` matches the AL column name exactly. BC's report runtime scans the `.docx` for content controls whose `<w:tag>` matches dataset column names.
+- **Excel**: the sheet name in `xl/workbook.xml` must equal the AL dataitem name. Row 1 header cells reference shared strings whose text is the AL column name. BC maps each dataitem to a worksheet by name.
+- Column names with quotes (`column("No."; "No.")`) have quotes stripped before use as tag/header values.
+
+### Implementation
+
+- `M._parse_report(bufnr)` — scans buffer lines for `report <id> "<name>"`, `dataitem(<name>;…)`, and `column(<name>;…)`. Returns `nil` with `vim.notify` on failure.
+- `build_docx(tmpdir, di_name, columns)` — writes 5 XML files: `[Content_Types].xml`, `_rels/.rels`, `word/_rels/document.xml.rels`, `word/settings.xml`, `word/document.xml` (table with header row + SDT data row).
+- `build_xlsx(tmpdir, di_name, columns)` — writes 7 XML files: `[Content_Types].xml`, `_rels/.rels`, `xl/workbook.xml` (sheet name = dataitem), `xl/_rels/workbook.xml.rels`, `xl/sharedStrings.xml`, `xl/styles.xml`, `xl/worksheets/sheet1.xml` (row 1 = column headers).
+- `platform.create_zip(src_dir, dst_file)` — uses Python 3's `zipfile` module via `vim.fn.system({"python3", "-c", script, src_dir, dst_file})`. No external `zip` CLI needed (important for Windows).
+- If `python3` is not on PATH the zip step fails with a clear notify and no output file is created.
 
 ## AL File Organiser (`wizard.M.organise_file`)
 
