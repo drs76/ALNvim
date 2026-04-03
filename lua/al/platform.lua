@@ -76,7 +76,8 @@ function M.create_zip(src_dir, dst_file)
     .. "[z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),s))"
     .. " for r,_,fs in os.walk(s) for f in fs];"
     .. "z.close()"
-  vim.fn.system({ "python3", "-c", script, src_dir, dst_file })
+  local py = M.is_windows and "python" or "python3"
+  vim.fn.system({ py, "-c", script, src_dir, dst_file })
   return vim.v.shell_error == 0
 end
 
