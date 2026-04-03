@@ -381,6 +381,7 @@ function M.generate()
 
         vim.notify(string.format("ALReportLayout: created %s (%d columns)",
           vim.fn.fnamemodify(out_path, ":~"), #di.columns), vim.log.levels.INFO)
+        platform.open_url(out_path)
       end
 
       -- Confirm overwrite if file already exists.
