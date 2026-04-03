@@ -123,7 +123,7 @@ highlight default link alException    Exception
 highlight default link alOperator     Operator
 highlight default link alObject       Structure
 highlight default link alMetadata     Keyword
-highlight default link alProperty     Identifier
+highlight default link alProperty     Keyword
 highlight default link alType         Type
 highlight default link alBoolean      Boolean
 highlight default link alAttribute    PreProc

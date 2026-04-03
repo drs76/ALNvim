@@ -425,11 +425,10 @@ Applied automatically when focusing an AL window, restored when focusing a non-A
 | Background | `#010704` |
 | Foreground | `#efefef` |
 | Comments | `#04b925` (green) |
-| AL keywords / object types / built-in types | `#f6fa16` (yellow) — `Type`, `Structure` groups |
-| Strings | `#ce8349` (orange) |
-| Numbers / constants | `#2fafff` (blue) |
+| AL keywords / object types / built-in types / property keywords | `#f6fa16` (yellow) — `Keyword`, `Type`, `Structure` groups |
+| Strings / numbers / variables / identifiers | `#efefef` (near-white) |
 
-**Implementation note:** `plugin/al.lua` saves `vim.g._al_user_colorscheme` once at load time (before any AL file triggers `bc_dark`). A global `WinEnter` autocmd applies `bc_dark` when the newly focused window has `filetype=al`, and restores the saved scheme when it does not. This handles LSP hover floats, `gd` navigation, split switching, and neo-tree focus correctly without buffer-local autocmds.
+**Implementation note:** `bc_yellow` is an alias for `bc_dark` (identical colors, different `colors_name`). Set `colorscheme bc_yellow` in `init.lua` to use it as a global default without any per-window switching logic in the plugin.
 
 **Syntax string regions use `oneline`** on `alString`, `alVerbatim`, and `alQuotedIdent` in `syntax/al.vim`. Without `oneline`, unclosed quote characters bleed highlight colour across the rest of the file.
 
