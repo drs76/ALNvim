@@ -362,6 +362,10 @@ end, {
   desc     = "AL Object Wizard: create a new AL object file",
 })
 
+vim.api.nvim_create_user_command("ALReportLayout", function()
+  require("al.layout").generate()
+end, { desc = "Generate Word (.docx) or Excel (.xlsx) layout from AL report dataset" })
+
 vim.api.nvim_create_user_command("ALSearch", function(opts)
   require("al.explorer").search(opts.args ~= "" and opts.args or nil)
 end, {

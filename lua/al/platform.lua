@@ -63,6 +63,23 @@ function M.extract_zip(src, dst, files_glob)
   end
 end
 
+-- Create a ZIP archive from the contents of src_dir, writing to dst_file.
+-- Uses Python3's built-in zipfile module — works on Linux, macOS, and Windows
+-- (where the 'zip' CLI is absent but python3 is always available with AL tooling).
+-- @param src_dir  directory whose contents to archive (files stored relative to this dir)
+-- @param dst_file output path (.docx / .xlsx / .zip — Python doesn't care about the extension)
+-- @return true on success, false on failure (check vim.v.shell_error for details)
+function M.create_zip(src_dir, dst_file)
+  local script = "import zipfile,os,sys;"
+    .. "s,d=sys.argv[1],sys.argv[2];"
+    .. "z=zipfile.ZipFile(d,'w',zipfile.ZIP_DEFLATED);"
+    .. "[z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),s))"
+    .. " for r,_,fs in os.walk(s) for f in fs];"
+    .. "z.close()"
+  vim.fn.system({ "python3", "-c", script, src_dir, dst_file })
+  return vim.v.shell_error == 0
+end
+
 -- Recursive directory copy used as a fallback when os.rename fails cross-device.
 function M.copy_dir(src, dst)
   if M.is_windows then
