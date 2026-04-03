@@ -3,58 +3,6 @@
 if vim.g.vscode or vim.g.alnvim_loaded then return end
 vim.g.alnvim_loaded = true
 
--- Save the user's colorscheme once at plugin load, before any AL file triggers bc_dark.
-if not vim.g._al_user_colorscheme then
-  vim.g._al_user_colorscheme = vim.g.colors_name or "default"
-end
-
--- Two-event approach for colorscheme switching:
---
--- WinEnter  — handles switching between already-open windows. Filetype is known
---             immediately so no deferral is needed. Ignored when ft="" (new buffer
---             not yet loaded — FileType handles that case instead).
---
--- FileType  — handles new buffers being loaded (e.g. opening a file from neo-tree).
---             Fires after the filetype is set, so ft is always correct here.
---             Guards against neo-tree preview: only acts when the buffer whose
---             filetype just changed IS the currently focused buffer (ev.buf ==
---             current buf). When neo-tree shows a preview without moving focus,
---             ev.buf is the preview buffer but current buf is still neo-tree —
---             the guard prevents the scheme from changing in that case.
-
-local function al_apply(ft, bt)
-  if ft == "al" then
-    if vim.g.colors_name ~= "bc_dark" then vim.cmd("colorscheme bc_dark") end
-  elseif bt == "" and ft ~= "" then
-    if vim.g.colors_name == "bc_dark" then
-      local r = vim.g._al_user_colorscheme or "default"
-      if r ~= "bc_dark" then vim.cmd("colorscheme " .. r) end
-    end
-  end
-end
-
-local _cs_group = vim.api.nvim_create_augroup("ALColorscheme", { clear = true })
-
-vim.api.nvim_create_autocmd("WinEnter", {
-  group = _cs_group,
-  callback = function()
-    local buf = vim.api.nvim_get_current_buf()
-    local ft  = vim.bo[buf].filetype
-    if ft == "" then return end   -- new buffer loading; FileType will handle it
-    al_apply(ft, vim.bo[buf].buftype)
-  end,
-})
-
-vim.api.nvim_create_autocmd("FileType", {
-  group = _cs_group,
-  callback = function(ev)
-    -- Only act when the buffer whose ft just changed is the focused buffer.
-    -- If neo-tree previews a file without moving focus, ev.buf is the preview
-    -- buffer but current buf is neo-tree — skip to avoid scheme jumping.
-    if vim.api.nvim_get_current_buf() ~= ev.buf then return end
-    al_apply(ev.match, vim.bo[ev.buf].buftype)
-  end,
-})
 
 -- ── ALInstallExtension — always available, even before extension is installed ─
 vim.api.nvim_create_user_command("ALInstallExtension", function()
