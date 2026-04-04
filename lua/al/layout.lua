@@ -1,6 +1,9 @@
 -- AL Report Layout Wizard
--- Generates a starter Word (.docx) or Excel (.xlsx) layout from an AL report's
--- dataset columns.  Both formats are Office Open XML (ZIP of XML files).
+-- Generates starter report layouts from an AL report's dataset columns:
+--   Excel (.xlsx) — one sheet per dataitem, column headers in row 1 (export layout)
+--   Word  (.docx) — minimal empty document; import into BC then edit with BC Word add-in
+--   RDLC  (.rdlc) — tabular layout with DataSet_Result fields and Tablix table
+-- Also injects rendering section + DefaultRenderingLayout into the report .al buffer.
 
 local platform = require("al.platform")
 local M = {}
@@ -11,7 +14,7 @@ local function xml_escape(s)
   return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
 end
 
--- 1-based column index → Excel column letter(s): 1→"A", 26→"Z", 27→"AA" …
+-- 1-based column index → Excel letter(s): 1→"A", 26→"Z", 27→"AA" …
 local function col_letter(n)
   local r = ""
   while n > 0 do
@@ -26,6 +29,21 @@ end
 local function strip_name(s)
   s = vim.trim(s)
   return s:match('^"([^"]+)"') or s:match("^'([^']+)'") or s
+end
+
+-- Sanitise an AL name into a valid AL identifier (letters + digits only).
+local function sanitise_id(name)
+  local r = name:gsub("[^%a%d]", "")
+  if r == "" then r = "Layout" end
+  return r
+end
+
+-- Sanitise a string into a valid RDLC XML Name (letters/digits/underscore, not starting with digit).
+local function rdlc_id(s)
+  local r = s:gsub("[^%a%d_]", "_")
+  if r:match("^%d") then r = "col_" .. r end
+  if r == "" then r = "col" end
+  return r
 end
 
 local function write_file(path, content)
@@ -43,6 +61,24 @@ local function rm_rf(dir)
   end
 end
 
+-- Flatten all dataitem columns into a list of { rname, display } pairs,
+-- disambiguating duplicate column names by prepending the dataitem name.
+local function collect_fields(dataitems)
+  local fields = {}
+  local seen = {}
+  for _, di in ipairs(dataitems) do
+    for _, col in ipairs(di.columns) do
+      local rname = rdlc_id(col)
+      if seen[rname] then
+        rname = rdlc_id(di.name .. "_" .. col)
+      end
+      seen[rname] = true
+      table.insert(fields, { rname = rname, display = col })
+    end
+  end
+  return fields
+end
+
 -- ── Buffer parser ─────────────────────────────────────────────────────────────
 
 -- Parse an AL report buffer.
@@ -54,9 +90,8 @@ function M._parse_report(bufnr)
   local current_di = nil
 
   for _, line in ipairs(lines) do
-    -- report <id> "<name>"  (with or without quotes around name)
     if not info.report_id then
-      local id, name = line:match("^%s*report%s+(%d+)%s+\"([^\"]+)\"")
+      local id, name = line:match('^%s*report%s+(%d+)%s+"([^"]+)"')
       if not id then
         id, name = line:match("^%s*report%s+(%d+)%s+([%w_]+)")
       end
@@ -66,14 +101,12 @@ function M._parse_report(bufnr)
       end
     end
 
-    -- dataitem(<name>; ...)
     local di_raw = line:match("^%s*dataitem%s*%(([^;,%)]+)")
     if di_raw then
       current_di = { name = strip_name(di_raw), columns = {} }
       table.insert(info.dataitems, current_di)
     end
 
-    -- column(<name>; ...)
     local col_raw = line:match("^%s*column%s*%(([^;,%)]+)")
     if col_raw and current_di then
       table.insert(current_di.columns, strip_name(col_raw))
@@ -98,121 +131,33 @@ function M._parse_report(bufnr)
   return info
 end
 
--- ── Word (.docx) XML generators ───────────────────────────────────────────────
+-- ── Excel (.xlsx) generators ──────────────────────────────────────────────────
 
-local function docx_content_types()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml"  ContentType="application/xml"/>
-  <Override PartName="/word/document.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/settings.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
-</Types>]]
-end
-
-local function docx_rels()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
-    Target="word/document.xml"/>
-</Relationships>]]
-end
-
-local function docx_document_rels()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
-    Target="settings.xml"/>
-</Relationships>]]
-end
-
-local function docx_settings()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:compat/>
-</w:settings>]]
-end
-
--- Build one header <w:tc> with bold text.
-local function docx_header_cell(label)
-  local e = xml_escape(label)
-  return "<w:tc><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>"
-    .. "<w:r><w:rPr><w:b/></w:rPr><w:t>" .. e .. "</w:t></w:r></w:p></w:tc>"
-end
-
--- Build one data <w:tc> with an inline SDT content control tagged with the column name.
--- BC's report engine matches the <w:tag> value to the AL dataset column name.
-local function docx_data_cell(col_name)
-  local e = xml_escape(col_name)
-  return "<w:tc><w:p>"
-    .. "<w:sdt>"
-    .. "<w:sdtPr><w:tag w:val=\"" .. e .. "\"/><w:alias w:val=\"" .. e .. "\"/></w:sdtPr>"
-    .. "<w:sdtContent><w:r><w:t>" .. e .. "</w:t></w:r></w:sdtContent>"
-    .. "</w:sdt>"
-    .. "</w:p></w:tc>"
-end
-
-local function docx_document(di_name, columns)
-  local ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+local function xlsx_content_types(n_sheets)
   local parts = {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    '<w:document ' .. ns .. '>',
-    '<w:body>',
-    -- Table
-    '<w:tbl>',
-    '<w:tblPr>',
-    '  <w:tblStyle w:val="TableGrid"/>',
-    '  <w:tblW w:w="0" w:type="auto"/>',
-    '</w:tblPr>',
-    -- Header row
-    '<w:tr>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '  <Default Extension="xml"  ContentType="application/xml"/>',
+    '  <Override PartName="/xl/workbook.xml"',
+    '    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
   }
-  for _, col in ipairs(columns) do
-    table.insert(parts, docx_header_cell(col))
+  for i = 1, n_sheets do
+    table.insert(parts,
+      string.format('  <Override PartName="/xl/worksheets/sheet%d.xml"', i))
+    table.insert(parts,
+      '    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>')
   end
-  table.insert(parts, "</w:tr>")
-  -- Data row (SDT content controls)
-  table.insert(parts, "<w:tr>")
-  for _, col in ipairs(columns) do
-    table.insert(parts, docx_data_cell(col))
-  end
-  table.insert(parts, "</w:tr>")
-  table.insert(parts, "</w:tbl>")
-  -- Section properties
-  table.insert(parts, "<w:sectPr/>")
-  table.insert(parts, "</w:body>")
-  table.insert(parts, "</w:document>")
+  table.insert(parts,
+    '  <Override PartName="/xl/sharedStrings.xml"')
+  table.insert(parts,
+    '    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>')
+  table.insert(parts,
+    '  <Override PartName="/xl/styles.xml"')
+  table.insert(parts,
+    '    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>')
+  table.insert(parts, '</Types>')
   return table.concat(parts, "\n")
-end
-
-local function build_docx(tmpdir, di_name, columns)
-  write_file(tmpdir .. "/[Content_Types].xml",      docx_content_types())
-  write_file(tmpdir .. "/_rels/.rels",               docx_rels())
-  write_file(tmpdir .. "/word/_rels/document.xml.rels", docx_document_rels())
-  write_file(tmpdir .. "/word/settings.xml",         docx_settings())
-  write_file(tmpdir .. "/word/document.xml",         docx_document(di_name, columns))
-end
-
--- ── Excel (.xlsx) XML generators ─────────────────────────────────────────────
-
-local function xlsx_content_types()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml"  ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/sharedStrings.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-  <Override PartName="/xl/styles.xml"
-    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-</Types>]]
 end
 
 local function xlsx_rels()
@@ -224,39 +169,66 @@ local function xlsx_rels()
 </Relationships>]]
 end
 
--- BC maps each dataitem to an Excel worksheet by sheet name.
-local function xlsx_workbook(sheet_name)
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-    .. '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-    .. ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n'
-    .. '  <sheets>\n'
-    .. '    <sheet name="' .. xml_escape(sheet_name) .. '" sheetId="1" r:id="rId1"/>\n'
-    .. '  </sheets>\n'
-    .. '</workbook>'
+-- BC maps each dataitem to a worksheet by sheet name.
+local function xlsx_workbook(dataitems)
+  local parts = {
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+    '          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '  <sheets>',
+  }
+  for i, di in ipairs(dataitems) do
+    table.insert(parts,
+      string.format('    <sheet name="%s" sheetId="%d" r:id="rId%d"/>',
+        xml_escape(di.name), i, i))
+  end
+  table.insert(parts, '  </sheets>')
+  table.insert(parts, '</workbook>')
+  return table.concat(parts, "\n")
 end
 
-local function xlsx_workbook_rels()
-  return [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
-    Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"
-    Target="sharedStrings.xml"/>
-  <Relationship Id="rId3"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
-    Target="styles.xml"/>
-</Relationships>]]
+-- Sheet rels: rId1…rIdN for sheets, rId(N+1) for sharedStrings, rId(N+2) for styles.
+local function xlsx_workbook_rels(n_sheets)
+  local parts = {
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+  }
+  for i = 1, n_sheets do
+    table.insert(parts,
+      string.format('  <Relationship Id="rId%d"', i))
+    table.insert(parts,
+      '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"')
+    table.insert(parts,
+      string.format('    Target="worksheets/sheet%d.xml"/>', i))
+  end
+  table.insert(parts,
+    string.format('  <Relationship Id="rId%d"', n_sheets + 1))
+  table.insert(parts,
+    '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings"')
+  table.insert(parts, '    Target="sharedStrings.xml"/>')
+  table.insert(parts,
+    string.format('  <Relationship Id="rId%d"', n_sheets + 2))
+  table.insert(parts,
+    '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"')
+  table.insert(parts, '    Target="styles.xml"/>')
+  table.insert(parts, '</Relationships>')
+  return table.concat(parts, "\n")
 end
 
-local function xlsx_shared_strings(columns)
+-- Single shared-strings pool for all dataitems combined.
+local function xlsx_shared_strings(dataitems)
+  local all = {}
+  for _, di in ipairs(dataitems) do
+    for _, col in ipairs(di.columns) do
+      table.insert(all, col)
+    end
+  end
   local parts = {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     string.format('<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-      .. ' count="%d" uniqueCount="%d">', #columns, #columns),
+      .. ' count="%d" uniqueCount="%d">', #all, #all),
   }
-  for _, col in ipairs(columns) do
+  for _, col in ipairs(all) do
     table.insert(parts, "  <si><t>" .. xml_escape(col) .. "</t></si>")
   end
   table.insert(parts, "</sst>")
@@ -281,9 +253,8 @@ local function xlsx_styles()
 </styleSheet>]]
 end
 
--- Row 1: column headers as shared-string references (t="s", value = 0-based index).
--- BC matches column headers to AL dataset column names when rendering the report.
-local function xlsx_sheet(columns)
+-- Row 1: column headers as shared-string refs, offset into the combined pool.
+local function xlsx_sheet(columns, offset)
   local parts = {
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
@@ -291,9 +262,9 @@ local function xlsx_sheet(columns)
     '  <sheetData>',
     '    <row r="1">',
   }
-  for i, _ in ipairs(columns) do
+  for i = 1, #columns do
     table.insert(parts,
-      string.format('      <c r="%s1" t="s"><v>%d</v></c>', col_letter(i), i - 1))
+      string.format('      <c r="%s1" t="s"><v>%d</v></c>', col_letter(i), offset + i - 1))
   end
   table.insert(parts, "    </row>")
   table.insert(parts, "  </sheetData>")
@@ -301,19 +272,459 @@ local function xlsx_sheet(columns)
   return table.concat(parts, "\n")
 end
 
-local function build_xlsx(tmpdir, di_name, columns)
-  write_file(tmpdir .. "/[Content_Types].xml",           xlsx_content_types())
-  write_file(tmpdir .. "/_rels/.rels",                    xlsx_rels())
-  write_file(tmpdir .. "/xl/workbook.xml",                xlsx_workbook(di_name))
-  write_file(tmpdir .. "/xl/_rels/workbook.xml.rels",     xlsx_workbook_rels())
-  write_file(tmpdir .. "/xl/sharedStrings.xml",           xlsx_shared_strings(columns))
-  write_file(tmpdir .. "/xl/styles.xml",                  xlsx_styles())
-  write_file(tmpdir .. "/xl/worksheets/sheet1.xml",       xlsx_sheet(columns))
+local function build_xlsx(tmpdir, dataitems)
+  local n = #dataitems
+  write_file(tmpdir .. "/[Content_Types].xml",       xlsx_content_types(n))
+  write_file(tmpdir .. "/_rels/.rels",                xlsx_rels())
+  write_file(tmpdir .. "/xl/workbook.xml",            xlsx_workbook(dataitems))
+  write_file(tmpdir .. "/xl/_rels/workbook.xml.rels", xlsx_workbook_rels(n))
+  write_file(tmpdir .. "/xl/sharedStrings.xml",       xlsx_shared_strings(dataitems))
+  write_file(tmpdir .. "/xl/styles.xml",              xlsx_styles())
+  local offset = 0
+  for i, di in ipairs(dataitems) do
+    write_file(tmpdir .. "/xl/worksheets/sheet" .. i .. ".xml",
+      xlsx_sheet(di.columns, offset))
+    offset = offset + #di.columns
+  end
 end
 
--- ── Wizard ────────────────────────────────────────────────────────────────────
+-- ── Word (.docx) — minimal empty document ─────────────────────────────────────
+-- BC must inject its custom XML schema via "Update and Export Layout" before
+-- the BC Word add-in can bind fields.  We provide a valid empty container.
 
-local LAYOUT_TYPES = { "Word Layout (.docx)", "Excel Layout (.xlsx)" }
+local function build_docx_empty(tmpdir)
+  write_file(tmpdir .. "/[Content_Types].xml", [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml"  ContentType="application/xml"/>
+  <Override PartName="/word/document.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/settings.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+</Types>]])
+
+  write_file(tmpdir .. "/_rels/.rels", [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="word/document.xml"/>
+</Relationships>]])
+
+  write_file(tmpdir .. "/word/_rels/document.xml.rels", [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
+    Target="settings.xml"/>
+</Relationships>]])
+
+  write_file(tmpdir .. "/word/settings.xml", [[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:compat/>
+</w:settings>]])
+
+  write_file(tmpdir .. "/word/document.xml",
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    .. '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    .. '<w:body><w:sectPr/></w:body></w:document>')
+end
+
+-- ── RDLC generator — functional tabular layout ────────────────────────────────
+-- BC passes all dataitem columns to the RDLC renderer as a flat DataSet_Result.
+-- Generates a Tablix with a header row + repeating data row for all fields.
+
+local function build_rdlc(out_path, dataitems)
+  local fields = collect_fields(dataitems)
+  local n = #fields
+  local total_w = n .. "in"
+
+  local p = {}
+  local function a(s) table.insert(p, s) end
+
+  a('<?xml version="1.0" encoding="utf-8"?>')
+  a('<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition"')
+  a('        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">')
+
+  -- DataSets
+  a('  <DataSets>')
+  a('    <DataSet Name="DataSet_Result">')
+  a('      <Fields>')
+  for _, f in ipairs(fields) do
+    a('        <Field Name="' .. xml_escape(f.rname) .. '">')
+    a('          <DataField>' .. xml_escape(f.rname) .. '</DataField>')
+    a('        </Field>')
+  end
+  a('      </Fields>')
+  a('    </DataSet>')
+  a('  </DataSets>')
+
+  -- Body
+  a('  <Body>')
+  a('    <Height>0.6in</Height>')
+  a('    <ReportItems>')
+  a('      <Tablix Name="Table1">')
+  a('        <TablixBody>')
+
+  -- TablixColumns
+  a('          <TablixColumns>')
+  for _ = 1, n do
+    a('            <TablixColumn><Width>1in</Width></TablixColumn>')
+  end
+  a('          </TablixColumns>')
+
+  -- TablixRows
+  a('          <TablixRows>')
+
+  -- Header row
+  a('            <TablixRow>')
+  a('              <Height>0.25in</Height>')
+  a('              <TablixCells>')
+  for _, f in ipairs(fields) do
+    a('                <TablixCell><CellContents>')
+    a('                  <Textbox Name="hdr_' .. f.rname .. '">')
+    a('                    <CanGrow>true</CanGrow>')
+    a('                    <Paragraphs><Paragraph><TextRuns><TextRun>')
+    a('                      <Value>' .. xml_escape(f.display) .. '</Value>')
+    a('                      <Style><FontWeight>Bold</FontWeight></Style>')
+    a('                    </TextRun></TextRuns></Paragraph></Paragraphs>')
+    a('                  </Textbox>')
+    a('                </CellContents></TablixCell>')
+  end
+  a('              </TablixCells>')
+  a('            </TablixRow>')
+
+  -- Data row
+  a('            <TablixRow>')
+  a('              <Height>0.25in</Height>')
+  a('              <TablixCells>')
+  for _, f in ipairs(fields) do
+    a('                <TablixCell><CellContents>')
+    a('                  <Textbox Name="fld_' .. f.rname .. '">')
+    a('                    <CanGrow>true</CanGrow>')
+    a('                    <Paragraphs><Paragraph><TextRuns><TextRun>')
+    a('                      <Value>=Fields!' .. xml_escape(f.rname) .. '.Value</Value>')
+    a('                    </TextRun></TextRuns></Paragraph></Paragraphs>')
+    a('                  </Textbox>')
+    a('                </CellContents></TablixCell>')
+  end
+  a('              </TablixCells>')
+  a('            </TablixRow>')
+
+  a('          </TablixRows>')
+  a('        </TablixBody>')
+
+  -- TablixColumnHierarchy
+  a('        <TablixColumnHierarchy><TablixMembers>')
+  for _ = 1, n do a('          <TablixMember/>') end
+  a('        </TablixMembers></TablixColumnHierarchy>')
+
+  -- TablixRowHierarchy: static header member + repeating data member
+  a('        <TablixRowHierarchy><TablixMembers>')
+  a('          <TablixMember><KeepWithGroup>After</KeepWithGroup></TablixMember>')
+  a('          <TablixMember><Group Name="DataSet_Result_Details_1"/></TablixMember>')
+  a('        </TablixMembers></TablixRowHierarchy>')
+
+  a('        <DataSetName>DataSet_Result</DataSetName>')
+  a('        <Top>0in</Top><Left>0in</Left>')
+  a('        <Height>0.5in</Height>')
+  a('        <Width>' .. total_w .. '</Width>')
+  a('      </Tablix>')
+  a('    </ReportItems>')
+  a('  </Body>')
+  a('  <Width>' .. total_w .. '</Width>')
+  a('  <Page>')
+  a('    <PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth>')
+  a('    <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>')
+  a('    <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>')
+  a('  </Page>')
+  a('  <Language>en-US</Language>')
+  a('</Report>')
+
+  write_file(out_path, table.concat(p, "\n"))
+end
+
+-- ── AL buffer modification ────────────────────────────────────────────────────
+
+-- Inject rendering section entries and (if absent) DefaultRenderingLayout
+-- into the current report buffer.  Does NOT save — user reviews then :w.
+--
+-- entries = { { id, type_str, layout_file }, ... }  (only new types, pre-filtered)
+-- default_id = identifier to set as DefaultRenderingLayout, or nil if already set
+function M._inject_rendering(bufnr, default_id, entries)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local n = #lines
+
+  -- Find report object opening brace (1-based line index).
+  local report_brace = nil
+  for i, line in ipairs(lines) do
+    if line:match("^%s*report%s+%d+") then
+      if line:match("{") then
+        report_brace = i
+      elseif i < n and lines[i + 1]:match("^%s*{") then
+        report_brace = i + 1
+      end
+      break
+    end
+  end
+  if not report_brace then return end
+
+  -- Check for existing DefaultRenderingLayout.
+  local has_default = false
+  for _, line in ipairs(lines) do
+    if line:match("DefaultRenderingLayout") then has_default = true; break end
+  end
+
+  -- Find existing rendering section start + closing brace (1-based).
+  local rend_close = nil
+  local rend_start = nil
+  for i, line in ipairs(lines) do
+    if line:match("^%s*rendering%s*$") or line:match("^%s*rendering%s*{") then
+      rend_start = i
+      local depth = 0
+      local j = line:match("{") and i or (i + 1)
+      for k = j, n do
+        local l = lines[k]
+        for _ in l:gmatch("{") do depth = depth + 1 end
+        for _ in l:gmatch("}") do depth = depth - 1 end
+        if depth == 0 then rend_close = k; break end
+      end
+      break
+    end
+  end
+
+  -- Find the report's outer closing } (last bare } line).
+  local report_close = nil
+  for i = n, 1, -1 do
+    if lines[i]:match("^}%s*$") then report_close = i; break end
+  end
+  if not report_close then return end
+
+  -- Safety: skip any entry whose Type already exists in the rendering section.
+  local existing_types = {}
+  if rend_start and rend_close then
+    for i = rend_start, rend_close do
+      local t = lines[i]:match("Type%s*=%s*(%w+)%s*;")
+      if t then existing_types[t:lower()] = true end
+    end
+  end
+  local new_entries = {}
+  for _, e in ipairs(entries) do
+    if not existing_types[e.type_str:lower()] then
+      table.insert(new_entries, e)
+    end
+  end
+
+  -- Build insertions as { after = 1-based line, text = string[] }, applied bottom-up.
+  local ops = {}
+
+  if not has_default and default_id then
+    table.insert(ops, {
+      after = report_brace,
+      text  = { "    DefaultRenderingLayout = " .. default_id .. ";" },
+    })
+  end
+
+  if #new_entries > 0 then
+    local layout_lines = {}
+    for _, e in ipairs(new_entries) do
+      table.insert(layout_lines, "        layout(" .. e.id .. ")")
+      table.insert(layout_lines, "        {")
+      table.insert(layout_lines, "            Type = " .. e.type_str .. ";")
+      table.insert(layout_lines, "            LayoutFile = '" .. e.layout_file .. "';")
+      table.insert(layout_lines, "        }")
+    end
+
+    if rend_close then
+      -- Insert before the rendering section's closing }.
+      table.insert(ops, { after = rend_close - 1, text = layout_lines })
+    else
+      -- Create a full rendering section before the report's outer closing }.
+      local block = { "    rendering", "    {" }
+      for _, l in ipairs(layout_lines) do table.insert(block, l) end
+      table.insert(block, "    }")
+      table.insert(ops, { after = report_close - 1, text = block })
+    end
+  end
+
+  if #ops == 0 then return end
+
+  -- Apply bottom-up so earlier line numbers stay valid.
+  table.sort(ops, function(a, b) return a.after > b.after end)
+  for _, op in ipairs(ops) do
+    -- nvim_buf_set_lines: 0-based, end-exclusive.
+    -- Inserting at position op.after (0-based) places new lines AFTER 1-based line op.after.
+    vim.api.nvim_buf_set_lines(bufnr, op.after, op.after, false, op.text)
+  end
+
+  vim.notify("ALReportLayout: report source updated — review and :w to save", vim.log.levels.WARN)
+end
+
+-- ── Layout type picker (multi-select) ─────────────────────────────────────────
+
+local LAYOUT_OPTIONS = {
+  { key = "Excel", label = "Excel (.xlsx) — export layout with column headers", ext = ".xlsx", type_str = "Excel" },
+  { key = "Word",  label = "Word  (.docx) — empty template for BC Word add-in",  ext = ".docx", type_str = "Word"  },
+  { key = "RDLC",  label = "RDLC  (.rdlc) — tabular layout for SSRS/Report Builder", ext = ".rdlc", type_str = "RDLC"  },
+}
+
+local function telescope_layout_picker(callback)
+  local pickers      = require("telescope.pickers")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+
+  pickers.new({}, {
+    prompt_title = "AL Layout Types  (<Tab> toggle, <CR> generate)",
+    finder = finders.new_table({
+      results = LAYOUT_OPTIONS,
+      entry_maker = function(opt)
+        return { value = opt, display = "[ ]  " .. opt.label, ordinal = opt.key }
+      end,
+    }),
+    sorter = conf.generic_sorter({}),
+    attach_mappings = function(prompt_bufnr, map)
+      actions.select_default:replace(function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local sel = picker:get_multi_selection()
+        if #sel == 0 then
+          local e = action_state.get_selected_entry()
+          if e then sel = { e } end
+        end
+        actions.close(prompt_bufnr)
+        local selected = vim.tbl_map(function(s) return s.value end, sel)
+        if #selected > 0 then callback(selected) end
+      end)
+      map({ "i", "n" }, "<Tab>", actions.toggle_selection + actions.move_selection_next)
+      return true
+    end,
+  }):find()
+end
+
+local function simple_layout_picker(callback)
+  local state = {}
+  for _, opt in ipairs(LAYOUT_OPTIONS) do state[opt.key] = false end
+
+  local function show()
+    local items = {}
+    for _, opt in ipairs(LAYOUT_OPTIONS) do
+      items[#items + 1] = (state[opt.key] and "[x]  " or "[ ]  ") .. opt.label
+    end
+    items[#items + 1] = "─── Generate ───"
+    items[#items + 1] = "─── Cancel ───"
+
+    vim.ui.select(items, { prompt = "Select layout types to generate:" }, function(_, idx)
+      if not idx or idx == #items then return end  -- Cancel
+      if idx == #items - 1 then                    -- Generate
+        local selected = {}
+        for _, opt in ipairs(LAYOUT_OPTIONS) do
+          if state[opt.key] then table.insert(selected, opt) end
+        end
+        if #selected == 0 then
+          vim.notify("ALReportLayout: no layout types selected", vim.log.levels.WARN)
+          return
+        end
+        callback(selected)
+        return
+      end
+      state[LAYOUT_OPTIONS[idx].key] = not state[LAYOUT_OPTIONS[idx].key]
+      show()
+    end)
+  end
+
+  show()
+end
+
+-- ── Wizard helpers ────────────────────────────────────────────────────────────
+
+-- Return a set of layout Types already declared in the report buffer's rendering section.
+local function existing_layout_types(bufnr)
+  local types = {}
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local in_rendering = false
+  for _, line in ipairs(lines) do
+    if line:match("^%s*rendering%s") or line:match("^%s*rendering%s*$") then
+      in_rendering = true
+    end
+    if in_rendering then
+      local t = line:match("Type%s*=%s*(%w+)%s*;")
+      if t then types[t:lower()] = true end
+    end
+  end
+  return types
+end
+
+-- Resolve names/paths for each selected layout type, prompting on duplicates.
+-- Calls back with a list of { opt, id, out_path } (may be shorter than selected).
+local function resolve_names(bufnr, info, root, selected, cb)
+  local safe   = sanitise_id(info.report_name)
+  local exist  = existing_layout_types(bufnr)
+  local result = {}
+  local i = 0
+
+  local function next_opt()
+    i = i + 1
+    if i > #selected then cb(result); return end
+    local opt = selected[i]
+    local default_id = safe .. opt.type_str  -- e.g. "SalesInvoiceExcel"
+
+    if not exist[opt.type_str:lower()] then
+      table.insert(result, {
+        opt      = opt,
+        id       = default_id,
+        out_path = root .. "/layouts/" .. default_id .. opt.ext,
+      })
+      next_opt()
+    else
+      -- Suggest a unique name by counting existing same-type layouts.
+      local suggested = default_id .. "_2"
+      vim.notify("ALReportLayout: a " .. opt.type_str
+        .. " layout already exists in this report's rendering section.", vim.log.levels.WARN)
+      vim.ui.input(
+        { prompt = "New layout name (empty to skip): ", default = suggested },
+        function(input)
+          local name = input and vim.trim(input) or ""
+          if name ~= "" then
+            local new_id = sanitise_id(name):len() > 0 and name or suggested
+            table.insert(result, {
+              opt      = opt,
+              id       = new_id,
+              out_path = root .. "/layouts/" .. new_id .. opt.ext,
+            })
+          end
+          next_opt()
+        end)
+    end
+  end
+
+  next_opt()
+end
+
+-- Confirm overwrite for each entry whose output file already exists.
+local function confirm_overwrites(resolved, cb)
+  local confirmed = {}
+  local i = 0
+
+  local function next_entry()
+    i = i + 1
+    if i > #resolved then cb(confirmed); return end
+    local e = resolved[i]
+    if vim.fn.filereadable(e.out_path) == 1 then
+      vim.ui.select({ "Overwrite", "Cancel" },
+        { prompt = vim.fn.fnamemodify(e.out_path, ":t") .. " already exists. Overwrite?" },
+        function(ans)
+          if ans == "Overwrite" then table.insert(confirmed, e) end
+          next_entry()
+        end)
+    else
+      table.insert(confirmed, e)
+      next_entry()
+    end
+  end
+
+  next_entry()
+end
+
+-- ── Wizard entry point ────────────────────────────────────────────────────────
 
 function M.generate()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -326,87 +737,105 @@ function M.generate()
   local info = M._parse_report(bufnr)
   if not info then return end
 
-  -- If multiple dataitems, let the user pick one.
-  local function pick_dataitem(cb)
-    if #info.dataitems == 1 then
-      cb(info.dataitems[1])
+  local root = require("al.lsp").get_root(bufnr)
+  if not root then
+    vim.notify("ALReportLayout: no project root (app.json) found", vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify(
+    "ALReportLayout:\n"
+    .. "  Excel — column headers per dataitem, ready as export layout\n"
+    .. "  Word  — empty template; import into BC → 'Update and Export Layout' → BC Word add-in\n"
+    .. "  RDLC  — tabular layout with all fields; open in SSRS Report Builder / Visual Studio",
+    vim.log.levels.INFO)
+
+  local function run_picker(cb)
+    if pcall(require, "telescope") then
+      telescope_layout_picker(cb)
     else
-      local names = vim.tbl_map(function(di) return di.name end, info.dataitems)
-      vim.ui.select(names, { prompt = "Select dataitem:" }, function(choice)
-        if not choice then cb(nil); return end
-        for _, di in ipairs(info.dataitems) do
-          if di.name == choice then cb(di); return end
-        end
-      end)
+      simple_layout_picker(cb)
     end
   end
 
-  pick_dataitem(function(di)
-    if not di then return end
+  run_picker(function(selected)
+    resolve_names(bufnr, info, root, selected, function(resolved)
+      if #resolved == 0 then return end
 
-    vim.ui.select(LAYOUT_TYPES, { prompt = "Layout type:" }, function(choice)
-      if not choice then return end
-      local is_word = choice:find("Word") ~= nil
-      local ext     = is_word and ".docx" or ".xlsx"
+      confirm_overwrites(resolved, function(confirmed)
+        if #confirmed == 0 then return end
 
-      -- Output path: same directory as the AL file.
-      local buf_path = vim.api.nvim_buf_get_name(bufnr)
-      local buf_dir  = vim.fn.fnamemodify(buf_path, ":p:h")
-      local safe     = info.report_name:gsub('[\\/:*?"<>|]', "_")
-      local out_path = buf_dir .. "/" .. safe .. ext
+        vim.fn.mkdir(root .. "/layouts", "p")
 
-      local function do_generate()
-        local tmpdir = vim.fn.tempname() .. "_allayout"
-        vim.fn.mkdir(tmpdir, "p")
-
-        local ok, err = pcall(function()
-          if is_word then
-            build_docx(tmpdir, di.name, di.columns)
-          else
-            build_xlsx(tmpdir, di.name, di.columns)
-          end
-        end)
-
-        local zip_ok = ok and platform.create_zip(tmpdir, out_path)
-        rm_rf(tmpdir)
-
-        if not ok then
-          vim.notify("ALReportLayout: generation failed — " .. tostring(err), vim.log.levels.ERROR)
-          return
-        end
-        if not zip_ok then
-          vim.notify("ALReportLayout: zip failed (is python3 on PATH?)", vim.log.levels.ERROR)
-          return
-        end
-
-        vim.notify(string.format("ALReportLayout: created %s (%d columns)",
-          vim.fn.fnamemodify(out_path, ":~"), #di.columns), vim.log.levels.INFO)
-        platform.open_url(out_path)
-      end
-
-      -- Confirm overwrite if file already exists.
-      if vim.fn.filereadable(out_path) == 1 then
-        vim.ui.select({ "Overwrite", "Cancel" },
-          { prompt = vim.fn.fnamemodify(out_path, ":t") .. " exists. Overwrite?" },
-          function(ans)
-            if ans == "Overwrite" then do_generate() end
+        local generated = {}
+        for _, e in ipairs(confirmed) do
+          local ok, err = pcall(function()
+            if e.opt.type_str == "Excel" then
+              local tmp = vim.fn.tempname() .. "_allayout"
+              vim.fn.mkdir(tmp, "p")
+              build_xlsx(tmp, info.dataitems)
+              if not platform.create_zip(tmp, e.out_path) then
+                error("zip failed (is python3/python on PATH?)")
+              end
+              rm_rf(tmp)
+            elseif e.opt.type_str == "Word" then
+              local tmp = vim.fn.tempname() .. "_allayout"
+              vim.fn.mkdir(tmp, "p")
+              build_docx_empty(tmp)
+              if not platform.create_zip(tmp, e.out_path) then
+                error("zip failed (is python3/python on PATH?)")
+              end
+              rm_rf(tmp)
+            elseif e.opt.type_str == "RDLC" then
+              build_rdlc(e.out_path, info.dataitems)
+            end
           end)
-      else
-        do_generate()
-      end
+          if ok then
+            table.insert(generated, e)
+          else
+            vim.notify("ALReportLayout: " .. e.opt.type_str .. " failed — " .. tostring(err),
+              vim.log.levels.ERROR)
+          end
+        end
+
+        if #generated == 0 then return end
+
+        -- Default rendering layout: Excel > RDLC > Word priority.
+        local default_id = nil
+        for _, prio in ipairs({ "Excel", "RDLC", "Word" }) do
+          if not default_id then
+            for _, e in ipairs(generated) do
+              if e.opt.type_str == prio then default_id = e.id; break end
+            end
+          end
+        end
+
+        -- Build render_entries for _inject_rendering.
+        local render_entries = {}
+        for _, e in ipairs(generated) do
+          table.insert(render_entries, {
+            id          = e.id,
+            type_str    = e.opt.type_str,
+            layout_file = "layouts/" .. e.id .. e.opt.ext,
+          })
+        end
+
+        M._inject_rendering(bufnr, default_id, render_entries)
+
+        for _, e in ipairs(generated) do
+          vim.notify("ALReportLayout: created " .. vim.fn.fnamemodify(e.out_path, ":~"),
+            vim.log.levels.INFO)
+          platform.open_url(e.out_path)
+        end
+      end)
     end)
   end)
 end
 
 -- ── Open existing layout ──────────────────────────────────────────────────────
 
--- Find .docx / .xlsx layout files associated with the current AL buffer.
--- Searches in:
---   1. The same directory as the AL file
---   2. A "layouts/" subdirectory inside the project root
--- Opens the file in the system default application (LibreOffice, Word, Excel, etc.).
 function M.open_layout()
-  local bufnr   = vim.api.nvim_get_current_buf()
+  local bufnr    = vim.api.nvim_get_current_buf()
   local buf_path = vim.api.nvim_buf_get_name(bufnr)
   if buf_path == "" then
     vim.notify("ALOpenLayout: buffer has no file path", vim.log.levels.WARN)
@@ -414,34 +843,29 @@ function M.open_layout()
   end
 
   local buf_dir = vim.fn.fnamemodify(buf_path, ":p:h")
-  local lsp_mod = require("al.lsp")
-  local root    = lsp_mod.get_root(bufnr)
+  local root    = require("al.lsp").get_root(bufnr)
 
-  -- Collect candidate directories: file dir first, then project layouts/ subdir.
-  local search_dirs = { buf_dir }
-  if root and root ~= buf_dir then
-    local layouts_dir = root .. "/layouts"
-    if vim.fn.isdirectory(layouts_dir) == 1 then
-      table.insert(search_dirs, layouts_dir)
-    end
+  -- Search: project layouts/ first, then same dir as the AL file.
+  local search_dirs = {}
+  if root then
+    local ld = root .. "/layouts"
+    if vim.fn.isdirectory(ld) == 1 then table.insert(search_dirs, ld) end
+  end
+  if buf_dir ~= (root and root .. "/layouts" or "") then
+    table.insert(search_dirs, buf_dir)
   end
 
-  -- Glob for .docx and .xlsx in each directory (non-recursive, immediate files only).
-  local found = {}
-  local seen  = {}
+  local found, seen = {}, {}
   for _, dir in ipairs(search_dirs) do
-    for _, pat in ipairs({ "/*.docx", "/*.xlsx" }) do
+    for _, pat in ipairs({ "/*.xlsx", "/*.docx", "/*.rdlc" }) do
       for _, f in ipairs(vim.fn.glob(dir .. pat, false, true)) do
-        if not seen[f] then
-          seen[f] = true
-          table.insert(found, f)
-        end
+        if not seen[f] then seen[f] = true; table.insert(found, f) end
       end
     end
   end
 
   if #found == 0 then
-    vim.notify("ALOpenLayout: no .docx or .xlsx files found near this file", vim.log.levels.WARN)
+    vim.notify("ALOpenLayout: no layout files found near this file", vim.log.levels.WARN)
     return
   end
 

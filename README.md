@@ -40,7 +40,7 @@ Provides:
 |---|---|
 | [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) | AL Explorer, Procedure picker, Search |
 | [nvim-dap](https://github.com/mfussenegger/nvim-dap) | Live attach debugging |
-| `python3` | Report Layout Wizard (Word/Excel .docx/.xlsx generation) |
+| `python3` (Linux/macOS) or `python` (Windows) | Report Layout Wizard — Excel/Word ZIP generation |
 
 ---
 
@@ -203,34 +203,55 @@ Query, XmlPort, Enum, EnumExtension, Interface, PermissionSet.
 
 ## Report Layout Wizard
 
-`:ALReportLayout` (`<leader>aw`) parses the `column()` declarations in the current AL
-report buffer and generates a starter Word (`.docx`) or Excel (`.xlsx`) layout file placed
-next to the AL source file. The file is opened in the default application immediately.
+`:ALReportLayout` (`<leader>aw`) opens a multi-select picker for all three BC layout types.
+After selection, layout files are generated into `<project root>/layouts/` and a `rendering`
+section is automatically injected into the AL report source file.
 
-`:ALOpenLayout` (`<leader>aW`) searches for existing `.docx`/`.xlsx` layout files in the
-same directory as the current AL file and in a `layouts/` subdirectory at the project root.
-If one is found it opens immediately; if multiple are found a picker is shown.
+`:ALOpenLayout` (`<leader>aW`) searches for layout files (`.xlsx`, `.docx`, `.rdlc`) in
+`<project root>/layouts/` and the AL file's own directory. One found → opens immediately;
+multiple → picker.
 
-### How it works
+### Layout types
 
-Both formats are ZIP archives of Office Open XML. The wizard generates all XML in Lua and
-uses Python 3's built-in `zipfile` module to produce the archive — no external `zip` tool
-required (important for Windows).
+| Format | What is generated | Next step |
+|---|---|---|
+| Excel (`.xlsx`) | One sheet per dataitem, column headers in row 1 | Ready to use as export layout in BC |
+| Word (`.docx`) | Minimal empty document | Import into BC → "Update and Export Layout" → edit with BC Word add-in |
+| RDLC (`.rdlc`) | Tabular layout with all columns in a Tablix table | Open in SSRS Report Builder or Visual Studio to style |
 
-| Format | BC runtime mapping |
-|---|---|
-| Word (`.docx`) | Each dataset column maps to a Word content control whose `<w:tag>` matches the AL column name exactly |
-| Excel (`.xlsx`) | Sheet name = AL dataitem name; row 1 header cells = AL column names (exact match required) |
+Excel and Word are ZIP archives generated from Lua-built XML using Python 3's `zipfile`
+module. RDLC is plain XML written directly. No external `zip` tool required.
 
-The resulting file can be opened in LibreOffice or sent to a Windows machine for styling.
+### AL source file wiring
 
-### Wizard flow
+After generating the selected layouts the wizard also modifies the report `.al` buffer
+(without saving — review and `:w` manually):
 
-1. Parse the report buffer for `dataitem()` and `column()` declarations
-2. If the report has more than one dataitem, pick which one to use
-3. Pick format: Word or Excel
-4. If the output file already exists, confirm overwrite
-5. Generate XML → ZIP → open in default app
+```al
+report 50100 "Sales Invoice"
+{
+    DefaultRenderingLayout = SalesInvoiceExcel;
+
+    dataset { ... }
+
+    rendering
+    {
+        layout(SalesInvoiceExcel)
+        {
+            Type = Excel;
+            LayoutFile = 'layouts/SalesInvoiceExcel.xlsx';
+        }
+        layout(SalesInvoiceRDLC)
+        {
+            Type = RDLC;
+            LayoutFile = 'layouts/SalesInvoiceRDLC.rdlc';
+        }
+    }
+}
+```
+
+If a layout of the same type already exists in the rendering section, the wizard prompts
+for a new name rather than overwriting the existing entry.
 
 ---
 

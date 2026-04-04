@@ -656,23 +656,44 @@ Uses `ids.M.next_id(root, obj_type)` which is a thin wrapper around the existing
 
 ## Report Layout Wizard (`lua/al/layout.lua`)
 
-`:ALReportLayout` / `<leader>aw` — parses the current AL report buffer's `column()` declarations and generates a starter `.docx` (Word) or `.xlsx` (Excel) layout file placed next to the AL file, then opens it in the default application immediately.
+`:ALReportLayout` / `<leader>aw` — multi-select picker (Excel / Word / RDLC); generates the selected layout types into `<root>/layouts/` and injects a `rendering` section + `DefaultRenderingLayout` into the AL report buffer.
 
-`:ALOpenLayout` / `<leader>aW` — searches for existing `.docx`/`.xlsx` files in the current AL file's directory and a project-level `layouts/` subdirectory. One file → opens immediately; multiple → picker; none → warning.
+`:ALOpenLayout` / `<leader>aW` — searches for `.xlsx`, `.docx`, `.rdlc` files in `<root>/layouts/` then the AL file's own directory. One file → opens immediately; multiple → picker; none → warning.
 
-### BC-specific mapping rules
+### Layout types
 
-- **Word**: each data cell in the generated table contains an inline SDT (Structured Document Tag) where `<w:sdtPr><w:tag w:val="ColumnName"/></w:sdtPr>` matches the AL column name exactly. BC's report runtime scans the `.docx` for content controls whose `<w:tag>` matches dataset column names.
-- **Excel**: the sheet name in `xl/workbook.xml` must equal the AL dataitem name. Row 1 header cells reference shared strings whose text is the AL column name. BC maps each dataitem to a worksheet by name.
-- Column names with quotes (`column("No."; "No.")`) have quotes stripped before use as tag/header values.
+| Type | File | What is generated | BC workflow |
+|---|---|---|---|
+| Excel | `.xlsx` | One worksheet per dataitem; sheet name = dataitem name; row 1 = column headers | Ready to use as export layout — BC maps sheets to dataitems by name |
+| Word | `.docx` | Minimal empty document | Import into BC → "Update and Export Layout" → edit with BC Word add-in |
+| RDLC | `.rdlc` | Plain XML; `DataSet_Result` dataset with all columns; Tablix with header + data row | Open in SSRS Report Builder or Visual Studio to style |
+
+### Multi-dataitem handling
+
+- **Excel**: one sheet per dataitem; single shared-strings pool across all sheets, each sheet's cells reference the correct offset into the pool.
+- **RDLC**: all columns from all dataitems are flattened into `DataSet_Result`. If two dataitems share a column name, the second is prefixed with the dataitem name (`SalesLines_No_`). Field references use `=Fields!ColumnName.Value`.
+- **Word**: empty — BC handles multi-dataitem structure through its own XML schema injection.
+
+### AL buffer modification (`M._inject_rendering`)
+
+After generating files, the wizard modifies the current report buffer (no auto-save):
+1. Inserts `DefaultRenderingLayout = <id>;` after the report object's opening `{` (if not already set).
+2. Adds `layout()` blocks to the existing `rendering` section, or creates a new `rendering` section before the report's outer closing `}`.
+3. Priority for `DefaultRenderingLayout` when multiple types generated: Excel > RDLC > Word.
+4. If a layout of the same Type already exists in the rendering section, the user is prompted for a new name before adding a second entry.
+
+### Duplicate Type handling
+
+When the wizard detects a Type already in the rendering section, it shows a `vim.notify` warning and opens a `vim.ui.input` prompt pre-filled with a suggested name (e.g. `SalesInvoiceExcel_2`). Empty input = skip that type.
 
 ### Implementation
 
-- `M._parse_report(bufnr)` — scans buffer lines for `report <id> "<name>"`, `dataitem(<name>;…)`, and `column(<name>;…)`. Returns `nil` with `vim.notify` on failure.
-- `build_docx(tmpdir, di_name, columns)` — writes 5 XML files: `[Content_Types].xml`, `_rels/.rels`, `word/_rels/document.xml.rels`, `word/settings.xml`, `word/document.xml` (table with header row + SDT data row).
-- `build_xlsx(tmpdir, di_name, columns)` — writes 7 XML files: `[Content_Types].xml`, `_rels/.rels`, `xl/workbook.xml` (sheet name = dataitem), `xl/_rels/workbook.xml.rels`, `xl/sharedStrings.xml`, `xl/styles.xml`, `xl/worksheets/sheet1.xml` (row 1 = column headers).
-- `platform.create_zip(src_dir, dst_file)` — uses Python 3's `zipfile` module via `vim.fn.system({"python3", "-c", script, src_dir, dst_file})`. No external `zip` CLI needed (important for Windows).
-- If `python3` is not on PATH the zip step fails with a clear notify and no output file is created.
+- `M._parse_report(bufnr)` — scans buffer for `report`, `dataitem()`, `column()` declarations.
+- `build_xlsx(tmpdir, dataitems)` — N sheets, combined shared-strings pool with running offset.
+- `build_docx_empty(tmpdir)` — 5-file minimal valid .docx (no content).
+- `build_rdlc(out_path, dataitems)` — plain XML written directly (not zipped).
+- `platform.create_zip(src_dir, dst_file)` — Python 3 `zipfile` module; uses `python3` (Linux/macOS) or `python` (Windows).
+- `M._inject_rendering(bufnr, default_id, entries)` — splices lines into the buffer using `nvim_buf_set_lines`, applied bottom-up to preserve line numbers.
 
 ## AL File Organiser (`wizard.M.organise_file`)
 

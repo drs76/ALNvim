@@ -61,7 +61,7 @@ vim.keymap.set("n", "<leader>ah", "<cmd>ALHelp<CR>",        vim.tbl_extend("forc
 vim.keymap.set("n", "<leader>aH", "<cmd>ALHelpTopics<CR>", vim.tbl_extend("force", opts, { desc = "AL: Help topic picker" }))
 vim.keymap.set("n", "<leader>aG", "<cmd>ALGuidelines<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Open AL Code Guidelines in browser" }))
 vim.keymap.set("n", "<leader>an", "<cmd>ALNewObject<CR>",     vim.tbl_extend("force", opts, { desc = "AL: New object wizard" }))
-vim.keymap.set("n", "<leader>aw", "<cmd>ALReportLayout<CR>", vim.tbl_extend("force", opts, { desc = "AL: Report Layout Wizard (Word/Excel)" }))
+vim.keymap.set("n", "<leader>aw", "<cmd>ALReportLayout<CR>", vim.tbl_extend("force", opts, { desc = "AL: Report Layout Wizard (Excel/Word/RDLC)" }))
 vim.keymap.set("n", "<leader>aW", "<cmd>ALOpenLayout<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open existing report layout in default app" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))
