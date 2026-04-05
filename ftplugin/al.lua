@@ -24,7 +24,12 @@ vim.api.nvim_create_autocmd("BufEnter", {
 vim.api.nvim_create_autocmd("BufWritePre", {
   buffer   = 0,
   callback = function()
-    pcall(vim.lsp.buf.format, { async = false, timeout_ms = 3000, name = "al_language_server" })
+    local bufnr  = vim.api.nvim_get_current_buf()
+    local clients = vim.lsp.get_clients({ name = "al_language_server", bufnr = bufnr })
+    if #clients == 0 then return end
+    local cap = clients[1].server_capabilities.documentFormattingProvider
+    if not cap then return end
+    vim.lsp.buf.format({ bufnr = bufnr, async = false, timeout_ms = 3000, id = clients[1].id })
   end,
 })
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
