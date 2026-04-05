@@ -236,7 +236,6 @@ local function az_get_token(tenant, verbose)
   local cmd = "az account get-access-token"
     .. " --resource https://api.businesscentral.dynamics.com"
     .. " --query accessToken -o tsv"
-    .. " --allow-no-subscriptions"
   if tenant and tenant ~= "" and tenant ~= "default" then
     cmd = cmd .. " --tenant " .. vim.fn.shellescape(tenant)
   end
