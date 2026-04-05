@@ -166,10 +166,11 @@ function M.clear_credentials()
 end
 
 -- Open a floating terminal running `az login --use-device-code`.
--- The user follows the on-screen instructions to sign in via a browser.
--- Calls cb(true) when the terminal exits with code 0, cb(false) otherwise.
+-- The window stays open after the process exits so the user can read any output.
+-- Press q or <Esc> to close and continue. Calls cb(true) on exit code 0.
 local function az_login_terminal(cb)
   local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
   local ui  = vim.api.nvim_list_uis()[1]
   local w   = math.min(84, math.max(60, ui.width  - 4))
   local h   = math.min(22, math.max(10, ui.height - 4))
@@ -185,13 +186,31 @@ local function az_login_terminal(cb)
     title_pos = "center",
     noautocmd = true,
   })
+
+  local exit_code = nil
+  local cb_called = false
+  local function close_and_continue()
+    if cb_called then return end
+    cb_called = true
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+    cb(exit_code == 0)
+  end
+
+  vim.keymap.set("n", "q",     close_and_continue, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close_and_continue, { buffer = buf, nowait = true, silent = true })
+
   vim.fn.termopen("az login --use-device-code", {
     on_exit = function(_, code)
       vim.schedule(function()
+        exit_code = code
         if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_close(win, true)
+          local title = code == 0
+            and " Sign in complete — press q to continue "
+            or  " Sign in failed — press q to close "
+          vim.api.nvim_win_set_config(win, { title = title, title_pos = "center" })
         end
-        cb(code == 0)
       end)
     end,
   })
