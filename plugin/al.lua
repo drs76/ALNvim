@@ -130,6 +130,27 @@ vim.api.nvim_create_autocmd("LspAttach", {
             end
             return _cb(err, result, ...)
           end
+        elseif method == "textDocument/rename" and type(callback) == "function" then
+          -- Intercept rename response to diagnose silent failures.
+          local _cb = callback
+          callback = function(err, result, ...)
+            if err then
+              vim.schedule(function()
+                vim.notify("AL rename error: " .. vim.inspect(err), vim.log.levels.WARN)
+              end)
+            elseif not result then
+              vim.schedule(function()
+                vim.notify("AL rename: server returned nil (cursor may not be on a renameable symbol)", vim.log.levels.WARN)
+              end)
+            elseif type(result) == "table"
+                and not result.changes
+                and not result.documentChanges then
+              vim.schedule(function()
+                vim.notify("AL rename: server returned empty WorkspaceEdit — " .. vim.inspect(result), vim.log.levels.WARN)
+              end)
+            end
+            return _cb(err, result, ...)
+          end
         end
         return _orig(self, method, params, callback, bufnr_)
       end
