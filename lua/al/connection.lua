@@ -187,46 +187,41 @@ local function az_login_terminal(cb)
     noautocmd = true,
   })
 
-  local exit_code = nil
   local cb_called = false
-  local function close_and_continue()
+  local function close_and_abort()
     if cb_called then return end
     cb_called = true
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
-    cb(exit_code == 0)
+    cb(false)
   end
 
-  vim.keymap.set("n", "q",     close_and_continue, { buffer = buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", close_and_continue, { buffer = buf, nowait = true, silent = true })
+  -- q / <Esc> only needed on failure to dismiss the error window
+  vim.keymap.set("n", "q",     close_and_abort, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close_and_abort, { buffer = buf, nowait = true, silent = true })
 
   vim.fn.termopen("az login --allow-no-subscriptions --use-device-code", {
     on_exit = function(_, code)
       vim.schedule(function()
-        exit_code = code
-        local ok = code == 0
-        if vim.api.nvim_win_is_valid(win) then
-          vim.api.nvim_win_set_config(win, {
-            title     = ok and " Sign in complete — press q to continue "
-                           or  " Sign in failed — press q to close ",
-            title_pos = "center",
-          })
+        if code == 0 then
+          -- Success: close immediately and let the token fetch proceed
+          if cb_called then return end
+          cb_called = true
+          if vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_close(win, true)
+          end
+          cb(true)
+        else
+          -- Failure: keep the window open so the error is readable
+          if vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_set_config(win, {
+              title     = " Sign in failed — press q to close ",
+              title_pos = "center",
+            })
+          end
+          vim.notify("AL: Entra ID sign-in failed. Press q to close the login window.", vim.log.levels.WARN)
         end
-        -- az login clears the terminal screen on exit, leaving a blank window.
-        -- Append a visible prompt and notify so the user knows what to do.
-        pcall(function()
-          vim.bo[buf].modifiable = true
-          vim.api.nvim_buf_set_lines(buf, -1, -1, false, {
-            "",
-            ok and "  Sign in complete.  Press q or <Esc> to continue."
-               or  "  Sign in failed.    Press q or <Esc> to close.",
-          })
-        end)
-        vim.notify(
-          ok and "AL: Signed in to Entra ID. Press q in the login window to continue."
-             or  "AL: Entra ID sign-in failed. Press q to close the login window.",
-          ok and vim.log.levels.INFO or vim.log.levels.WARN)
       end)
     end,
   })
