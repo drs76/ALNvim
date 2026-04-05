@@ -131,25 +131,64 @@ vim.api.nvim_create_autocmd("LspAttach", {
             return _cb(err, result, ...)
           end
         elseif method == "textDocument/rename" and type(callback) == "function" then
-          -- Intercept rename response to diagnose silent failures.
+          -- Intercept rename to fix cross-file application.
+          -- The AL server returns a valid WorkspaceEdit but may not include all files,
+          -- or Neovim may not open+edit files that aren't loaded yet.
           local _cb = callback
           callback = function(err, result, ...)
             if err then
               vim.schedule(function()
                 vim.notify("AL rename error: " .. vim.inspect(err), vim.log.levels.WARN)
               end)
-            elseif not result then
-              vim.schedule(function()
-                vim.notify("AL rename: server returned nil (cursor may not be on a renameable symbol)", vim.log.levels.WARN)
-              end)
-            elseif type(result) == "table"
-                and not result.changes
-                and not result.documentChanges then
-              vim.schedule(function()
-                vim.notify("AL rename: server returned empty WorkspaceEdit — " .. vim.inspect(result), vim.log.levels.WARN)
-              end)
+              return _cb(err, result, ...)
             end
-            return _cb(err, result, ...)
+            if not result then
+              vim.schedule(function()
+                vim.notify("AL rename: no result (cursor may not be on a renameable symbol)", vim.log.levels.WARN)
+              end)
+              return _cb(err, result, ...)
+            end
+            -- Collect all (uri, edits) pairs from either changes or documentChanges format.
+            local all_changes = {}  -- { uri = string, edits = TextEdit[] }
+            if type(result.documentChanges) == "table" then
+              for _, dc in ipairs(result.documentChanges) do
+                if dc.textDocument and dc.edits then
+                  table.insert(all_changes, { uri = dc.textDocument.uri, edits = dc.edits })
+                end
+              end
+            elseif type(result.changes) == "table" then
+              for uri, edits in pairs(result.changes) do
+                table.insert(all_changes, { uri = uri, edits = edits })
+              end
+            end
+            if #all_changes == 0 then
+              vim.schedule(function()
+                vim.notify("AL rename: server returned empty WorkspaceEdit", vim.log.levels.WARN)
+              end)
+              return _cb(err, result, ...)
+            end
+            -- Apply changes ourselves to guarantee all files are opened and modified,
+            -- even if they aren't currently loaded as buffers.
+            -- Neovim's default apply_workspace_edit can miss files that have a version
+            -- mismatch because they aren't open yet.
+            local enc = client.offset_encoding or "utf-16"
+            vim.schedule(function()
+              local changed = 0
+              for _, change in ipairs(all_changes) do
+                local fname = vim.uri_to_fname(change.uri)
+                local bufnr2 = vim.fn.bufadd(fname)
+                vim.fn.bufload(bufnr2)
+                vim.lsp.util.apply_text_edits(change.edits, bufnr2, enc)
+                changed = changed + 1
+              end
+              if changed > 0 then
+                vim.notify(
+                  string.format("AL rename: %d file(s) modified — :wa to save all", changed),
+                  vim.log.levels.INFO)
+              end
+            end)
+            -- Pass nil so Neovim's internal handler doesn't double-apply.
+            return _cb(err, nil, ...)
           end
         end
         return _orig(self, method, params, callback, bufnr_)
