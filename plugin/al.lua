@@ -136,8 +136,12 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
 
     -- Surface project identity and LSP state in the statusline.
+    -- Only reset to "starting" on the first attach for this client; subsequent buffer
+    -- attachments should not clobber the "ready" state that was already reached.
     local status = require("al.status")
-    status.set_lsp_starting()
+    if not client._al_workspace_set then
+      status.set_lsp_starting()
+    end
     local _app = require("al.lsp").read_app_json(root)
     if _app then status.set_project(_app.name, _app.version, root) end
     status.set_cops(require("al.cops").get_active(root))
@@ -204,41 +208,53 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- VSCode extension sends: { currentWorkspaceFolderPath: <WorkspaceFolder>, settings: { ... } }
     -- Sending settings at the top level causes silent deserialization failure in the server.
-    local root_uri = "file://" .. root
-    client:request("al/setActiveWorkspace", {
-      currentWorkspaceFolderPath = {
-        uri   = root_uri,
-        name  = vim.fn.fnamemodify(root, ":t"),
-        index = 0,
-      },
-      settings = {
-        workspacePath                       = root,
-        alResourceConfigurationSettings     = ws_cfg,
-        setActiveWorkspace                  = true,
-        dependencyParentWorkspacePath       = vim.NIL,
-        expectedProjectReferenceDefinitions = proj_refs,
-        activeWorkspaceClosure              = {},
-      },
-    }, function(err, result)
-      if err then
-        vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
-      elseif result and result.success == false then
-        vim.notify("AL: setActiveWorkspace returned success=false: " .. vim.inspect(result), vim.log.levels.WARN)
-      else
-        vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.WARN)
-      end
-    end, args.buf)
+    -- Guard: only send al/setActiveWorkspace once per client lifetime.
+    -- The server restarts full project indexing on every send — sending it for each buffer
+    -- (one per file open) causes perpetual reloads that prevent hover and gd from working.
+    -- cops.apply() and :ALAnalyze bypass this guard intentionally.
+    if not client._al_workspace_set then
+      client._al_workspace_set = true
+
+      local root_uri = "file://" .. root
+      client:request("al/setActiveWorkspace", {
+        currentWorkspaceFolderPath = {
+          uri   = root_uri,
+          name  = vim.fn.fnamemodify(root, ":t"),
+          index = 0,
+        },
+        settings = {
+          workspacePath                       = root,
+          alResourceConfigurationSettings     = ws_cfg,
+          setActiveWorkspace                  = true,
+          dependencyParentWorkspacePath       = vim.NIL,
+          expectedProjectReferenceDefinitions = proj_refs,
+          activeWorkspaceClosure              = {},
+        },
+      }, function(err, result)
+        if err then
+          vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
+        elseif result and result.success == false then
+          vim.notify("AL: setActiveWorkspace returned success=false: " .. vim.inspect(result), vim.log.levels.WARN)
+        else
+          vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.WARN)
+        end
+      end, args.buf)
+    end
 
     -- gd: use the server's custom al/gotodefinition instead of textDocument/definition.
-    -- vim.schedule defers until after all LspAttach handlers have run, so this
-    -- overrides the generic gd set by the user's init.lua LspAttach callback.
+    -- Set for every buffer — vim.schedule defers until after all LspAttach handlers have
+    -- run so this overrides the generic gd set by the user's init.lua LspAttach callback.
     vim.schedule(function()
       vim.keymap.set("n", "gd", function()
         local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
         client:request("al/gotodefinition", {
           textDocumentPositionParams = params,
         }, function(err, result)
-          if err or not result then return end
+          if err then
+            vim.notify("AL gd error: " .. vim.inspect(err), vim.log.levels.WARN)
+            return
+          end
+          if not result then return end
           local uri   = result.uri or result.targetUri
           local range = result.range or result.targetSelectionRange or result.targetRange
           if not uri or not range then return end
@@ -280,7 +296,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
                 return
               end
               vim.cmd("edit " .. vim.fn.fnameescape(fname))
-              jump_to(0)
+              jump_to(vim.api.nvim_get_current_buf())
             end)
           end
         end, args.buf)

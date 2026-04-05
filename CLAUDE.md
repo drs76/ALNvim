@@ -117,7 +117,7 @@ The AL server extends LSP with several custom methods. All are handled in `plugi
 
 | Method | Direction | Purpose |
 |---|---|---|
-| `al/setActiveWorkspace` | client → server | Trigger project/symbol indexing. Must be sent after attach. |
+| `al/setActiveWorkspace` | client → server | Trigger project/symbol indexing. Sent **once per client** (guarded by `client._al_workspace_set`). Re-sent explicitly by `cops.apply()` and `:ALAnalyze`. |
 | `al/activeProjectLoaded` | server → client | Server notifies when indexing is complete. This is a REQUEST, not a notification — client must respond. |
 | `al/progressNotification` | server → client | Loading progress (percent). Notification — no response needed. |
 | `al/gotodefinition` | client → server | Go to definition (server has `definitionProvider = false`). Returns `file://` or `al-preview://` URI. |
@@ -126,6 +126,8 @@ The AL server extends LSP with several custom methods. All are handled in `plugi
 ### `al/setActiveWorkspace` — critical payload format
 
 The payload **must** be wrapped as `{ currentWorkspaceFolderPath, settings }`. Sending the settings fields at the top level causes silent server-side deserialization failure — the project never loads and `al/gotodefinition` fails with `projectId = null`.
+
+**Send once per client** (`client._al_workspace_set` guard in `LspAttach`): the server restarts full project indexing on every `al/setActiveWorkspace` call. Sending it for every buffer open (one call per file) causes perpetual reloads — the server responds to `textDocument/completion` with partial results but refuses `al/gotodefinition` and `textDocument/hover` until indexing completes. `cops.apply()` and `:ALAnalyze` bypass this guard intentionally (their whole purpose is to force a re-index).
 
 ```lua
 client:request("al/setActiveWorkspace", {
@@ -183,6 +185,8 @@ The server has `definitionProvider = false` — `textDocument/definition` return
 2. **`al-preview://` URI** — a virtual document served by the language server (symbol stubs from `.app` packages). Must be fetched via `al/previewDocument { Uri = uri }` → `result.content`. Display in a read-only `nofile` scratch buffer with `filetype=al`. The content has Windows line endings (`\r\n`) — strip before splitting.
 
 **Do not use `vim.lsp.util.jump_to_location` or `vim.lsp.util.show_document`** — both are deprecated or fail with "cursor position outside buffer" when the target file is not yet open. Open the file manually then set cursor with `pcall(nvim_win_set_cursor, ...)`.
+
+**After `vim.cmd("edit ...")` use `vim.api.nvim_get_current_buf()`** — do NOT pass `0` to the `jump_to(bufnr)` helper. `nvim_set_current_buf(0)` is invalid (0 is not a real buffer handle for that API); you must pass the actual buffer number obtained from `nvim_get_current_buf()` after the edit command opens the file.
 
 **`al/previewDocument`** — payload: `{ Uri = "al-preview://..." }`, response: `{ content = "..." }`. The URI comes directly from the `al/gotodefinition` result. Scratch buffers are named after the URI so repeated `gd` calls reuse the same buffer.
 
