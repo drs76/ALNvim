@@ -205,12 +205,28 @@ local function az_login_terminal(cb)
     on_exit = function(_, code)
       vim.schedule(function()
         exit_code = code
+        local ok = code == 0
         if vim.api.nvim_win_is_valid(win) then
-          local title = code == 0
-            and " Sign in complete — press q to continue "
-            or  " Sign in failed — press q to close "
-          vim.api.nvim_win_set_config(win, { title = title, title_pos = "center" })
+          vim.api.nvim_win_set_config(win, {
+            title     = ok and " Sign in complete — press q to continue "
+                           or  " Sign in failed — press q to close ",
+            title_pos = "center",
+          })
         end
+        -- az login clears the terminal screen on exit, leaving a blank window.
+        -- Append a visible prompt and notify so the user knows what to do.
+        pcall(function()
+          vim.bo[buf].modifiable = true
+          vim.api.nvim_buf_set_lines(buf, -1, -1, false, {
+            "",
+            ok and "  Sign in complete.  Press q or <Esc> to continue."
+               or  "  Sign in failed.    Press q or <Esc> to close.",
+          })
+        end)
+        vim.notify(
+          ok and "AL: Signed in to Entra ID. Press q in the login window to continue."
+             or  "AL: Entra ID sign-in failed. Press q to close the login window.",
+          ok and vim.log.levels.INFO or vim.log.levels.WARN)
       end)
     end,
   })
