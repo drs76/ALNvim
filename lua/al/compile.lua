@@ -50,30 +50,28 @@ local function parse_output(lines)
   return qf
 end
 
--- Open a left vertical split for build output. Returns (buf, win).
--- The right-hand window (where the file was) is used for <CR> jump-to-error.
+-- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
+-- The window above (where the file is) is used for <CR> jump-to-error.
 local function open_build_win(title)
-  -- Remember the current window — it becomes the file pane after the split.
+  -- Remember the current window — it becomes the file pane above the build panel.
   local file_win = vim.api.nvim_get_current_win()
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
 
-  -- Open a fixed-width split on the configured side.
-  local side = (require("al").config.compile_side or "left")
-  local split_cmd = side == "right" and "botright vsplit" or "topleft vsplit"
-  local split_width = math.max(60, math.floor(vim.o.columns * 0.40))
-  vim.cmd(split_cmd)
+  -- Full-width split pinned to the bottom of the screen.
+  local split_height = math.max(15, math.floor(vim.o.lines * 0.30))
+  vim.cmd("botright split")
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)
-  vim.api.nvim_win_set_width(win, split_width)
+  vim.api.nvim_win_set_height(win, split_height)
 
-  vim.wo[win].wrap        = false
-  vim.wo[win].cursorline  = true
-  vim.wo[win].number      = false
-  vim.wo[win].signcolumn  = "no"
-  vim.wo[win].winfixwidth = true
-  vim.wo[win].winbar      = "  " .. title .. "  (q to close, <CR> to open error)"
+  vim.wo[win].wrap         = false
+  vim.wo[win].cursorline   = true
+  vim.wo[win].number       = false
+  vim.wo[win].signcolumn   = "no"
+  vim.wo[win].winfixheight = true
+  vim.wo[win].winbar       = "  " .. title .. "  (q to close, <CR> to open error)"
 
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
