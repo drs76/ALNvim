@@ -4,11 +4,25 @@
 local M = {}
 
 local COPS = {
-  { token = "${CodeCop}",               name = "CodeCop",               desc = "General AL coding guidelines" },
-  { token = "${PerTenantExtensionCop}", name = "PerTenantExtensionCop", desc = "Per-tenant extension rules" },
-  { token = "${UICop}",                 name = "UICop",                 desc = "UI / control add-in rules" },
-  { token = "${AppSourceCop}",          name = "AppSourceCop",          desc = "AppSource submission rules (strict)" },
+  { token = "${CodeCop}",               name = "CodeCop",               short = "CC",  desc = "General AL coding guidelines" },
+  { token = "${PerTenantExtensionCop}", name = "PerTenantExtensionCop", short = "PTE", desc = "Per-tenant extension rules" },
+  { token = "${UICop}",                 name = "UICop",                 short = "UI",  desc = "UI / control add-in rules" },
+  { token = "${AppSourceCop}",          name = "AppSourceCop",          short = "AS",  desc = "AppSource submission rules (strict)" },
 }
+
+-- Map from token → short abbreviation for statusline display.
+local TOKEN_SHORT = {}
+for _, c in ipairs(COPS) do TOKEN_SHORT[c.token] = c.short end
+
+-- Return a compact string of active cop abbreviations, e.g. "CC·PTE·UI".
+function M.short_names(tokens)
+  if not tokens or #tokens == 0 then return "no cops" end
+  local out = {}
+  for _, t in ipairs(tokens) do
+    out[#out + 1] = TOKEN_SHORT[t] or (t:match("%{(.-)%}") or t)
+  end
+  return table.concat(out, "·")
+end
 
 -- Default: all cops except AppSourceCop, which is project-specific.
 local DEFAULT_COPS = { "${CodeCop}", "${PerTenantExtensionCop}", "${UICop}" }
@@ -98,6 +112,7 @@ function M.apply(root, cops)
     return t:match("%{(.-)%}") or t
   end, cops)
   vim.notify("AL cops: " .. (#cops > 0 and table.concat(names, ", ") or "none"), vim.log.levels.INFO)
+  require("al.status").set_cops(cops)
 end
 
 -- ── Pickers ────────────────────────────────────────────────────────────────

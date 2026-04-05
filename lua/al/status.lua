@@ -10,14 +10,15 @@
 local M = {}
 
 local _s = {
-  lsp     = nil,   -- nil | "starting" | "loading" | "ready"
-  pct     = nil,   -- number 0-100 while lsp == "loading"
-  compile = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
-  publish = nil,   -- nil | "publishing" | { ok=bool }
-  project = nil,   -- nil | { name=string, version=string }
-  root    = nil,   -- project root path (for git HEAD lookup)
-  branch  = nil,   -- cached branch name
-  branch_t = 0,   -- vim.uv.now() when branch was last read
+  lsp      = nil,   -- nil | "starting" | "loading" | "ready"
+  pct      = nil,   -- number 0-100 while lsp == "loading"
+  compile  = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
+  publish  = nil,   -- nil | "publishing" | { ok=bool }
+  project  = nil,   -- nil | { name=string, version=string }
+  cops     = nil,   -- nil | token list e.g. {"${CodeCop}", ...}
+  root     = nil,   -- project root path (for git HEAD lookup)
+  branch   = nil,   -- cached branch name
+  branch_t = 0,    -- vim.uv.now() when branch was last read
 }
 
 -- Read the current git branch by parsing .git/HEAD directly (no subprocess).
@@ -98,6 +99,11 @@ function M.set_publishing()
   redraw()
 end
 
+function M.set_cops(tokens)
+  _s.cops = tokens
+  redraw()
+end
+
 function M.set_publish_result(ok)
   _s.publish = { ok = ok }
   redraw()
@@ -147,6 +153,10 @@ function M.get()
     parts[#parts + 1] = "publishing…"
   elseif type(_s.publish) == "table" then
     parts[#parts + 1] = _s.publish.ok and "published ✓" or "publish failed ✗"
+  end
+
+  if _s.cops then
+    parts[#parts + 1] = require("al.cops").short_names(_s.cops)
   end
 
   if #parts == 0 then return "" end
