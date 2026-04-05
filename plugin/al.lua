@@ -457,3 +457,11 @@ end, { desc = "Show ALNvim / project information" })
 vim.api.nvim_create_user_command("ALSelectCops", function()
   require("al.cops").picker()
 end, { desc = "Select active AL Code Cops for this project" })
+
+vim.api.nvim_create_user_command("ALDiff", function(opts)
+  require("al.diff").explore(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "AL: Git diff explorer — list changed files with vifdiff",
+})
