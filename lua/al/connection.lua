@@ -200,24 +200,27 @@ end
 
 -- Attempt `az account get-access-token` and return the token string, or nil.
 -- tenant: optional Entra tenant (domain or GUID) — helps az when multiple tenants exist.
--- verbose: if true, notify with the az error output when the call fails.
+-- verbose: if true, re-run capturing stderr and notify the user when the call fails.
 local function az_get_token(tenant, verbose)
+  local devnull = require("al.platform").devnull()
   local cmd = "az account get-access-token"
     .. " --resource https://api.businesscentral.dynamics.com"
     .. " --query accessToken -o tsv"
   if tenant and tenant ~= "" and tenant ~= "default" then
     cmd = cmd .. " --tenant " .. vim.fn.shellescape(tenant)
   end
-  -- Merge stderr into stdout so vim.fn.system captures any error message.
-  local out = vim.trim(vim.fn.system(cmd .. " 2>&1"))
-  if vim.v.shell_error == 0 and out ~= "" and not out:match("^[\r\n]*$") then
-    -- Sanity-check: a Bearer token is a JWT and starts with "eyJ"
-    if out:match("^eyJ") then return out end
+  -- Suppress stderr so az deprecation warnings don't contaminate the token output.
+  local t = vim.trim(vim.fn.system(cmd .. " " .. devnull))
+  if vim.v.shell_error == 0 and t ~= "" then
+    return t
   end
-  if verbose and out ~= "" then
+  if verbose then
+    -- Re-run capturing stderr to give the user a useful error message.
+    local err = vim.trim(vim.fn.system(cmd .. " 2>&1"))
     vim.notify(
-      "AL: az account get-access-token failed:\n" .. out .. "\n"
-      .. "If you have multiple tenants, set `primaryTenantDomain` in launch.json.",
+      "AL: az account get-access-token failed"
+      .. (err ~= "" and (":\n" .. err) or "")
+      .. "\nIf you have multiple tenants, set `primaryTenantDomain` in launch.json.",
       vim.log.levels.WARN)
   end
   return nil
