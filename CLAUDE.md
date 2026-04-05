@@ -156,6 +156,10 @@ client:request("al/setActiveWorkspace", {
 
 **`assemblyProbingPaths` must be a non-null JSON array.** Omitting it causes `ArgumentNullException("path")` crash. The VSCode default `['./.netpackages']` hangs indefinitely on network-mounted (CIFS/SMB) paths — use `{}`.
 
+### Progress fallback
+
+Some server versions reach 100% via `al/progressNotification` but never send `al/activeProjectLoaded`. The progress handler detects this: if the status is still `"loading"` 3 seconds after percent ≥ 100, it calls `set_lsp_ready()` automatically.
+
 ### `al/activeProjectLoaded` — must return a response
 
 This is a server-initiated **request** (has an `id`). The Neovim `vim.lsp.handlers` callback must return `vim.NIL` to send a null JSON-RPC response back. Without this, Neovim throws an error and the server may stall.
@@ -289,6 +293,7 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>an` | n | `:ALNewObject` — AL Object Wizard |
 | `<leader>aw` | n | `:ALReportLayout` — generate Word/Excel layout from report dataset |
 | `<leader>aW` | n | `:ALOpenLayout` — open existing .docx/.xlsx layout in default app |
+| `<leader>aA` | n | `:ALAnalyze` — force re-analysis / refresh diagnostics |
 | `<leader>aD` | n | `:ALDiff` — git diff explorer (changed files) |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
@@ -334,6 +339,7 @@ Global LSP keymaps (`K`, `gr`, `<leader>rn`, etc.) are set by the user's `init.l
 | `:ALExplorerProcs` | Browse procedures/triggers in the current file |
 | `:ALSearch [dir]` | Live grep across all AL files (project + symbol packages) |
 | `:ALNextId` | Show next free object ID for the type on the current line |
+| `:ALAnalyze` | Force re-analysis of the current project — re-sends `al/setActiveWorkspace` to refresh diagnostics for all open AL buffers |
 | `:ALDiff [dir]` | Git diff explorer — list uncommitted changes with Telescope preview or panel; `<CR>` open file, `<C-d>` vifdiff (HEAD vs working) |
 | `:ALSelectCops` | Select active code cops for this project (Telescope or vim.ui.select) |
 | `:ALOpenAppJson` | Edit project `app.json` |

@@ -84,6 +84,10 @@ function M.set_lsp_off()
   redraw()
 end
 
+function M.is_loading()
+  return _s.lsp == "loading"
+end
+
 function M.set_compiling()
   _s.compile = "building"
   redraw()

@@ -19,6 +19,14 @@ vim.api.nvim_create_autocmd("BufEnter", {
   buffer   = 0,
   callback = function() vim.wo.statusline = _AL_STL end,
 })
+-- Format on save using the AL language server formatter.
+-- Runs synchronously in BufWritePre so the formatted content is what gets written.
+vim.api.nvim_create_autocmd("BufWritePre", {
+  buffer   = 0,
+  callback = function()
+    pcall(vim.lsp.buf.format, { async = false, timeout_ms = 3000, name = "al_language_server" })
+  end,
+})
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
 vim.api.nvim_create_autocmd("BufWritePost", {
   buffer   = 0,
@@ -63,6 +71,7 @@ vim.keymap.set("n", "<leader>aG", "<cmd>ALGuidelines<CR>",  vim.tbl_extend("forc
 vim.keymap.set("n", "<leader>an", "<cmd>ALNewObject<CR>",     vim.tbl_extend("force", opts, { desc = "AL: New object wizard" }))
 vim.keymap.set("n", "<leader>aw", "<cmd>ALReportLayout<CR>", vim.tbl_extend("force", opts, { desc = "AL: Report Layout Wizard (Excel/Word/RDLC)" }))
 vim.keymap.set("n", "<leader>aW", "<cmd>ALOpenLayout<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open existing report layout in default app" }))
+vim.keymap.set("n", "<leader>aA", "<cmd>ALAnalyze<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Force re-analysis / refresh diagnostics" }))
 vim.keymap.set("n", "<leader>aD", "<cmd>ALDiff<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Git diff explorer — changed files" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))

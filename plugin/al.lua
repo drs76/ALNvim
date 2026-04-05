@@ -82,7 +82,15 @@ end
 -- al/progressNotification is a server notification: { owner=string, percent=number, cancel=bool }
 vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
   if result and result.percent then
-    require("al.status").set_lsp_loading(result.percent)
+    local status = require("al.status")
+    status.set_lsp_loading(result.percent)
+    -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
+    -- Fall back: if still in "loading" state 3 seconds after hitting 100%, mark ready.
+    if result.percent >= 100 then
+      vim.defer_fn(function()
+        if status.is_loading() then status.set_lsp_ready() end
+      end, 3000)
+    end
   end
 end
 
@@ -458,6 +466,20 @@ end, { desc = "Show ALNvim / project information" })
 vim.api.nvim_create_user_command("ALSelectCops", function()
   require("al.cops").picker()
 end, { desc = "Select active AL Code Cops for this project" })
+
+vim.api.nvim_create_user_command("ALAnalyze", function()
+  local lsp_mod = require("al.lsp")
+  local cops    = require("al.cops")
+  local root    = lsp_mod.get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+  -- Re-send al/setActiveWorkspace — this triggers the server to re-index the project
+  -- and push fresh publishDiagnostics for all open buffers.
+  require("al.status").set_lsp_loading(0)
+  cops.apply(root, cops.get_active(root))
+end, { desc = "AL: Force re-analysis of the current project (refreshes diagnostics)" })
 
 vim.api.nvim_create_user_command("ALDiff", function(opts)
   require("al.diff").explore(opts.args ~= "" and opts.args or nil)
