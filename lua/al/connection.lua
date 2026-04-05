@@ -201,7 +201,7 @@ local function az_login_terminal(cb)
   vim.keymap.set("n", "q",     close_and_continue, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close_and_continue, { buffer = buf, nowait = true, silent = true })
 
-  vim.fn.termopen("az login --use-device-code", {
+  vim.fn.termopen("az login --allow-no-subscriptions --use-device-code", {
     on_exit = function(_, code)
       vim.schedule(function()
         exit_code = code
@@ -225,6 +225,7 @@ local function az_get_token(tenant, verbose)
   local cmd = "az account get-access-token"
     .. " --resource https://api.businesscentral.dynamics.com"
     .. " --query accessToken -o tsv"
+    .. " --allow-no-subscriptions"
   if tenant and tenant ~= "" and tenant ~= "default" then
     cmd = cmd .. " --tenant " .. vim.fn.shellescape(tenant)
   end
