@@ -130,27 +130,28 @@ function M.publish(root, skip_compile, on_success)
   local base   = conn.base_url(cfg)
   local tenant = cfg.tenant or "default"
   local schema = cfg.schemaUpdateMode or "synchronize"
-  local auth   = conn.curl_auth(cfg)
 
-  if skip_compile then
-    local app_file = find_app_file(root, app)
-    if not app_file then
-      vim.notify("AL: No .app file found. Run :ALCompile first.", vim.log.levels.ERROR)
-      return
-    end
-    do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
-    return
-  end
-
-  -- Compile first; on success, upload the resulting .app
-  require("al.compile").compile(root, nil, function()
-    vim.schedule(function()
+  conn.get_auth(cfg, function(auth)
+    if skip_compile then
       local app_file = find_app_file(root, app)
       if not app_file then
-        vim.notify("AL: Compile succeeded but no .app file found", vim.log.levels.ERROR)
+        vim.notify("AL: No .app file found. Run :ALCompile first.", vim.log.levels.ERROR)
         return
       end
       do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
+      return
+    end
+
+    -- Compile first; on success, upload the resulting .app
+    require("al.compile").compile(root, nil, function()
+      vim.schedule(function()
+        local app_file = find_app_file(root, app)
+        if not app_file then
+          vim.notify("AL: Compile succeeded but no .app file found", vim.log.levels.ERROR)
+          return
+        end
+        do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
+      end)
     end)
   end)
 end

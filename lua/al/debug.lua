@@ -89,44 +89,45 @@ function M.snapshot_start(root)
 
   local base   = conn.base_url(cfg)
   local tenant = cfg.tenant or "default"
-  local auth   = conn.curl_auth(cfg)
 
-  local body = vim.fn.json_encode({
-    breakOnNext      = cfg.breakOnNext or "WebClient",
-    executionContext = cfg.executionContext or "DebugAndProfile",
-  })
+  conn.get_auth(cfg, function(auth)
+    local body = vim.fn.json_encode({
+      breakOnNext      = cfg.breakOnNext or "WebClient",
+      executionContext = cfg.executionContext or "DebugAndProfile",
+    })
 
-  local cmd = {
-    "curl", "-sL", "--fail", "-X", "POST",
-    "-H", "Content-Type: application/json",
-    "-d", body,
-  }
-  vim.list_extend(cmd, auth)
-  table.insert(cmd, snapshot_base_url(base, tenant))
+    local cmd = {
+      "curl", "-sL", "--fail", "-X", "POST",
+      "-H", "Content-Type: application/json",
+      "-d", body,
+    }
+    vim.list_extend(cmd, auth)
+    table.insert(cmd, snapshot_base_url(base, tenant))
 
-  local output = {}
-  vim.fn.jobstart(cmd, {
-    stdout_buffered = true,
-    on_stdout = function(_, data) vim.list_extend(output, data) end,
-    on_exit = vim.schedule_wrap(function(_, code)
-      if code == 0 then
-        local raw = table.concat(output, "")
-        local ok, resp = pcall(vim.fn.json_decode, raw)
-        local sid = (ok and type(resp) == "table" and resp.sessionId) or "unknown"
-        vim.g.al_snapshot_session = tostring(sid)
-        vim.g.al_snapshot_root    = root
-        vim.notify(
-          "AL: Snapshot session started  (id: " .. sid .. ")\n"
-          .. "Perform actions in the BC client, then run :ALSnapshotFinish",
-          vim.log.levels.INFO)
-      else
-        vim.notify(
-          "AL: Failed to start snapshot session (curl exit " .. code .. ")\n"
-          .. "Check server/credentials in .vscode/launch.json",
-          vim.log.levels.ERROR)
-      end
-    end),
-  })
+    local output = {}
+    vim.fn.jobstart(cmd, {
+      stdout_buffered = true,
+      on_stdout = function(_, data) vim.list_extend(output, data) end,
+      on_exit = vim.schedule_wrap(function(_, code)
+        if code == 0 then
+          local raw = table.concat(output, "")
+          local ok, resp = pcall(vim.fn.json_decode, raw)
+          local sid = (ok and type(resp) == "table" and resp.sessionId) or "unknown"
+          vim.g.al_snapshot_session = tostring(sid)
+          vim.g.al_snapshot_root    = root
+          vim.notify(
+            "AL: Snapshot session started  (id: " .. sid .. ")\n"
+            .. "Perform actions in the BC client, then run :ALSnapshotFinish",
+            vim.log.levels.INFO)
+        else
+          vim.notify(
+            "AL: Failed to start snapshot session (curl exit " .. code .. ")\n"
+            .. "Check server/credentials in .vscode/launch.json",
+            vim.log.levels.ERROR)
+        end
+      end),
+    })
+  end)
 end
 
 -- Download the snapshot file from BC and open it in a new buffer.
@@ -151,29 +152,30 @@ function M.snapshot_finish(root)
 
   local base    = conn.base_url(cfg)
   local tenant  = cfg.tenant or "default"
-  local auth    = conn.curl_auth(cfg)
   local outdir  = root .. "/.snapshots"
   vim.fn.mkdir(outdir, "p")
   local outfile = outdir .. "/snapshot_" .. sid .. ".snapshots"
 
-  local cmd = { "curl", "-sL", "--fail" }
-  vim.list_extend(cmd, auth)
-  vim.list_extend(cmd, { "-o", outfile, snapshot_id_url(base, sid, tenant) })
+  conn.get_auth(cfg, function(auth)
+    local cmd = { "curl", "-sL", "--fail" }
+    vim.list_extend(cmd, auth)
+    vim.list_extend(cmd, { "-o", outfile, snapshot_id_url(base, sid, tenant) })
 
-  vim.fn.jobstart(cmd, {
-    on_exit = vim.schedule_wrap(function(_, code)
-      if code == 0 then
-        vim.g.al_snapshot_session = nil
-        vim.g.al_snapshot_root    = nil
-        vim.notify("AL: Snapshot saved to " .. outfile, vim.log.levels.INFO)
-        vim.cmd("edit " .. vim.fn.fnameescape(outfile))
-      else
-        vim.notify(
-          "AL: Failed to download snapshot (exit " .. code .. ")",
-          vim.log.levels.ERROR)
-      end
-    end),
-  })
+    vim.fn.jobstart(cmd, {
+      on_exit = vim.schedule_wrap(function(_, code)
+        if code == 0 then
+          vim.g.al_snapshot_session = nil
+          vim.g.al_snapshot_root    = nil
+          vim.notify("AL: Snapshot saved to " .. outfile, vim.log.levels.INFO)
+          vim.cmd("edit " .. vim.fn.fnameescape(outfile))
+        else
+          vim.notify(
+            "AL: Failed to download snapshot (exit " .. code .. ")",
+            vim.log.levels.ERROR)
+        end
+      end),
+    })
+  end)
 end
 
 -- ── launch.json patching ─────────────────────────────────────────────────────

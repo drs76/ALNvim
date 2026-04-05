@@ -156,8 +156,8 @@ function M.download(root)
 
   local base   = conn.base_url(cfg)
   local tenant = cfg.primaryTenantDomain or cfg.tenant or "default"
-  local auth   = conn.curl_auth(cfg)
 
+  conn.get_auth(cfg, function(auth)
   -- Open the progress float (header + blank + one row per package)
   local buf, win, ns = open_symbols_win(deps, base)
   -- Package rows start at line index 2 (0-based)
@@ -205,6 +205,7 @@ function M.download(root)
       end),
     })
   end
+  end) -- conn.get_auth
 end
 
 return M

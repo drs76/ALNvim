@@ -165,6 +165,111 @@ function M.clear_credentials()
   vim.notify("AL: Credential cache cleared", vim.log.levels.INFO)
 end
 
+-- Open a floating terminal running `az login --use-device-code`.
+-- The user follows the on-screen instructions to sign in via a browser.
+-- Calls cb(true) when the terminal exits with code 0, cb(false) otherwise.
+local function az_login_terminal(cb)
+  local buf = vim.api.nvim_create_buf(false, true)
+  local ui  = vim.api.nvim_list_uis()[1]
+  local w   = math.min(84, math.max(60, ui.width  - 4))
+  local h   = math.min(22, math.max(10, ui.height - 4))
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative  = "editor",
+    width     = w,
+    height    = h,
+    row       = math.floor((ui.height - h) / 2),
+    col       = math.floor((ui.width  - w)  / 2),
+    style     = "minimal",
+    border    = "rounded",
+    title     = " AL: Sign in to Microsoft Entra ID ",
+    title_pos = "center",
+    noautocmd = true,
+  })
+  vim.fn.termopen("az login --use-device-code", {
+    on_exit = function(_, code)
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(win) then
+          vim.api.nvim_win_close(win, true)
+        end
+        cb(code == 0)
+      end)
+    end,
+  })
+  vim.cmd("startinsert")
+end
+
+-- Attempt `az account get-access-token` and return the token string, or nil.
+local function az_get_token()
+  local t = vim.trim(vim.fn.system(
+    "az account get-access-token" ..
+    " --resource https://api.businesscentral.dynamics.com" ..
+    " --query accessToken -o tsv " .. require("al.platform").devnull()))
+  if vim.v.shell_error == 0 and t ~= "" then return t end
+  return nil
+end
+
+-- Async auth resolution. Calls cb(auth_args) when credentials are ready.
+-- auth_args is the same list-of-curl-flags format as curl_auth() returns.
+--
+-- For Windows and UserPassword/NavUserPassword the callback is invoked
+-- synchronously (before the function returns).
+-- For MicrosoftEntraID / AAD the function may open a terminal to run
+-- `az login --use-device-code` when the Azure CLI is installed but the user
+-- is not yet signed in, giving the same browser-based sign-in flow as VSCode.
+function M.get_auth(cfg, cb)
+  local auth = cfg.authentication or (M.is_cloud(cfg) and "MicrosoftEntraID" or "Windows")
+
+  if auth == "Windows" then
+    cb({ "--ntlm", "--negotiate", "-u", ":" }); return
+  end
+
+  if auth == "UserPassword" or auth == "NavUserPassword" then
+    cb(M.curl_auth(cfg)); return
+  end
+
+  -- ── MicrosoftEntraID / AAD ─────────────────────────────────────────────
+  local key = M.base_url(cfg) .. "|" .. auth
+
+  -- 1. Env var always wins
+  local token = os.getenv("AL_BC_TOKEN")
+  if token and token ~= "" then
+    cb({ "-H", "Authorization: Bearer " .. token }); return
+  end
+
+  -- 2. Azure CLI — try getting a cached token first (handles its own refresh)
+  local t = az_get_token()
+  if t then cb({ "-H", "Authorization: Bearer " .. t }); return end
+
+  -- 3. az installed but not signed in → open interactive device-code login
+  vim.fn.system("az --version " .. require("al.platform").devnull())
+  if vim.v.shell_error == 0 then
+    az_login_terminal(function(ok)
+      if ok then
+        local t2 = az_get_token()
+        if t2 then cb({ "-H", "Authorization: Bearer " .. t2 }); return end
+      end
+      -- Login failed or token still unavailable — fall back to manual entry
+      if not _cache[key] then
+        _cache[key] = vim.fn.inputsecret("Bearer token (Entra ID): ")
+      end
+      cb({ "-H", "Authorization: Bearer " .. _cache[key] })
+    end)
+    return
+  end
+
+  -- 4. az not installed — manual prompt with hint
+  vim.notify(
+    "AL: Azure CLI (`az`) not found — install it for automatic Entra ID sign-in.\n"
+    .. "Alternatively set AL_BC_TOKEN or enter a token manually below.\n"
+    .. "Get a token: az account get-access-token"
+    .. " --resource https://api.businesscentral.dynamics.com --query accessToken -o tsv",
+    vim.log.levels.WARN)
+  if not _cache[key] then
+    _cache[key] = vim.fn.inputsecret("Bearer token (Entra ID): ")
+  end
+  cb({ "-H", "Authorization: Bearer " .. _cache[key] })
+end
+
 -- Return a list of curl arguments that handle authentication.
 -- Credential resolution order:
 --   UserPassword  : 1. launch.json al_username/al_password  2. env vars  3. prompt (cached per session)
