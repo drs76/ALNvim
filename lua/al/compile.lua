@@ -50,9 +50,18 @@ local function parse_output(lines)
   return qf
 end
 
+-- Track the last build window so re-running compile closes the previous one first.
+local _build_win = nil
+
 -- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
 -- The window above (where the file is) is used for <CR> jump-to-error.
 local function open_build_win(title)
+  -- Close any existing build window before opening a new one.
+  if _build_win and vim.api.nvim_win_is_valid(_build_win) then
+    vim.api.nvim_win_close(_build_win, true)
+  end
+  _build_win = nil
+
   -- Remember the current window — it becomes the file pane above the build panel.
   local file_win = vim.api.nvim_get_current_win()
 
@@ -72,6 +81,8 @@ local function open_build_win(title)
   vim.wo[win].signcolumn   = "no"
   vim.wo[win].winfixheight = true
   vim.wo[win].winbar       = "  " .. title .. "  (q to close, <CR> to open error)"
+
+  _build_win = win
 
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
