@@ -325,8 +325,6 @@ vim.api.nvim_create_autocmd("LspAttach", {
           vim.notify("AL: setActiveWorkspace error: " .. vim.inspect(err), vim.log.levels.WARN)
         elseif result and result.success == false then
           vim.notify("AL: setActiveWorkspace returned success=false: " .. vim.inspect(result), vim.log.levels.WARN)
-        else
-          vim.notify("AL: setActiveWorkspace OK — waiting for project to load…", vim.log.levels.WARN)
         end
       end, args.buf)
     end
