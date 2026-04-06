@@ -60,14 +60,17 @@ end
 
 -- Re-send al/setActiveWorkspace with updated cops so changes take effect
 -- immediately without restarting the LSP server.
-function M.apply(root, cops)
+-- Pass silent=true to suppress the "AL cops: ..." notification (used for auto-sends).
+function M.apply(root, cops, silent)
   local clients = vim.lsp.get_clients({ name = "al_language_server" })
   local client
   for _, c in ipairs(clients) do
     if c.config.root_dir == root then client = c; break end
   end
   if not client then
-    vim.notify("AL cops: no active LSP client for " .. root, vim.log.levels.WARN)
+    if not silent then
+      vim.notify("AL cops: no active LSP client for " .. root, vim.log.levels.WARN)
+    end
     return
   end
 
@@ -108,10 +111,10 @@ function M.apply(root, cops)
     },
   }, function() end, 0)
 
-  local names = vim.tbl_map(function(t)
-    return t:match("%{(.-)%}") or t
-  end, cops)
-  vim.notify("AL cops: " .. (#cops > 0 and table.concat(names, ", ") or "none"), vim.log.levels.INFO)
+  if not silent then
+    local names = vim.tbl_map(function(t) return t:match("%{(.-)%}") or t end, cops)
+    vim.notify("AL cops: " .. (#cops > 0 and table.concat(names, ", ") or "none"), vim.log.levels.INFO)
+  end
   require("al.status").set_cops(cops)
 end
 

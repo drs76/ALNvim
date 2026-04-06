@@ -85,15 +85,32 @@ end
 vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
   if result and result.percent then
     local client = vim.lsp.get_client_by_id(ctx.client_id)
-    if client then client._al_last_active = vim.uv.now() end
+    if client then
+      client._al_last_active = vim.uv.now()
+      -- Track that a real loading cycle has started (percent > 0).
+      if result.percent > 0 then client._al_seen_loading = true end
+    end
     local status = require("al.status")
     status.set_lsp_loading(result.percent)
-    -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
-    -- Fall back: if still in "loading" state 3 seconds after hitting 100%, mark ready.
     if result.percent >= 100 then
+      -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
+      -- Fall back: if still in "loading" state 3 seconds after hitting 100%, mark ready.
       vim.defer_fn(function()
         if status.is_loading() then status.set_lsp_ready() end
       end, 3000)
+      -- The AL server only fully activates language features (including the formatter)
+      -- after a second al/setActiveWorkspace following the initial load cycle.
+      -- Send it once automatically so the user does not have to run :ALAnalyze.
+      if client and client._al_seen_loading and not client._al_second_init_done then
+        client._al_second_init_done = true
+        vim.defer_fn(function()
+          local root = client.root_dir
+          if root then
+            local cops_mod = require("al.cops")
+            cops_mod.apply(root, cops_mod.get_active(root), true)  -- silent
+          end
+        end, 1500)
+      end
     end
   end
 end
