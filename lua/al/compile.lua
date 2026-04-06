@@ -55,7 +55,7 @@ local _build_win = nil
 
 -- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
 -- The window above (where the file is) is used for <CR> jump-to-error.
-local function open_build_win(title)
+local function open_build_win(title, project_dir)
   -- Close any existing build window before opening a new one.
   if _build_win and vim.api.nvim_win_is_valid(_build_win) then
     vim.api.nvim_win_close(_build_win, true)
@@ -104,6 +104,12 @@ local function open_build_win(title)
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
+    -- Normalize path separators (Windows alc uses backslashes).
+    file = file:gsub("\\", "/")
+    -- alc on Windows emits relative paths; resolve against the project root.
+    if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
+      file = project_dir .. "/" .. file
+    end
     -- Re-validate file_win: must still exist and be a normal editing window.
     local target = (file_win and vim.api.nvim_win_is_valid(file_win)
                     and vim.bo[vim.api.nvim_win_get_buf(file_win)].buftype == ""
@@ -228,7 +234,7 @@ function M.compile(project_dir, extra_args, on_success)
   end
 
   local proj_name = vim.fn.fnamemodify(project_dir, ":t")
-  local buf, _win = open_build_win("AL Build — " .. proj_name)
+  local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir)
   buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
 
   -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
