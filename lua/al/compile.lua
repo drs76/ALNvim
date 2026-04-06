@@ -105,7 +105,7 @@ local function open_build_win(title)
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
     -- Re-validate file_win: must still exist and be a normal editing window.
-    local target = (vim.api.nvim_win_is_valid(file_win)
+    local target = (file_win and vim.api.nvim_win_is_valid(file_win)
                     and vim.bo[vim.api.nvim_win_get_buf(file_win)].buftype == ""
                     and file_win)
                    or best_edit_win(win)
