@@ -24,6 +24,9 @@ vim.api.nvim_create_autocmd("BufEnter", {
 vim.api.nvim_create_autocmd("BufWritePre", {
   buffer   = 0,
   callback = function()
+    -- Skip until the server has fully loaded the project; formatting requests
+    -- silently fail or time out during the indexing phase.
+    if not require("al.status").is_ready() then return end
     local bufnr  = vim.api.nvim_get_current_buf()
     local clients = vim.lsp.get_clients({ name = "al_language_server", bufnr = bufnr })
     if #clients == 0 then return end

@@ -88,6 +88,10 @@ function M.is_loading()
   return _s.lsp == "loading"
 end
 
+function M.is_ready()
+  return _s.lsp == "ready"
+end
+
 function M.set_compiling()
   _s.compile = "building"
   redraw()
