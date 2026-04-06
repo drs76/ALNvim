@@ -62,8 +62,20 @@ local function open_build_win(title)
   end
   _build_win = nil
 
-  -- Remember the current window — it becomes the file pane above the build panel.
-  local file_win = vim.api.nvim_get_current_win()
+  -- Find the best regular editing window: non-floating, normal buftype.
+  -- Called after closing the old build window so we never accidentally pick it.
+  local function best_edit_win(exclude)
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if w ~= exclude
+        and vim.api.nvim_win_get_config(w).relative == ""
+        and vim.bo[vim.api.nvim_win_get_buf(w)].buftype == "" then
+        return w
+      end
+    end
+  end
+
+  -- Capture target file window before the split is created.
+  local file_win = best_edit_win(nil)
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -87,16 +99,16 @@ local function open_build_win(title)
   vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
 
-  -- <CR> on a diagnostic line: open file in the right pane, keep results visible.
+  -- <CR> on a diagnostic line: open file in the target pane, keep results visible.
   vim.keymap.set("n", "<CR>", function()
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
-    local target = vim.api.nvim_win_is_valid(file_win) and file_win or (function()
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then return w end
-      end
-    end)()
+    -- Re-validate file_win: must still exist and be a normal editing window.
+    local target = (vim.api.nvim_win_is_valid(file_win)
+                    and vim.bo[vim.api.nvim_win_get_buf(file_win)].buftype == ""
+                    and file_win)
+                   or best_edit_win(win)
     if not target then return end
     vim.api.nvim_win_call(target, function()
       vim.cmd("edit " .. vim.fn.fnameescape(file))
