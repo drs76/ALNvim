@@ -62,20 +62,17 @@ local function open_build_win(title, project_dir)
   end
   _build_win = nil
 
-  -- Find the best regular editing window: non-floating, normal buftype.
-  -- Called after closing the old build window so we never accidentally pick it.
-  local function best_edit_win(exclude)
+  -- Remember the current window — the user ran :ALCompile from here.
+  local file_win = vim.api.nvim_get_current_win()
+
+  -- Fallback: find any non-floating window that isn't the build panel.
+  local function find_edit_win(exclude)
     for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= exclude
-        and vim.api.nvim_win_get_config(w).relative == ""
-        and vim.bo[vim.api.nvim_win_get_buf(w)].buftype == "" then
+      if w ~= exclude and vim.api.nvim_win_get_config(w).relative == "" then
         return w
       end
     end
   end
-
-  -- Capture target file window before the split is created.
-  local file_win = best_edit_win(nil)
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -110,11 +107,8 @@ local function open_build_win(title, project_dir)
     if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
       file = project_dir .. "/" .. file
     end
-    -- Re-validate file_win: must still exist and be a normal editing window.
-    local target = (file_win and vim.api.nvim_win_is_valid(file_win)
-                    and vim.bo[vim.api.nvim_win_get_buf(file_win)].buftype == ""
-                    and file_win)
-                   or best_edit_win(win)
+    local target = (file_win and vim.api.nvim_win_is_valid(file_win) and file_win)
+                   or find_edit_win(win)
     if not target then return end
     vim.api.nvim_win_call(target, function()
       vim.cmd("edit " .. vim.fn.fnameescape(file))
