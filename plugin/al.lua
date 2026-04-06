@@ -73,6 +73,8 @@ vim.api.nvim_create_autocmd("FileType", {
 -- and the server stays in a broken state. Respond with null and notify the user.
 vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
+    local client = vim.lsp.get_client_by_id(ctx.client_id)
+    if client then client._al_last_active = vim.uv.now() end
     require("al.status").set_lsp_ready()
   end
   return vim.NIL  -- server-initiated request: must respond with null
@@ -82,6 +84,8 @@ end
 -- al/progressNotification is a server notification: { owner=string, percent=number, cancel=bool }
 vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
   if result and result.percent then
+    local client = vim.lsp.get_client_by_id(ctx.client_id)
+    if client then client._al_last_active = vim.uv.now() end
     local status = require("al.status")
     status.set_lsp_loading(result.percent)
     -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
@@ -106,6 +110,11 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     local root = client.root_dir
     if not root then return end
+
+    -- Start the idle countdown from attach time so the watchdog has a baseline.
+    if not client._al_last_active then
+      client._al_last_active = vim.uv.now()
+    end
 
     -- The AL server sends completion labels as { label = "..." } objects instead of strings.
     -- nvim-cmp calls client:request("textDocument/completion", ..., its_own_callback), so the
@@ -193,6 +202,27 @@ vim.api.nvim_create_autocmd("LspAttach", {
         end
         return _orig(self, method, params, callback, bufnr_)
       end
+    end
+
+    -- Watchdog: if the server has been silent for > 10 min, re-send al/setActiveWorkspace
+    -- to wake it up. The AL server can idle/suspend after inactivity; this mirrors the
+    -- "AL: Reload" command in VSCode. Checks every 2 min via a uv timer.
+    if not client._al_keepalive then
+      local IDLE_MS  = 10 * 60 * 1000  -- treat as idle after 10 min of silence
+      local CHECK_MS =  2 * 60 * 1000  -- poll every 2 min
+      client._al_keepalive = vim.uv.new_timer()
+      client._al_keepalive:start(CHECK_MS, CHECK_MS, vim.schedule_wrap(function()
+        if not client._al_last_active then return end
+        if require("al.status").is_loading() then return end
+        if vim.uv.now() - client._al_last_active < IDLE_MS then return end
+        -- Reset timestamp before waking so we don't retry every 2 min if truly dead.
+        client._al_last_active = vim.uv.now()
+        local r = client.root_dir
+        if r then
+          local cops = require("al.cops")
+          cops.apply(r, cops.get_active(r))
+        end
+      end))
     end
 
     -- Surface project identity and LSP state in the statusline.
@@ -372,6 +402,11 @@ vim.api.nvim_create_autocmd("LspDetach", {
     local client = vim.lsp.get_client_by_id(args.data.client_id)
     if client and client.name == "al_language_server" then
       require("al.status").set_lsp_off()
+      if client._al_keepalive then
+        client._al_keepalive:stop()
+        client._al_keepalive:close()
+        client._al_keepalive = nil
+      end
     end
   end,
 })
