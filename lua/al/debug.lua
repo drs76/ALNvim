@@ -252,10 +252,10 @@ local function reset_output_win()
 end
 
 local function open_output_win(buf)
-  local w   = math.min(96, vim.o.columns - 4)
+  local w   = 60
   local h   = math.min(14, math.floor(vim.o.lines * 0.35))
-  local row = vim.o.lines - h - 3
-  local col = math.floor((vim.o.columns - w) / 2)
+  local row = 1
+  local col = vim.o.columns - w - 2
   local win = vim.api.nvim_open_win(buf, false, {
     relative  = "editor",
     width     = w,

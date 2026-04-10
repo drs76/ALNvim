@@ -291,6 +291,11 @@ Snippets use LuaSnip's `from_vscode` loader pointed at this plugin directory. `p
 | `<leader>aw` | n | `:ALReportLayout` — generate Word/Excel layout from report dataset |
 | `<leader>aW` | n | `:ALOpenLayout` — open existing .docx/.xlsx layout in default app |
 | `<leader>aA` | n | `:ALAnalyze` — force re-analysis / refresh diagnostics |
+| `<leader>aca` | n, v | All code actions (same as `<leader>ca` but AL-scoped) |
+| `<leader>acf` | n | Quick fixes for diagnostic(s) on cursor line |
+| `<leader>acF` | n | Fix all — apply all `source.fixAll` actions in file |
+| `<leader>acn` | n | Organise namespaces / using statements (`source.organizeImports`) |
+| `<leader>acr` | n | Refactor actions — convert `with`, promoted actions, implement interface… |
 | `<leader>aD` | n | `:ALDiff` — git diff explorer (changed files) |
 | `<leader>ae` | n | `:ALExplorer` — browse all AL objects |
 | `<leader>af` | n | `:ALExplorerProcs` — procedures in current file |
@@ -449,17 +454,24 @@ Cloud `launch.json` example:
 
 ## BC Dark colorscheme (`colors/bc_dark.lua`)
 
-Applied automatically when focusing an AL window, restored when focusing a non-AL window. Matches the user's VSCode TextMate colour settings:
+Applied automatically when focusing an AL window, restored when focusing a non-AL window. Derived from the official VS Code "Business Central Dark" theme (`themes/BC_dark.json` in the AL extension):
 
 | Element | Colour |
 |---|---|
-| Background | `#010704` |
-| Foreground | `#efefef` |
-| Comments | `#04b925` (green) |
-| AL keywords / object types / built-in types / property keywords | `#f6fa16` (yellow) — `Keyword`, `Type`, `Structure` groups |
-| Strings / numbers / variables / identifiers | `#efefef` (near-white) |
+| Background | `#1E1E1E` |
+| Foreground | `#D4D4D4` |
+| Comments | `#64707D` (neutral gray, italic) |
+| Keywords / operators / control flow | `#00747F` (teal — brand colour) |
+| Types / object types (codeunit, table…) | `#4EC9B0` (aqua) |
+| Functions | `#DCDCAA` (yellow) |
+| Variables / identifiers | `#9CDCFE` (light blue) |
+| Strings | `#CE9178` (orange) |
+| Numbers | `#9FD89F` (soft green) |
+| Language constants (true/false) | `#62CFD7` (light teal) |
+| Errors | `#D13438` (red) |
+| Status bar | `#00747F` bg, `#FFFFFF` fg |
 
-**Implementation note:** `bc_yellow` is an alias for `bc_dark` (identical colors, different `colors_name`). Set `colorscheme bc_yellow` in `init.lua` to use it as a global default without any per-window switching logic in the plugin.
+**`bc_yellow`** is a separate dark theme with a near-black green background (`#010704`), near-white foreground (`#efefef`), green comments (`#04b925`), and yellow keywords/types (`#f6fa16`). Set `colorscheme bc_yellow` in `init.lua` to use it as a global default without any per-window switching logic in the plugin.
 
 **Syntax string regions use `oneline`** on `alString`, `alVerbatim`, and `alQuotedIdent` in `syntax/al.vim`. Without `oneline`, unclosed quote characters bleed highlight colour across the rest of the file.
 

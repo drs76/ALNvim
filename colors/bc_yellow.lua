@@ -1,10 +1,8 @@
 -- Business Central Yellow colorscheme for Neovim
--- Identical to bc_dark — use this as your global default in init.lua so the
--- plugin does not need to switch colorschemes per window.
 -- Background: #010704  Foreground: #efefef
 -- Comments: #04b925  AL keywords/operators: #f6fa16
 vim.cmd("highlight clear")
-if vim.fn.exists("syntax_on") then vim.cmd("syntax reset") end
+if vim.fn.exists("syntax_on") == 1 then vim.cmd("syntax reset") end
 vim.g.colors_name = "bc_yellow"
 vim.o.background  = "dark"
 
@@ -48,9 +46,7 @@ hi(0, "PmenuSbar",    { bg = "#222222" })
 hi(0, "PmenuThumb",   { bg = "#04b925" })
 
 -- ── Syntax ────────────────────────────────────────────────────────────────────
--- comments → #04b925 (green)
 hi(0, "Comment",      { fg = "#04b925", italic = true })
--- strings, numbers, types, variables, functions → #efefef (near white)
 hi(0, "String",       { fg = "#efefef" })
 hi(0, "Character",    { fg = "#efefef" })
 hi(0, "Number",       { fg = "#efefef" })
@@ -61,8 +57,6 @@ hi(0, "Type",         { fg = "#f6fa16" })  -- keyword.other.builtintypes (Record
 hi(0, "Structure",    { fg = "#f6fa16" })  -- keyword.other.applicationobject (codeunit, table, page…)
 hi(0, "Typedef",      { fg = "#f6fa16" })
 -- AL keywords, operators, object types, constants → #f6fa16 (yellow)
--- covers: keyword.control, keyword.other, keyword.operators.al,
---         keyword.other.applicationobject, constant.language.al
 hi(0, "Keyword",      { fg = "#f6fa16" })
 hi(0, "Conditional",  { fg = "#f6fa16" })
 hi(0, "Repeat",       { fg = "#f6fa16" })
@@ -94,7 +88,7 @@ hi(0, "DiagnosticError",          { fg = "#ea0408" })
 hi(0, "DiagnosticWarn",           { fg = "#f0c722" })
 hi(0, "DiagnosticInfo",           { fg = "#04b925" })
 hi(0, "DiagnosticHint",           { fg = "#555555" })
-hi(0, "DiagnosticUnnecessary",    { fg = "#ce8349" })  -- unused vars/params → orange
+hi(0, "DiagnosticUnnecessary",    { fg = "#ce8349" })
 hi(0, "DiagnosticUnderlineError", { undercurl = true, sp = "#ea0408" })
 hi(0, "DiagnosticUnderlineWarn",  { undercurl = true, sp = "#f0c722" })
 

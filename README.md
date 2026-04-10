@@ -6,17 +6,18 @@ language server that ships with the [AL VSCode extension](https://marketplace.vi
 Provides:
 - Syntax highlighting derived from the official TextMate grammar
 - Full LSP integration (completions, go-to-definition, hover, diagnostics, rename…)
+- Code actions and quick fixes — quick fix, fix all, organise namespaces, refactor (convert `with`, promoted actions, implement interface)
 - Async compilation with floating output window + quickfix list via the `alc` compiler
 - One-step publish to Business Central (compile → POST `.app` to BC dev endpoint)
 - Symbol package download from BC dev endpoint (all base + explicit dependencies)
-- Snapshot debugging and live attach debugging via nvim-dap
+- Snapshot debugging and live attach debugging via nvim-dap; optional nvim-dap-ui panels (scopes, stacks, watches, REPL)
 - AL Help — open MS Learn AL docs and alguidelines.dev directly in the default browser
 - AL Explorer — Telescope pickers for all AL objects across project + symbol packages, with live grep
 - AL Object Wizard — interactive new-object creation with ID suggestion, extends picker, file naming
 - Object ID completion — suggests next free IDs from `app.json` idRanges in insert mode
 - Automatic file organiser — moves saved AL files to the correct `src/<type>/` folder on write
 - 40+ LuaSnip snippets (object templates, control flow, events, HTTP, JSON)
-- BC Dark / bc_yellow colour scheme — one global scheme, consistent across all windows
+- Two colour schemes: **bc_dark** (VS Code Business Central Dark) and **bc_yellow** (high-contrast black/yellow)
 - Text objects — `daf`/`vif` for procedures/triggers, `daF`/`viF` for begin/end blocks
 - Buffer-local keymaps and editor settings for AL files
 
@@ -40,6 +41,7 @@ Provides:
 |---|---|
 | [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) | AL Explorer, Procedure picker, Search |
 | [nvim-dap](https://github.com/mfussenegger/nvim-dap) | Live attach debugging |
+| [nvim-dap-ui](https://github.com/rcarriga/nvim-dap-ui) + [nvim-nio](https://github.com/nvim-neotest/nvim-nio) | Debug UI panels (scopes, stacks, watches, REPL) — auto-open on session start |
 | `python3` (Linux/macOS) or `python` (Windows) | Report Layout Wizard — Excel (.xlsx) ZIP generation |
 
 ---
@@ -258,6 +260,44 @@ for a new name rather than overwriting the existing entry.
 
 ---
 
+## Colour Schemes
+
+ALNvim ships two colour schemes. Apply with `:colorscheme <name>` or via a live picker
+(e.g. `Snacks.picker.colorschemes()`).
+
+### bc_dark
+
+Derived from the official VS Code **Business Central Dark** theme
+(`themes/BC_dark.json` inside the AL extension).
+
+| Token | Colour |
+|---|---|
+| Background | `#1E1E1E` |
+| Foreground | `#D4D4D4` |
+| Keywords / operators / control flow | `#00747F` teal |
+| Types / object types (`codeunit`, `table`…) | `#4EC9B0` aqua |
+| Functions | `#DCDCAA` yellow |
+| Variables / identifiers | `#9CDCFE` light blue |
+| Strings | `#CE9178` orange |
+| Numbers | `#9FD89F` soft green |
+| Language constants (`true` / `false`) | `#62CFD7` light teal |
+| Comments | `#64707D` gray italic |
+| Status bar | `#00747F` bg / `#FFFFFF` fg |
+
+### bc_yellow
+
+High-contrast dark theme with a near-black green background.
+
+| Token | Colour |
+|---|---|
+| Background | `#010704` |
+| Foreground | `#efefef` |
+| Keywords / object types / built-in types | `#f6fa16` yellow |
+| Comments | `#04b925` green |
+| Strings / numbers / variables | `#efefef` near-white |
+
+---
+
 ## Code Cops
 
 `:ALSelectCops` (`<leader>ac`) opens a picker to choose which AL code analyzers run for
@@ -281,6 +321,35 @@ Diagnostics from the active cops appear inline in the buffer. Use:
 - `<leader>ad` — Telescope list of all diagnostics for the current buffer
 - `<leader>D` — floating detail for the diagnostic on the current line
 - `]d` / `[d` — jump to next / previous diagnostic
+
+---
+
+## Code Actions
+
+All AL code actions are delivered through the standard LSP `textDocument/codeAction`
+protocol — no custom AL protocol is required. Actions appear when the language server
+has indexed the project (after the `AL: project loaded` notification).
+
+| Key | Scope | What it does |
+|---|---|---|
+| `<leader>ca` | cursor | All code actions (global LspAttach binding) |
+| `<leader>aca` | cursor | All code actions — AL buffer-scoped |
+| `<leader>acf` | cursor line | Quick fixes for the diagnostic(s) under the cursor |
+| `<leader>acF` | file | **Fix all** — apply every `source.fixAll` action in the file at once |
+| `<leader>acn` | file | **Organise namespaces** — add missing `using` statements and sort them |
+| `<leader>acr` | cursor | **Refactor** — convert `with` statements, convert promoted actions to modern action bar, implement interface members |
+
+### Available refactor actions (from the AL language server)
+
+| Action | Trigger |
+|---|---|
+| Convert explicit `with` statement to fully qualified references | `refactor` on `with` block |
+| Convert promoted actions to modern action bar syntax | `refactor` on promoted action |
+| Implement interface members | `quickfix` on unimplemented interface |
+| Move tooltips from page controls to table fields | `quickfix` on tooltip diagnostic |
+| Fix application area duplicates / set defaults | `quickfix` on AA diagnostics |
+| Convert event subscriber syntax | `refactor` on event subscriber |
+| Fix AL0604 / AL0606 / AL0729 warnings | `source.fixAll` or `quickfix` |
 
 ---
 
@@ -358,10 +427,20 @@ These apply to all LSP servers including AL:
 | `gr` | Show references |
 | `gi` | Go to implementation |
 | `<leader>rn` | Rename symbol |
-| `<leader>ca` | Code action |
+| `<leader>ca` | All code actions |
 | `<leader>D` | Open diagnostic float |
 | `[d` / `]d` | Previous / next diagnostic |
 | `<leader>lf` | Format document |
+
+### AL-specific code action keymaps (AL buffers only)
+
+| Key | Action |
+|---|---|
+| `<leader>aca` | All code actions |
+| `<leader>acf` | Quick fixes for diagnostic on cursor line |
+| `<leader>acF` | Fix all (`source.fixAll`) — bulk-fix all auto-fixable issues in the file |
+| `<leader>acn` | Organise namespaces / using statements (`source.organizeImports`) |
+| `<leader>acr` | Refactor actions (convert `with`, promoted actions, implement interface…) |
 
 ---
 
@@ -485,10 +564,16 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 
 | Command | Key | Description |
 |---|---|---|
-| `:ALLaunch [dir]` | `<F5>` / `<leader>adl` | Compile, publish then attach debugger |
+| `:ALLaunch [dir]` | `<F5>` / `<leader>adl` | Compile, publish then attach debugger (`<F5>` continues if a session is already active) |
 | `:ALSnapshotStart` | `<leader>ads` | Start BC snapshot debugging session |
 | `:ALSnapshotFinish` | `<leader>adf` | Finish snapshot and download file |
-| `:ALDebugSetup` | `<leader>add` | Configure nvim-dap for AL live attach |
+| `:ALDebugSetup` | `<leader>add` | Configure nvim-dap adapter without compiling |
+| — | `<F9>` | Toggle breakpoint |
+| — | `<F11>` | Step into |
+| — | `<F12>` | Step over |
+| — | `<leader>du` | Toggle nvim-dap-ui panels |
+| — | `<leader>dw` | Evaluate word under cursor |
+| — | `<leader>de` | Evaluate expression / selection |
 
 ### Project
 
@@ -737,9 +822,9 @@ sequenceDiagram
     participant ADA  as AL Debug Adapter\n(EditorServices.Host)
     participant BC   as Business Central
 
-    NV->>NV: :ALDebugSetup\nregisters dap.adapters.al\nregisters dap.configurations.al
+    NV->>NV: :ALLaunch\ncompile + publish + configure adapter
 
-    NV->>ADA: :DapContinue\nspawn EditorServices.Host (stdio)
+    NV->>ADA: spawn EditorServices.Host (stdio)
     NV->>ADA: DAP initialize request
     ADA->>BC: attach to BC session\n(server + serverInstance + tenant)
     BC-->>ADA: session attached
@@ -755,18 +840,72 @@ sequenceDiagram
 ```
 
 **Setup:**
-1. Add nvim-dap to `vim.pack.add`:
+1. Add nvim-dap (and optionally nvim-dap-ui + nvim-nio) to `vim.pack.add`:
    ```lua
    { src = "https://github.com/mfussenegger/nvim-dap" },
+   { src = "https://github.com/rcarriga/nvim-dap-ui" },
+   { src = "https://github.com/nvim-neotest/nvim-nio" },
    ```
-2. Open an AL file, run `:ALDebugSetup` — reads `launch.json` and configures the adapter
-3. Run `:DapContinue` and select the attach configuration
-4. Perform actions in BC; breakpoints set with `:DapToggleBreakpoint` will fire
+2. Press `<F5>` on an AL file (or `:ALLaunch`) — compiles, publishes, and attaches the debugger
+3. Perform actions in BC; breakpoints set with `<F9>` will fire
+4. nvim-dap-ui panels open automatically when the session starts and close when it ends
 
-> **Note:** The AL debug adapter (`EditorServices.Host`) uses proprietary DAP extensions
-> that are not publicly documented by Microsoft. The `attach` request type is the most
-> stable; `launch` (publish-and-debug) is not yet wired. If the adapter does not respond,
-> check `:DapLog` for the raw DAP exchange.
+### Debug keymaps (AL buffers)
+
+| Key | Action |
+|---|---|
+| `<F5>` | If session active: **continue**; otherwise: **ALLaunch** (compile + publish + attach) |
+| `<F9>` | Toggle breakpoint |
+| `<F11>` | Step into |
+| `<F12>` | Step over |
+| `<leader>adl` | `:ALLaunch` — compile, publish and attach |
+| `<leader>ads` | `:ALSnapshotStart` |
+| `<leader>adf` | `:ALSnapshotFinish` |
+| `<leader>add` | `:ALDebugSetup` — configure adapter only (no compile) |
+| `<leader>adb` | Toggle breakpoint |
+| `<leader>adB` | Conditional breakpoint |
+| `<leader>adc` | Continue |
+| `<leader>adq` | Terminate session |
+| `<leader>adi` | Inspect variable under cursor (hover float) |
+
+### nvim-dap-ui panels
+
+When nvim-dap-ui is installed the debug UI opens automatically on session start:
+
+| Panel | Position | Contents |
+|---|---|---|
+| Scopes | Left sidebar (top 40%) | Local and global variables at the current stack frame |
+| Watches | Left sidebar (20%) | Pinned expressions — updated at every step |
+| Stacks | Left sidebar (25%) | Call stack / stack trace |
+| Breakpoints | Left sidebar (15%) | All set breakpoints |
+| REPL | Right sidebar (top 70%) | Interactive expression evaluator — type any AL expression and press `<CR>` |
+| Console | Right sidebar (30%) | Adapter output (read-only) |
+
+Additional keymaps (configured in your `init.lua`):
+
+| Key | Action |
+|---|---|
+| `<leader>du` | Toggle dap-ui open/closed |
+| `<leader>de` | Evaluate expression (prompt) or selected text in a float |
+| `<leader>dw` | Evaluate the word under the cursor instantly |
+
+### Adapter output window
+
+The AL adapter emits structured output (publish status, session info, errors) as DAP
+`output` events. ALNvim displays these in a **floating window** positioned in the top-right
+corner of the editor (`q` to close). It reopens automatically when new output arrives.
+
+### Variable inspection
+
+The AL debug adapter (`EditorServices.Host`) does not implement the DAP `scopes`/`variables`
+protocol, so the Scopes panel will be empty. Use the **REPL** panel or `<leader>dw` / `<leader>de`
+to inspect values — both use the `evaluate` request which the AL adapter does support.
+
+> **Note:** `:ALLaunch` is the recommended entry point. It compiles with `alc`, publishes
+> to BC, then attaches the debug adapter in one step. For on-prem `UserPassword`
+> environments, `:ALLaunch` works on Linux; on Windows on-prem it may fail with an
+> internal adapter error (known limitation — use cloud sandboxes or VSCode for on-prem
+> Windows debugging).
 
 ---
 

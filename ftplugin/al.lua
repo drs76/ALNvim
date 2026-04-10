@@ -77,6 +77,22 @@ vim.keymap.set("n", "<leader>an", "<cmd>ALNewObject<CR>",     vim.tbl_extend("fo
 vim.keymap.set("n", "<leader>aw", "<cmd>ALReportLayout<CR>", vim.tbl_extend("force", opts, { desc = "AL: Report Layout Wizard (Excel/Word/RDLC)" }))
 vim.keymap.set("n", "<leader>aW", "<cmd>ALOpenLayout<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open existing report layout in default app" }))
 vim.keymap.set("n", "<leader>aA", "<cmd>ALAnalyze<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Force re-analysis / refresh diagnostics" }))
+-- Code actions
+-- <leader>ca (all code actions) is set globally via LspAttach in init.lua
+vim.keymap.set({ "n", "v" }, "<leader>aca", vim.lsp.buf.code_action,
+  vim.tbl_extend("force", opts, { desc = "AL: Code actions (all)" }))
+vim.keymap.set("n", "<leader>acf", function()
+  vim.lsp.buf.code_action({ context = { only = { "quickfix" }, diagnostics = vim.diagnostic.get(0) } })
+end, vim.tbl_extend("force", opts, { desc = "AL: Quick fixes for diagnostics on cursor line" }))
+vim.keymap.set("n", "<leader>acF", function()
+  vim.lsp.buf.code_action({ context = { only = { "source.fixAll" } } })
+end, vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fixAll actions in file" }))
+vim.keymap.set("n", "<leader>acn", function()
+  vim.lsp.buf.code_action({ context = { only = { "source.organizeImports" } } })
+end, vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
+vim.keymap.set("n", "<leader>acr", function()
+  vim.lsp.buf.code_action({ context = { only = { "refactor" } } })
+end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
 vim.keymap.set("n", "<leader>aD", "<cmd>ALDiff<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Git diff explorer — changed files" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
 vim.keymap.set("n", "<leader>af", "<cmd>ALExplorerProcs<CR>", vim.tbl_extend("force", opts, { desc = "AL: Explorer — procedures in file" }))
