@@ -62,17 +62,33 @@ local function open_build_win(title, project_dir)
   end
   _build_win = nil
 
-  -- Remember the current window — the user ran :ALCompile from here.
-  local file_win = vim.api.nvim_get_current_win()
+  -- Sidebar/plugin filetypes that should never be used as edit targets.
+  local _sidebar_ft = {
+    NvimTree = true, ["neo-tree"] = true, aerial = true,
+    Outline = true, undotree = true, oil = true, qf = true,
+  }
 
-  -- Fallback: find any non-floating window that isn't the build panel.
+  -- Returns true if w is a real editing window (not a sidebar, terminal, quickfix, …)
+  local function is_edit_win(w)
+    local buf = vim.api.nvim_win_get_buf(w)
+    local bt  = vim.bo[buf].buftype
+    if bt ~= "" and bt ~= "acwrite" then return false end
+    return not _sidebar_ft[vim.bo[buf].filetype]
+  end
+
+  -- Find the best non-floating editing window, excluding `exclude`.
   local function find_edit_win(exclude)
     for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= exclude and vim.api.nvim_win_get_config(w).relative == "" then
+      if w ~= exclude and vim.api.nvim_win_get_config(w).relative == "" and is_edit_win(w) then
         return w
       end
     end
   end
+
+  -- Remember the current window — the user ran :ALCompile from here.
+  -- Fall back if it's a sidebar or plugin window.
+  local cur = vim.api.nvim_get_current_win()
+  local file_win = is_edit_win(cur) and cur or find_edit_win(nil)
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -107,7 +123,7 @@ local function open_build_win(title, project_dir)
     if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
       file = project_dir .. "/" .. file
     end
-    local target = (file_win and vim.api.nvim_win_is_valid(file_win) and file_win)
+    local target = (file_win and vim.api.nvim_win_is_valid(file_win) and is_edit_win(file_win) and file_win)
                    or find_edit_win(win)
     if not target then return end
     vim.api.nvim_win_call(target, function()
