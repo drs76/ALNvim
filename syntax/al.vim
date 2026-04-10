@@ -97,10 +97,11 @@ syntax keyword alType         xmlprocessinginstruction xmlreadoptions xmltext xm
 syntax keyword alType         webserviceactioncontext webserviceactionresultcode
 
 " ── InStream / OutStream: type-position only ─────────────────────────────────
-" Removed from alType keywords so that variables named InStream/OutStream are
-" not coloured as types. These matches fire only after ':' (type position).
-syntax match alTypeStream ":\s*\zs\<instream\>"
-syntax match alTypeStream ":\s*\zs\<outstream\>"
+" alDeclColon matches every ':' and tells Vim to look ahead (skipping spaces)
+" for alTypeStream. alTypeStream is 'contained' so it fires ONLY via nextgroup —
+" meaning InStream/OutStream are Type-coloured after ':' but Normal elsewhere.
+syntax match   alDeclColon  ":" nextgroup=alTypeStream skipwhite
+syntax keyword alTypeStream instream outstream contained
 
 " ── Boolean constants ─────────────────────────────────────────────────────────
 syntax keyword alBoolean      true false
@@ -109,7 +110,7 @@ syntax keyword alBoolean      true false
 syntax region  alAttribute    start="\[" end="\]" contains=alString,alNumber
 
 " ── Punctuation ───────────────────────────────────────────────────────────────
-syntax match   alPunctuation  "[;:,]"
+syntax match   alPunctuation  "[;,]"
 
 " ── Highlight links ───────────────────────────────────────────────────────────
 highlight default link alComment      Comment
@@ -131,6 +132,7 @@ highlight default link alObject       Structure
 highlight default link alMetadata     Keyword
 highlight default link alProperty     Keyword
 highlight default link alType         Type
+highlight default link alDeclColon    Delimiter
 highlight default link alTypeStream   Type
 highlight default link alBoolean      Boolean
 highlight default link alAttribute    PreProc
