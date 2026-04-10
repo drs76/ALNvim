@@ -535,6 +535,10 @@ end, {
   desc     = "AL Object Wizard: create a new AL object file",
 })
 
+vim.api.nvim_create_user_command("ALPreviewPage", function()
+  require("al.preview").preview(vim.api.nvim_get_current_buf(), require("al.lsp").get_root())
+end, { desc = "Preview AL page / pageextension layout in a floating window" })
+
 vim.api.nvim_create_user_command("ALReportLayout", function()
   require("al.layout").generate()
 end, { desc = "Generate Word (.docx) or Excel (.xlsx) layout from AL report dataset" })
