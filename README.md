@@ -298,7 +298,7 @@ High-contrast dark theme with a near-black green background.
 
 ---
 
-## Code Cops
+## Code Cops and Browser
 
 `:ALSelectCops` (`<leader>ac`) opens a picker to choose which AL code analyzers run for
 the current project. Changes apply immediately — no LSP restart required.
@@ -314,8 +314,32 @@ The default selection is CodeCop + PerTenantExtensionCop + UICop. AppSourceCop i
 default because it enforces AppSource-specific requirements (tooltips on all fields,
 event publisher rules, etc.) that are not relevant for internal or per-tenant extensions.
 
-The selection is saved to `.vscode/alnvim.json` in the project root and read on every
-LSP attach, so it persists across Neovim sessions.
+Both the cop selection and the browser choice are saved to `.vscode/alnvim.json` in the
+project root and persist across Neovim sessions:
+
+```json
+{
+  "codeAnalyzers": ["${CodeCop}", "${PerTenantExtensionCop}", "${UICop}"],
+  "browser": "google-chrome"
+}
+```
+
+The file can be committed alongside `launch.json` or added to `.gitignore`.
+
+### Browser for BC launch
+
+`:ALSelectBrowser` (`<leader>aB`) opens a picker of common browsers for your OS.
+The chosen browser is used whenever ALNvim opens a BC URL from Lua — after
+`:ALPublish`, after `:ALLaunch`, and for DAP `al/openUri` and `al/deviceLogin` events.
+Leave it as **Default** to use the OS system browser (`xdg-open` / `open` / `start`).
+
+| OS | Common values |
+|---|---|
+| Linux | `google-chrome`, `chromium`, `microsoft-edge`, `firefox` |
+| macOS | `Google Chrome`, `Microsoft Edge`, `Firefox` (passed to `open -a`) |
+| Windows | `chrome`, `msedge`, `firefox` |
+
+Selecting **Custom…** prompts for any executable path or name.
 
 Diagnostics from the active cops appear inline in the buffer. Use:
 - `<leader>ad` — Telescope list of all diagnostics for the current buffer
@@ -582,6 +606,7 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 | `:ALOpenAppJson` | `<leader>ao` | Open `app.json` for current project |
 | `:ALOpenLaunchJson` | `<leader>al` | Open `.vscode/launch.json` |
 | `:ALSelectCops` | `<leader>ac` | Pick active code cops for this project |
+| `:ALSelectBrowser` | `<leader>aB` | Pick browser used when launching BC after publish/debug |
 | `:ALClearCredentials` | — | Clear cached BC credentials |
 | `:ALReloadSnippets` | — | Reload snippets from `snippets/al.json` |
 | `:ALInfo` | — | Show extension path, LSP binary, project manifest |
