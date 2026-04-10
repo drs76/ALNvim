@@ -29,10 +29,31 @@ function M.ensure_executable(path)
   end
 end
 
--- Open a URL in the default browser.
-function M.open_url(url)
+-- Open a URL in the browser.
+-- @param url     URL string to open.
+-- @param browser Optional browser override (from alnvim.json "browser" setting).
+--                Empty string or nil means system default.
+--                Linux/macOS: executable name or path (e.g. "google-chrome", "firefox").
+--                macOS app name (e.g. "Google Chrome") is passed to `open -a`.
+--                Windows: executable name (e.g. "chrome", "msedge", "firefox").
+function M.open_url(url, browser)
+  if browser and browser ~= "" then
+    if M.is_windows then
+      vim.fn.jobstart({ "cmd", "/c", "start", "", browser, url }, { detach = true })
+    elseif M.is_mac then
+      -- App name (no path separator) → open -a; full path → invoke directly.
+      if not browser:find("/", 1, true) then
+        vim.fn.jobstart({ "open", "-a", browser, url })
+      else
+        vim.fn.jobstart({ browser, url })
+      end
+    else
+      vim.fn.jobstart({ browser, url })
+    end
+    return
+  end
+  -- System default
   if M.is_windows then
-    -- The empty string title prevents cmd from treating the URL as the window title.
     vim.fn.jobstart({ "cmd", "/c", "start", "", url }, { detach = true })
   elseif M.is_mac then
     vim.fn.jobstart({ "open", url })

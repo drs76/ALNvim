@@ -202,6 +202,107 @@ local function simple_picker(root, active_set)
   show()
 end
 
+-- ── Browser setting ────────────────────────────────────────────────────────
+-- Stored in .vscode/alnvim.json as { "browser": "<cmd>" }.
+-- Empty string means "system default" (xdg-open / open / start).
+
+-- Platform-appropriate browser choices.
+local function browser_choices()
+  local p = require("al.platform")
+  if p.is_windows then
+    return {
+      { label = "Default (system)",  value = "" },
+      { label = "Google Chrome",     value = "chrome" },
+      { label = "Microsoft Edge",    value = "msedge" },
+      { label = "Firefox",           value = "firefox" },
+      { label = "Custom…",           value = nil },
+    }
+  elseif p.is_mac then
+    return {
+      { label = "Default (system)",  value = "" },
+      { label = "Google Chrome",     value = "Google Chrome" },
+      { label = "Microsoft Edge",    value = "Microsoft Edge" },
+      { label = "Firefox",           value = "Firefox" },
+      { label = "Chromium",          value = "Chromium" },
+      { label = "Custom…",           value = nil },
+    }
+  else
+    return {
+      { label = "Default (system)",  value = "" },
+      { label = "Google Chrome",     value = "google-chrome" },
+      { label = "Chromium",          value = "chromium" },
+      { label = "Microsoft Edge",    value = "microsoft-edge" },
+      { label = "Firefox",           value = "firefox" },
+      { label = "Custom…",           value = nil },
+    }
+  end
+end
+
+-- Read the configured browser for a project ("" = system default).
+function M.get_browser(root)
+  if not root then return "" end
+  local path = config_path(root)
+  local ok, lines = pcall(vim.fn.readfile, path)
+  if not ok or not lines or #lines == 0 then return "" end
+  local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+  if not ok2 or type(data) ~= "table" then return "" end
+  return data.browser or ""
+end
+
+-- Persist the browser choice for a project.
+function M.set_browser(root, browser)
+  local path = config_path(root)
+  vim.fn.mkdir(root .. "/.vscode", "p")
+  local data = {}
+  local ok, lines = pcall(vim.fn.readfile, path)
+  if ok and lines and #lines > 0 then
+    local ok2, existing = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+    if ok2 and type(existing) == "table" then data = existing end
+  end
+  data.browser = browser
+  vim.fn.writefile({ vim.fn.json_encode(data) }, path)
+end
+
+-- Public entry point: `:ALSelectBrowser`
+function M.select_browser()
+  local root = require("al.lsp").get_root()
+  if not root then
+    vim.notify("AL browser: no project root (app.json) found", vim.log.levels.WARN)
+    return
+  end
+
+  local current = M.get_browser(root)
+  local choices = browser_choices()
+
+  local labels = vim.tbl_map(function(c)
+    local mark = (c.value == current) and "  ◆  " or "     "
+    return mark .. c.label
+  end, choices)
+
+  vim.ui.select(labels, { prompt = "AL: Select browser for BC launch:" }, function(_, idx)
+    if not idx then return end
+    local chosen = choices[idx]
+    if not chosen then return end
+
+    if chosen.value == nil then
+      -- Custom — prompt for executable
+      vim.ui.input({
+        prompt = "Browser executable / path: ",
+        default = current,
+      }, function(input)
+        if input == nil then return end
+        M.set_browser(root, input)
+        local display = input == "" and "system default" or input
+        vim.notify("AL browser: set to " .. display, vim.log.levels.INFO)
+      end)
+    else
+      M.set_browser(root, chosen.value)
+      local display = chosen.value == "" and "system default" or chosen.value
+      vim.notify("AL browser: set to " .. display, vim.log.levels.INFO)
+    end
+  end)
+end
+
 -- Public entry point: `:ALSelectCops`
 function M.picker()
   local root = require("al.lsp").get_root()

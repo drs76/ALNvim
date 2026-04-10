@@ -85,7 +85,8 @@ local function do_upload(base, tenant, schema, auth, app_file, cfg, on_success)
       if pub_ok then
         vim.notify("AL: Published successfully", vim.log.levels.INFO)
         if cfg and cfg.launchBrowser then
-          require("al.platform").open_url(conn.webclient_url(cfg))
+          local browser = require("al.cops").get_browser(root)
+          require("al.platform").open_url(conn.webclient_url(cfg), browser)
         end
         if on_success then on_success() end
       elseif status == 415 then

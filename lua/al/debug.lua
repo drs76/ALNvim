@@ -14,6 +14,10 @@
 
 local M    = {}
 
+-- Set when launch/setup_adapter is called; used by global DAP listeners to
+-- open URLs in the project-configured browser rather than the system default.
+local _current_root = nil
+
 -- The DAP adapter (16.x+) deserialises breakOnError / breakOnRecordWrite as
 -- strict booleans even though the VSCode schema accepts string enum values.
 -- "All" → true, anything else ("None", false, nil) → false.
@@ -367,7 +371,8 @@ local function register_al_dap_events(dap)
 
   dap.listeners.before["event_al/openUri"]["alnvim"] = function(_, body)
     if not (body and body.uri) then return end
-    require("al.platform").open_url(body.uri)
+    local browser = require("al.cops").get_browser(_current_root)
+    require("al.platform").open_url(body.uri, browser)
     vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
   end
 
@@ -384,7 +389,7 @@ local function register_al_dap_events(dap)
     local uri   = body.uri   or ""
     -- Copy device code to clipboard and open the login page.
     vim.fn.setreg("+", token)
-    require("al.platform").open_url(uri)
+    require("al.platform").open_url(uri, require("al.cops").get_browser(_current_root))
     vim.notify(
       string.format("AL: Device login — code %s copied to clipboard\n%s\n%s",
         token, body.message or "", uri),
@@ -434,6 +439,7 @@ end
 -- :ALDebugSetup, then :DapContinue, and inspect :DapLog if it does not connect.
 
 function M.setup_dap(root)
+  _current_root = root or require("al.lsp").get_root() or _current_root
   local ok, dap = pcall(require, "dap")
   if not ok then
     vim.notify(
@@ -640,7 +646,8 @@ function M.publish_only(root)
       -- On Linux/macOS: launchBrowser=true makes the adapter call xdg-open (our stub).
       -- Open from Lua instead. On Windows: adapter opens the browser natively — skip.
       if not p.is_windows then
-        require("al.platform").open_url(conn.webclient_url(cfg))
+        local browser = require("al.cops").get_browser(_current_root)
+        require("al.platform").open_url(conn.webclient_url(cfg), browser)
       end
       vim.schedule(function()
         if dap.session() then dap.disconnect({ terminateDebuggee = false }) end
@@ -679,6 +686,7 @@ function M.launch(root)
   end
 
   root = root or lsp.get_root()
+  _current_root = root or _current_root
   if not root then
     vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
     return
@@ -757,7 +765,8 @@ function M.launch(root)
         dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
         if not p.is_windows then
           local url = conn.webclient_url(cfg)
-          require("al.platform").open_url(url)
+          local browser = require("al.cops").get_browser(_current_root)
+          require("al.platform").open_url(url, browser)
           vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
         end
       end

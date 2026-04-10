@@ -593,6 +593,10 @@ vim.api.nvim_create_user_command("ALSelectCops", function()
   require("al.cops").picker()
 end, { desc = "Select active AL Code Cops for this project" })
 
+vim.api.nvim_create_user_command("ALSelectBrowser", function()
+  require("al.cops").select_browser()
+end, { desc = "Select browser used when launching BC after publish/debug" })
+
 vim.api.nvim_create_user_command("ALAnalyze", function()
   local lsp_mod = require("al.lsp")
   local cops    = require("al.cops")
