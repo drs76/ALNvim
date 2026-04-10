@@ -1,8 +1,9 @@
 -- Buffer-local settings for AL files
 
--- Apply bc_dark when this AL buffer is first loaded.
--- Ongoing window-focus switching is handled by the global WinEnter autocmd in plugin/al.lua.
-if vim.g.colors_name ~= "bc_dark" then
+-- Apply bc_dark as default when an AL buffer is first loaded,
+-- but only if the user hasn't already chosen a bc_* colorscheme.
+local _cs = vim.g.colors_name or ""
+if not _cs:find("^bc_") then
   vim.cmd("colorscheme bc_dark")
 end
 

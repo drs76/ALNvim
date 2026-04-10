@@ -3,6 +3,24 @@
 if vim.g.vscode or vim.g.alnvim_loaded then return end
 vim.g.alnvim_loaded = true
 
+-- ── Colorscheme-specific syntax overrides ────────────────────────────────────
+-- 'highlight default link' in syntax/al.vim wins if the group has no direct
+-- definition yet. A ColorScheme autocmd fires after the full colorscheme runs,
+-- so setting colours here always beats the default link regardless of ordering.
+local function _al_apply_hl_overrides(cs)
+  cs = cs or vim.g.colors_name or ""
+  if cs == "bc_yellow" then
+    vim.api.nvim_set_hl(0, "alTypeSubtype",  { fg = "#9CDCFE" })
+    vim.api.nvim_set_hl(0, "alTypeSubtypeQ", { fg = "#9CDCFE" })
+  end
+end
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group    = vim.api.nvim_create_augroup("ALNvimColors", { clear = true }),
+  callback = function(ev) _al_apply_hl_overrides(ev.match) end,
+})
+-- Also apply immediately in case bc_yellow was set before this plugin loaded.
+_al_apply_hl_overrides()
+
 
 -- ── ALInstallExtension — always available, even before extension is installed ─
 vim.api.nvim_create_user_command("ALInstallExtension", function()
@@ -35,6 +53,15 @@ end
 -- vim.lsp.config/enable does not support on_new_config (nvim-lspconfig concept only),
 -- so init_options cannot be set dynamically that way. Use a FileType autocmd with
 -- vim.lsp.start instead, where root_dir is resolved before the client is created.
+-- Re-apply colour overrides each time an AL buffer is opened: the syntax file
+-- runs 'highlight default link alTypeSubtype Typedef' which would win if the
+-- group was cleared between the ColorScheme event and this FileType firing.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "al",
+  group   = vim.api.nvim_create_augroup("ALNvimHL", { clear = true }),
+  callback = function() _al_apply_hl_overrides() end,
+})
+
 vim.api.nvim_create_autocmd("FileType", {
   pattern  = "al",
   group    = vim.api.nvim_create_augroup("ALNvimLsp", { clear = true }),
@@ -64,6 +91,13 @@ vim.api.nvim_create_autocmd("FileType", {
         workspacePath = root,
         alResourceConfigurationSettings = res_cfg,
       },
+      -- Disable semantic tokens immediately after initialize response, before
+      -- Neovim can issue textDocument/semanticTokens/full requests.
+      -- LspAttach also sets this but fires after the first attach requests,
+      -- so on_init is the only reliable interception point.
+      on_init = function(client)
+        client.server_capabilities.semanticTokensProvider = nil
+      end,
     }, { bufnr = args.buf })
   end,
 })
@@ -71,6 +105,17 @@ vim.api.nvim_create_autocmd("FileType", {
 -- The server sends al/activeProjectLoaded as a REQUEST (not notification) when it has
 -- finished loading the active project. Without a handler Neovim responds with an error
 -- and the server stays in a broken state. Respond with null and notify the user.
+-- Prevent the server from triggering semantic token refreshes mid-session.
+-- After the second al/setActiveWorkspace (second indexing cycle) the server
+-- sends $/semanticTokens/refresh; Neovim's default handler would re-request
+-- tokens and override vim syntax. Return null to satisfy the request silently.
+vim.lsp.handlers["$/semanticTokens/refresh"] = function(_, _, ctx)
+  local client = vim.lsp.get_client_by_id(ctx.client_id)
+  if client and client.name == "al_language_server" then
+    return vim.NIL
+  end
+end
+
 vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
     local client = vim.lsp.get_client_by_id(ctx.client_id)
@@ -127,6 +172,12 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     local root = client.root_dir
     if not root then return end
+
+    -- Disable LSP semantic tokens: the AL server delivers them progressively as
+    -- it indexes, which overrides vim syntax highlights (e.g. alTypeSubtype turns
+    -- yellow because the server classifies subtype names as @lsp.type.type).
+    -- Our vim syntax file provides all the highlighting we need.
+    client.server_capabilities.semanticTokensProvider = nil
 
     -- Start the idle countdown from attach time so the watchdog has a baseline.
     if not client._al_last_active then

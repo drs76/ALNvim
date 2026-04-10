@@ -103,6 +103,15 @@ syntax keyword alType         webserviceactioncontext webserviceactionresultcode
 syntax match   alDeclColon  ":" nextgroup=alTypeStream skipwhite
 syntax keyword alTypeStream instream outstream contained
 
+" ── Types that introduce a named subtype ─────────────────────────────────────
+" Defined after alType/alObject so these keywords override both for nextgroup.
+" alTypeRef is linked to Type (same yellow); after it matches, Vim's state
+" machine looks ahead for alTypeSubtype/alTypeSubtypeQ — stable across scrolling.
+syntax keyword alTypeRef record codeunit page report reportextension query xmlport enum enumextension interface
+      \ nextgroup=alTypeSubtype,alTypeSubtypeQ skipwhite
+syntax match   alTypeSubtype  /\k\+/           contained
+syntax region  alTypeSubtypeQ start='"' end='"' oneline contained
+
 " ── Boolean constants ─────────────────────────────────────────────────────────
 syntax keyword alBoolean      true false
 
@@ -132,6 +141,9 @@ highlight default link alObject       Structure
 highlight default link alMetadata     Keyword
 highlight default link alProperty     Keyword
 highlight default link alType         Type
+highlight default link alTypeRef      Type
+highlight default link alTypeSubtype  Typedef
+highlight default link alTypeSubtypeQ Typedef
 highlight default link alDeclColon    Delimiter
 highlight default link alTypeStream   Type
 highlight default link alBoolean      Boolean
