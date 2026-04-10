@@ -72,10 +72,10 @@ syntax keyword alType         defaultlayout dialog dictionary dotnet dotnetassem
 syntax keyword alType         dotnettypedeclaration duration enum errorinfo errortype
 syntax keyword alType         executioncontext executionmode fieldclass fieldref
 syntax keyword alType         fieldtype file fileupload fileuploadaction
-syntax keyword alType         filterpagebuilder guid instream integer interface
+syntax keyword alType         filterpagebuilder guid integer interface
 syntax keyword alType         isolationlevel joker keyref label list media mediaset
 syntax keyword alType         moduledependencyinfo moduleinfo none notification
-syntax keyword alType         notificationscope objecttype option outstream page
+syntax keyword alType         notificationscope objecttype option page
 syntax keyword alType         pagebackgroundtaskerrorlevel pageresult pagestyle
 syntax keyword alType         query record recordid recordref report reportformat
 syntax keyword alType         securityfilter securityfiltering securityoperationresult
@@ -95,6 +95,12 @@ syntax keyword alType         xmldeclaration xmldocument xmldocumenttype xmlelem
 syntax keyword alType         xmlnamespacemanager xmlnametable xmlnode xmlnodelist
 syntax keyword alType         xmlprocessinginstruction xmlreadoptions xmltext xmlwriteoptions
 syntax keyword alType         webserviceactioncontext webserviceactionresultcode
+
+" ── InStream / OutStream: type-position only ─────────────────────────────────
+" Removed from alType keywords so that variables named InStream/OutStream are
+" not coloured as types. These matches fire only after ':' (type position).
+syntax match alTypeStream ":\s*\zs\<instream\>"
+syntax match alTypeStream ":\s*\zs\<outstream\>"
 
 " ── Boolean constants ─────────────────────────────────────────────────────────
 syntax keyword alBoolean      true false
@@ -125,6 +131,7 @@ highlight default link alObject       Structure
 highlight default link alMetadata     Keyword
 highlight default link alProperty     Keyword
 highlight default link alType         Type
+highlight default link alTypeStream   Type
 highlight default link alBoolean      Boolean
 highlight default link alAttribute    PreProc
 highlight default link alPunctuation  Delimiter
