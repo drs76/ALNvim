@@ -92,7 +92,14 @@ vim.keymap.set("i", "<C-Space>", "<C-x><C-u>",
 vim.keymap.set("i", "<Nul>", "<C-x><C-u>",
   { buffer = true, silent = true, desc = "AL: Next free object ID" })
 -- Debugging
-vim.keymap.set("n", "<F5>",        "<cmd>ALLaunch<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Compile, publish and attach debugger" }))
+vim.keymap.set("n", "<F5>", function()
+  local ok, dap = pcall(require, "dap")
+  if ok and dap.session() then
+    dap.continue()   -- session already running: resume
+  else
+    vim.cmd("ALLaunch")  -- no session: compile, publish and attach
+  end
+end, vim.tbl_extend("force", opts, { desc = "AL: Continue debug session or launch" }))
 vim.keymap.set("n", "<leader>adl", "<cmd>ALLaunch<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Compile, publish and attach debugger" }))
 vim.keymap.set("n", "<leader>ads", "<cmd>ALSnapshotStart<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Start snapshot debug session" }))
 vim.keymap.set("n", "<leader>adf", "<cmd>ALSnapshotFinish<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Finish snapshot and download" }))
@@ -105,7 +112,7 @@ if pcall(require, "dap") then
   vim.keymap.set("n", "<leader>adB", function() dap.set_breakpoint(vim.fn.input("Condition: ")) end,  vim.tbl_extend("force", opts, { desc = "DAP: Conditional breakpoint" }))
   vim.keymap.set("n", "<F10>",       dap.step_over,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Step over" }))
   vim.keymap.set("n", "<F11>",       dap.step_into,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Step into" }))
-  vim.keymap.set("n", "<F12>",       dap.step_out,                                                    vim.tbl_extend("force", opts, { desc = "DAP: Step out" }))
+  vim.keymap.set("n", "<F12>",       dap.step_over,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Step over" }))
   vim.keymap.set("n", "<leader>adc", dap.continue,                                                    vim.tbl_extend("force", opts, { desc = "DAP: Continue" }))
   vim.keymap.set("n", "<leader>adq", dap.terminate,                                                   vim.tbl_extend("force", opts, { desc = "DAP: Terminate session" }))
   vim.keymap.set("n", "<leader>adi", function() require("dap.ui.widgets").hover() end,                vim.tbl_extend("force", opts, { desc = "DAP: Inspect variable under cursor" }))
