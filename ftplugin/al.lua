@@ -63,6 +63,8 @@ vim.keymap.set("n", "<leader>al", "<cmd>ALOpenLaunchJson<CR>",   vim.tbl_extend(
 vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
 vim.keymap.set("n", "<leader>ac", "<cmd>ALSelectCops<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Select active code cops" }))
 vim.keymap.set("n", "<leader>aB", "<cmd>ALSelectBrowser<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Select browser for BC launch" }))
+vim.keymap.set("n", "<leader>am", "<cmd>ALMcpSetup<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Configure MCP server for Claude Code" }))
+vim.keymap.set("n", "<leader>aM", "<cmd>ALMcpStatus<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Show configured AL MCP entries" }))
 vim.keymap.set("n", "<leader>ad", function()
   if pcall(require, "telescope.builtin") then
     require("telescope.builtin").diagnostics({ bufnr = 0 })

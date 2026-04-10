@@ -25,6 +25,11 @@ M.defaults = {
   -- Side the compile results panel opens on: "left" or "right"
   compile_side = "left",
 
+  -- Automatically configure the AL MCP server in ~/.claude/settings.json
+  -- whenever the AL LSP attaches to a project. Set to false to manage manually
+  -- via :ALMcpSetup / :ALMcpRemove.
+  auto_mcp = true,
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

@@ -11,6 +11,7 @@ Provides:
 - One-step publish to Business Central (compile → POST `.app` to BC dev endpoint)
 - Symbol package download from BC dev endpoint (all base + explicit dependencies)
 - Snapshot debugging and live attach debugging via nvim-dap; optional nvim-dap-ui panels (scopes, stacks, watches, REPL)
+- AL MCP Server integration — one command wires the Microsoft AL Development Tools MCP server into Claude Code so Claude can build, publish, search symbols, and debug BC directly from AI chat
 - AL Help — open MS Learn AL docs and alguidelines.dev directly in the default browser
 - AL Explorer — Telescope pickers for all AL objects across project + symbol packages, with live grep
 - AL Object Wizard — interactive new-object creation with ID suggestion, extends picker, file naming
@@ -43,6 +44,7 @@ Provides:
 | [nvim-dap](https://github.com/mfussenegger/nvim-dap) | Live attach debugging |
 | [nvim-dap-ui](https://github.com/rcarriga/nvim-dap-ui) + [nvim-nio](https://github.com/nvim-neotest/nvim-nio) | Debug UI panels (scopes, stacks, watches, REPL) — auto-open on session start |
 | `python3` (Linux/macOS) or `python` (Windows) | Report Layout Wizard — Excel (.xlsx) ZIP generation |
+| `dotnet tool install Microsoft.Dynamics.BusinessCentral.Development.Tools --prerelease --global` | AL MCP Server (`~/.dotnet/tools/al`) |
 
 ---
 
@@ -75,6 +77,11 @@ require("al").setup({
 
   -- Package cache path, relative to the project root
   packagecachepath = ".alpackages",
+
+  -- Automatically configure the AL MCP server in ~/.claude/settings.json
+  -- when the AL LSP attaches to a project (default: true).
+  -- Set to false to manage manually via :ALMcpSetup / :ALMcpRemove.
+  auto_mcp = true,
 
   -- Called when the AL language server attaches to a buffer
   on_attach = nil,
@@ -607,6 +614,9 @@ Type the prefix and press `<Tab>` to expand. Use `<Tab>` / `<S-Tab>` to jump bet
 | `:ALOpenLaunchJson` | `<leader>al` | Open `.vscode/launch.json` |
 | `:ALSelectCops` | `<leader>ac` | Pick active code cops for this project |
 | `:ALSelectBrowser` | `<leader>aB` | Pick browser used when launching BC after publish/debug |
+| `:ALMcpSetup` | `<leader>am` | Add/update AL MCP server entry in `~/.claude/settings.json` |
+| `:ALMcpRemove` | — | Remove AL MCP server entry for the current project |
+| `:ALMcpStatus` | `<leader>aM` | Show all configured AL MCP entries |
 | `:ALClearCredentials` | — | Clear cached BC credentials |
 | `:ALReloadSnippets` | — | Reload snippets from `snippets/al.json` |
 | `:ALInfo` | — | Show extension path, LSP binary, project manifest |
@@ -931,6 +941,82 @@ to inspect values — both use the `evaluate` request which the AL adapter does 
 > environments, `:ALLaunch` works on Linux; on Windows on-prem it may fail with an
 > internal adapter error (known limitation — use cloud sandboxes or VSCode for on-prem
 > Windows debugging).
+
+---
+
+## AL MCP Server (Claude Code integration)
+
+Microsoft ships an **MCP server** as part of the AL Development Tools dotnet tool
+(`Microsoft.Dynamics.BusinessCentral.Development.Tools`). When configured, Claude Code
+can drive your AL project directly — compile, publish, download symbols, search the
+symbol database, set breakpoints, and start debugging sessions — all from AI chat.
+
+### Prerequisites
+
+Install the dotnet tool globally (requires .NET SDK):
+
+```bash
+dotnet tool install Microsoft.Dynamics.BusinessCentral.Development.Tools --prerelease --global
+# Binary will be at ~/.dotnet/tools/al
+```
+
+### Automatic setup (default)
+
+With `auto_mcp = true` (the default), ALNvim automatically writes the MCP server entry to
+`~/.claude/settings.json` the first time the AL LSP attaches to each project. Restart
+Claude Code (or run `/mcp` in the chat) to activate the server.
+
+### Manual setup
+
+Run `:ALMcpSetup` (`<leader>am`) on any AL file in the project. The command writes the
+correct entry for that project root and notifies you to restart Claude Code.
+
+```json
+// ~/.claude/settings.json (written by ALNvim)
+{
+  "mcpServers": {
+    "al:HTest": {
+      "command": "/home/user/.dotnet/tools/al",
+      "args": [
+        "launchmcpserver",
+        "--transport", "stdio",
+        "--disableTelemetry",
+        "--packagecachepath", "/path/to/HTest/.alpackages",
+        "/path/to/HTest"
+      ]
+    }
+  }
+}
+```
+
+Each project gets its own named entry (`al:<projectName>`) so multiple projects can
+coexist in `settings.json` without overwriting each other.
+
+### MCP tools exposed to Claude
+
+| Tool | What it does |
+|---|---|
+| `al_build` | Compile the AL project (equivalent to `:ALCompile`) |
+| `al_publish` | Package and deploy the extension to BC |
+| `al_downloadsymbols` | Download dependency symbol packages |
+| `al_symbolsearch` | Search AL symbols across the project and all dependencies |
+| `al_debug` | Start a debugging session |
+| `al_setbreakpoint` | Add, remove, or toggle a breakpoint |
+| `al_snapshotdebugging` | Manage BC snapshot debugging sessions |
+
+### Commands and keymaps
+
+| Command | Key | Description |
+|---|---|---|
+| `:ALMcpSetup` | `<leader>am` | Add/update MCP server entry for the current project |
+| `:ALMcpRemove` | — | Remove the MCP server entry for the current project |
+| `:ALMcpStatus` | `<leader>aM` | Show all configured AL MCP entries from `settings.json` |
+
+### Disable auto-setup
+
+```lua
+require("al").setup({ auto_mcp = false })
+```
 
 ---
 

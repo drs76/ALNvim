@@ -315,6 +315,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- VSCode extension sends: { currentWorkspaceFolderPath: <WorkspaceFolder>, settings: { ... } }
     -- Sending settings at the top level causes silent deserialization failure in the server.
+    -- Auto-configure the AL MCP server in ~/.claude/settings.json (once per client).
+    if not client._al_mcp_configured then
+      client._al_mcp_configured = true
+      local al_cfg = require("al").config
+      if al_cfg.auto_mcp then
+        require("al.mcp").configure(root)
+      end
+    end
+
     -- Guard: only send al/setActiveWorkspace once per client lifetime.
     -- The server restarts full project indexing on every send — sending it for each buffer
     -- (one per file open) causes perpetual reloads that prevent hover and gd from working.
@@ -596,6 +605,37 @@ end, { desc = "Select active AL Code Cops for this project" })
 vim.api.nvim_create_user_command("ALSelectBrowser", function()
   require("al.cops").select_browser()
 end, { desc = "Select browser used when launching BC after publish/debug" })
+
+vim.api.nvim_create_user_command("ALMcpSetup", function(opts)
+  local root = (opts.args ~= "" and opts.args) or require("al.lsp").get_root()
+  if not root then
+    vim.notify("AL MCP: no project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+  require("al.mcp").configure(root)
+end, { nargs = "?", complete = "dir", desc = "Configure AL MCP server for Claude Code" })
+
+vim.api.nvim_create_user_command("ALMcpRemove", function(opts)
+  local root = (opts.args ~= "" and opts.args) or require("al.lsp").get_root()
+  if not root then
+    vim.notify("AL MCP: no project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+  require("al.mcp").deconfigure(root)
+end, { nargs = "?", complete = "dir", desc = "Remove AL MCP server config for current project" })
+
+vim.api.nvim_create_user_command("ALMcpStatus", function()
+  local entries = require("al.mcp").status()
+  if #entries == 0 then
+    vim.notify("AL MCP: no projects configured", vim.log.levels.INFO)
+    return
+  end
+  local lines = { "AL MCP configured projects:" }
+  for _, e in ipairs(entries) do
+    lines[#lines + 1] = "  " .. e.key .. "  →  " .. table.concat(e.args, " ")
+  end
+  vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+end, { desc = "Show configured AL MCP server entries" })
 
 vim.api.nvim_create_user_command("ALAnalyze", function()
   local lsp_mod = require("al.lsp")
