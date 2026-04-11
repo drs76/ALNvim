@@ -718,22 +718,14 @@ vim.api.nvim_create_autocmd("VimEnter", {
       if client.root_dir == cwd then return end
     end
 
-    -- Find the first AL source file to use as the LSP anchor buffer.
-    local files = require("al.platform").glob_al_files(cwd)
-    local anchor = files[1]
-
-    local buf
-    if anchor then
-      -- bufadd + bufload: loads the file into the buffer, fires BufRead autocmds
-      -- which trigger ftdetect (sets filetype=al) and allow vim.lsp.start() to
-      -- attach properly. An unloaded buffer from bufadd alone cannot be attached.
-      buf = vim.fn.bufadd(anchor)
-      vim.fn.bufload(buf)
-    else
-      -- Empty project: scratch buffer rooted in the project directory.
-      buf = vim.api.nvim_create_buf(false, false)
-      vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
-    end
+    -- Always use a scratch buffer as the LSP anchor — never a real project file.
+    -- Using a real file taints that buffer with _al_background=true; if the user
+    -- later opens it, Neovim reuses the existing buffer (filetype already set,
+    -- ftplugin won't re-run) and the statusline/keymaps are never registered.
+    -- A scratch buffer named inside the project root is sufficient: lsp.get_root()
+    -- resolves app.json from it, and vim.lsp.start() attaches normally.
+    local buf = vim.api.nvim_create_buf(false, false)
+    vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
 
     -- Mark this as a background anchor buffer so ftplugin/al.lua skips
     -- the statusline and keymap setup (which would corrupt the active window).
