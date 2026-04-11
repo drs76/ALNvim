@@ -9,17 +9,21 @@ end
 
 -- AL statusline: show project name/version, LSP loading state, compile/publish result.
 -- Save and restore around focus changes so other buffers get their default statusline back.
+-- Skip if this buffer is not displayed in any window (e.g. background LSP anchor buffer).
 local _AL_STL = " %f %m  │  %{v:lua.require('al.status').get()}  %=  %l:%c  %P "
-local _prev_stl = vim.wo.statusline
-vim.wo.statusline = _AL_STL
-vim.api.nvim_create_autocmd("BufLeave", {
-  buffer   = 0,
-  callback = function() vim.wo.statusline = _prev_stl end,
-})
-vim.api.nvim_create_autocmd("BufEnter", {
-  buffer   = 0,
-  callback = function() vim.wo.statusline = _AL_STL end,
-})
+local _buf = vim.api.nvim_get_current_buf()
+if #vim.fn.win_findbuf(_buf) > 0 then
+  local _prev_stl = vim.wo.statusline
+  vim.wo.statusline = _AL_STL
+  vim.api.nvim_create_autocmd("BufLeave", {
+    buffer   = 0,
+    callback = function() vim.wo.statusline = _prev_stl end,
+  })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    buffer   = 0,
+    callback = function() vim.wo.statusline = _AL_STL end,
+  })
+end
 -- Format on save using the AL language server formatter.
 -- Runs synchronously in BufWritePre so the formatted content is what gets written.
 vim.api.nvim_create_autocmd("BufWritePre", {
