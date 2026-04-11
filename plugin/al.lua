@@ -733,7 +733,7 @@ vim.api.nvim_create_autocmd("VimEnter", {
 
     -- Fire the FileType autocmd on the buffer — this triggers the existing
     -- ALNvimLsp handler which calls vim.lsp.start() with the right root_dir.
-    vim.api.nvim_exec_autocmds("FileType", { pattern = "al", buf = buf })
+    vim.api.nvim_exec_autocmds("FileType", { pattern = "al", buffer = buf })
   end,
 })
 
