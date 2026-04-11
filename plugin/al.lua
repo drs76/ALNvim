@@ -701,8 +701,8 @@ vim.api.nvim_create_autocmd("VimEnter", {
   once  = true,
   group = vim.api.nvim_create_augroup("ALNvimAutoStart", { clear = true }),
   callback = function()
-    -- Respect opt-out.
-    if not require("al").config.auto_start then return end
+    -- Respect opt-out (only skip if explicitly set to false; nil = default on).
+    if require("al").config.auto_start == false then return end
 
     local cwd = vim.fn.getcwd()
     -- Only trigger when app.json is directly in the cwd (project root).
