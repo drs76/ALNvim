@@ -724,26 +724,31 @@ vim.api.nvim_create_autocmd("VimEnter", {
 
     local buf
     if anchor then
+      -- bufadd + bufload: loads the file into the buffer, fires BufRead autocmds
+      -- which trigger ftdetect (sets filetype=al) and allow vim.lsp.start() to
+      -- attach properly. An unloaded buffer from bufadd alone cannot be attached.
       buf = vim.fn.bufadd(anchor)
+      vim.fn.bufload(buf)
     else
-      -- Empty project: create a scratch buffer rooted in the project.
+      -- Empty project: scratch buffer rooted in the project directory.
       buf = vim.api.nvim_create_buf(false, false)
       vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
     end
 
-    -- Set filetype=al on the buffer — this fires the FileType autocmd which
-    -- triggers the existing ALNvimLsp handler that calls vim.lsp.start().
+    -- setfiletype is idempotent (no-op if ftdetect already set it).
+    -- For the scratch/empty-project path it is the only trigger.
     vim.api.nvim_buf_call(buf, function() vim.cmd("setfiletype al") end)
 
     -- Poll until the LSP is ready, then run a full analyze so the server
     -- pushes diagnostics for all project files (visible in the file explorer).
     -- Poll every second; give up after 60 seconds.
+    -- Use the client's own root_dir (not cwd) to avoid path normalisation mismatches.
     local polls = 0
     local status = require("al.status")
     local timer  = vim.uv.new_timer()
     timer:start(2000, 1000, vim.schedule_wrap(function()
       polls = polls + 1
-      if polls > 60 or not timer:is_active() then
+      if polls > 60 then
         timer:stop()
         timer:close()
         return
@@ -751,8 +756,15 @@ vim.api.nvim_create_autocmd("VimEnter", {
       if status.is_ready() then
         timer:stop()
         timer:close()
-        local cops_mod = require("al.cops")
-        cops_mod.apply(cwd, cops_mod.get_active(cwd), true)
+        local al_clients = vim.lsp.get_clients({ name = "al_language_server" })
+        local client = al_clients[1]
+        if client then
+          local root = client.root_dir or client.config.root_dir
+          if root then
+            local cops_mod = require("al.cops")
+            cops_mod.apply(root, cops_mod.get_active(root))
+          end
+        end
       end
     end))
   end,
