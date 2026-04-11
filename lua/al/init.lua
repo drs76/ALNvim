@@ -30,6 +30,11 @@ M.defaults = {
   -- via :ALMcpSetup / :ALMcpRemove.
   auto_mcp = true,
 
+  -- Automatically start the AL LSP when Neovim opens inside an AL project root
+  -- (i.e. app.json exists in the current working directory). Enables diagnostics
+  -- in the file explorer without needing to open an AL file first.
+  auto_start = true,
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

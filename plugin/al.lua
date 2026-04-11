@@ -692,6 +692,51 @@ vim.api.nvim_create_user_command("ALMcpStatus", function()
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end, { desc = "Show configured AL MCP server entries" })
 
+-- ── Auto-start LSP when Neovim opens inside an AL project root ───────────────
+-- Fires once at startup. If app.json is in cwd and auto_start is enabled,
+-- we fire the existing FileType autocmd on a background buffer so the LSP
+-- begins indexing before the user opens their first AL file. This lets
+-- diagnostics appear in the file explorer immediately.
+vim.api.nvim_create_autocmd("VimEnter", {
+  once  = true,
+  group = vim.api.nvim_create_augroup("ALNvimAutoStart", { clear = true }),
+  callback = function()
+    -- Respect opt-out.
+    if not require("al").config.auto_start then return end
+
+    local cwd = vim.fn.getcwd()
+    -- Only trigger when app.json is directly in the cwd (project root).
+    if vim.fn.filereadable(cwd .. "/app.json") ~= 1 then return end
+
+    -- Skip if Neovim was opened with AL file arguments — FileType fires naturally.
+    for i = 0, vim.fn.argc() - 1 do
+      if tostring(vim.fn.argv(i)):match("%.[Aa][Ll]$") then return end
+    end
+
+    -- Skip if a language server is already running for this root.
+    for _, client in ipairs(vim.lsp.get_clients({ name = "al_language_server" })) do
+      if client.root_dir == cwd then return end
+    end
+
+    -- Find the first AL source file to use as the LSP anchor buffer.
+    local files = require("al.platform").glob_al_files(cwd)
+    local anchor = files[1]
+
+    local buf
+    if anchor then
+      buf = vim.fn.bufadd(anchor)
+    else
+      -- Empty project: create a scratch buffer rooted in the project.
+      buf = vim.api.nvim_create_buf(false, false)
+      vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
+    end
+
+    -- Fire the FileType autocmd on the buffer — this triggers the existing
+    -- ALNvimLsp handler which calls vim.lsp.start() with the right root_dir.
+    vim.api.nvim_exec_autocmds("FileType", { pattern = "al", buf = buf })
+  end,
+})
+
 vim.api.nvim_create_user_command("ALAnalyze", function()
   local lsp_mod = require("al.lsp")
   local cops    = require("al.cops")
@@ -712,4 +757,12 @@ end, {
   nargs    = "?",
   complete = "dir",
   desc     = "AL: Git diff explorer — list changed files with vifdiff",
+})
+
+vim.api.nvim_create_user_command("ALAddNamespace", function(opts)
+  require("al.namespace").wizard(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "AL: Add namespace declaration to all source files and fix using statements",
 })
