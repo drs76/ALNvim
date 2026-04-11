@@ -121,18 +121,6 @@ vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
     local client = vim.lsp.get_client_by_id(ctx.client_id)
     if client then client._al_last_active = vim.uv.now() end
     require("al.status").set_lsp_ready()
-    -- After an auto-start (VimEnter with no AL file open), run a full analyze
-    -- so the server pushes background diagnostics for all project files.
-    if _al_auto_analyze_pending then
-      _al_auto_analyze_pending = false
-      local root = client and client.root_dir
-      if root then
-        vim.defer_fn(function()
-          local cops_mod = require("al.cops")
-          cops_mod.apply(root, cops_mod.get_active(root), true)
-        end, 500)
-      end
-    end
   end
   return vim.NIL  -- server-initiated request: must respond with null
 end
@@ -153,18 +141,7 @@ vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
       -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
       -- Fall back: if still in "loading" state 3 seconds after hitting 100%, mark ready.
       vim.defer_fn(function()
-        if status.is_loading() then
-          status.set_lsp_ready()
-          -- Fallback path: activeProjectLoaded never fired, so trigger analyze here.
-          if _al_auto_analyze_pending then
-            _al_auto_analyze_pending = false
-            local root = client and client.root_dir
-            if root then
-              local cops_mod = require("al.cops")
-              cops_mod.apply(root, cops_mod.get_active(root), true)
-            end
-          end
-        end
+        if status.is_loading() then status.set_lsp_ready() end
       end, 3000)
       -- The AL server only fully activates language features (including the formatter)
       -- after a second al/setActiveWorkspace following the initial load cycle.
@@ -715,10 +692,6 @@ vim.api.nvim_create_user_command("ALMcpStatus", function()
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end, { desc = "Show configured AL MCP server entries" })
 
--- Flag: set by VimEnter auto-start, consumed by al/activeProjectLoaded to
--- trigger a final analyze pass once the server finishes its initial load.
-local _al_auto_analyze_pending = false
-
 -- ── Auto-start LSP when Neovim opens inside an AL project root ───────────────
 -- Fires once at startup. If app.json is in cwd and auto_start is enabled,
 -- we fire the existing FileType autocmd on a background buffer so the LSP
@@ -758,12 +731,30 @@ vim.api.nvim_create_autocmd("VimEnter", {
       vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
     end
 
-    -- Mark that we want an auto-analyze once the server finishes loading.
-    _al_auto_analyze_pending = true
-
     -- Set filetype=al on the buffer — this fires the FileType autocmd which
     -- triggers the existing ALNvimLsp handler that calls vim.lsp.start().
     vim.api.nvim_buf_call(buf, function() vim.cmd("setfiletype al") end)
+
+    -- Poll until the LSP is ready, then run a full analyze so the server
+    -- pushes diagnostics for all project files (visible in the file explorer).
+    -- Poll every second; give up after 60 seconds.
+    local polls = 0
+    local status = require("al.status")
+    local timer  = vim.uv.new_timer()
+    timer:start(2000, 1000, vim.schedule_wrap(function()
+      polls = polls + 1
+      if polls > 60 or not timer:is_active() then
+        timer:stop()
+        timer:close()
+        return
+      end
+      if status.is_ready() then
+        timer:stop()
+        timer:close()
+        local cops_mod = require("al.cops")
+        cops_mod.apply(cwd, cops_mod.get_active(cwd), true)
+      end
+    end))
   end,
 })
 
