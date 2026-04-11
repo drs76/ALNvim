@@ -66,6 +66,7 @@ local function open_build_win(title, project_dir)
   local _sidebar_ft = {
     NvimTree = true, ["neo-tree"] = true, aerial = true,
     Outline = true, undotree = true, oil = true, qf = true,
+    alpha = true, dashboard = true,
   }
 
   -- Returns true if w is a real editing window (not a sidebar, terminal, quickfix, …)

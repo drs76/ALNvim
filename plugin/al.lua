@@ -735,6 +735,10 @@ vim.api.nvim_create_autocmd("VimEnter", {
       vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
     end
 
+    -- Mark this as a background anchor buffer so ftplugin/al.lua skips
+    -- the statusline and keymap setup (which would corrupt the active window).
+    vim.api.nvim_buf_set_var(buf, "_al_background", true)
+
     -- setfiletype is idempotent (no-op if ftdetect already set it).
     -- For the scratch/empty-project path it is the only trigger.
     vim.api.nvim_buf_call(buf, function() vim.cmd("setfiletype al") end)
