@@ -289,7 +289,7 @@ Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com �
 
 `M.update()` — queries marketplace for latest, compares with `installed_version()` (scans `~/.vscode*/extensions/ms-dynamics-smb.al-*`), downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`.
 
-`M.install_dotnet_tool()` — checks if `~/.dotnet/tools/al[.exe]` exists, runs `dotnet tool install` (first time) or `dotnet tool update` (already installed), streams output live. Registered as `:ALInstallDotnetTool`. Requires `dotnet` on PATH.
+`M.install_dotnet_tool()` — checks if `~/.dotnet/tools/al[.exe]` exists, runs `dotnet tool install` (first time) or `dotnet tool update` (already installed) for package `microsoft.dynamics.businesscentral.development.tools`, streams output live. Registered as `:ALInstallDotnetTool`. Requires `dotnet` on PATH.
 
 ## AL Text Objects (`lua/al/textobj.lua`)
 

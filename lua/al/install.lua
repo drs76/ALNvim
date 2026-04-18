@@ -423,13 +423,13 @@ function M.update()
   end)
 end
 
--- Install or update the dotnet AL MCP tool (Microsoft.Dynamics.Nav.Al).
+-- Install or update the dotnet AL MCP tool (microsoft.dynamics.businesscentral.development.tools).
 -- Requires dotnet SDK/runtime to be installed and on PATH.
 function M.install_dotnet_tool()
   local _, _, log, done, width = make_window("AL Dotnet Tool Installer")
   log("AL Dotnet Tool Installer")
   log(string.rep("─", width - 2))
-  log("Tool: Microsoft.Dynamics.Nav.Al")
+  log("Tool: microsoft.dynamics.businesscentral.development.tools")
   log("")
 
   -- Verify dotnet is available.
@@ -446,17 +446,27 @@ function M.install_dotnet_tool()
   end
   local already_installed = vim.fn.filereadable(al_bin) == 1
 
-  local subcmd = already_installed and "update" or "install"
-  local label  = already_installed and "Updating" or "Installing"
-  log(label .. " dotnet tool (this may take a minute)…")
-  if already_installed then
-    log("Current binary: " .. al_bin)
-  end
-  log("")
+  vim.ui.select({ "Stable", "Preview (--prerelease)" }, { prompt = "AL dotnet tool channel:" }, function(choice)
+    if not choice then
+      done(true, "Cancelled.")
+      return
+    end
+    local prerelease = choice:find("Preview") ~= nil
 
-  local out_lines = {}
-  vim.fn.jobstart(
-    { "dotnet", "tool", subcmd, "-g", "Microsoft.Dynamics.Nav.Al" },
+    local subcmd = already_installed and "update" or "install"
+    local label  = already_installed and "Updating" or "Installing"
+    log(label .. " dotnet tool" .. (prerelease and " (preview)…" or "…") .. " (this may take a minute)…")
+    if already_installed then
+      log("Current binary: " .. al_bin)
+    end
+    log("")
+
+    local cmd = { "dotnet", "tool", subcmd, "-g", "microsoft.dynamics.businesscentral.development.tools" }
+    if prerelease then cmd[#cmd + 1] = "--prerelease" end
+
+    local out_lines = {}
+    vim.fn.jobstart(
+      cmd,
     {
       stdout_buffered = false,
       stderr_buffered = false,
@@ -515,6 +525,7 @@ function M.install_dotnet_tool()
       end,
     }
   )
+  end)
 end
 
 return M

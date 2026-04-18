@@ -107,6 +107,25 @@ vim.api.nvim_create_autocmd("FileType", {
       on_init = function(client)
         client.server_capabilities.semanticTokensProvider = nil
       end,
+      -- AL server sends publishDiagnostics for all project files during background
+      -- analysis, including files the user has never opened. For unloaded buffers,
+      -- vim.diagnostic uses once_buf_loaded → BufReadPost autocmd whose closure
+      -- captures diagnostic positions. If those positions are inconsistent (e.g.
+      -- during or just after re-analysis triggered by codeAction), opening the file
+      -- crashes at nvim_buf_get_lines strict_indexing=true. Skip diagnostics for
+      -- unloaded buffers entirely; they are re-published once the user opens the file.
+      handlers = {
+        ["textDocument/publishDiagnostics"] = function(err, result, ctx, config)
+          if result and result.uri then
+            local fname = vim.uri_to_fname(result.uri)
+            local bufnr = vim.fn.bufnr(fname)
+            if bufnr == -1 or not vim.api.nvim_buf_is_loaded(bufnr) then
+              return
+            end
+          end
+          vim.lsp.diagnostic.on_publish_diagnostics(err, result, ctx, config)
+        end,
+      },
     }, { bufnr = args.buf })
   end,
 })
