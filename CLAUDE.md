@@ -205,7 +205,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALInstallExtension`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALInfo`, `:ALUpdate`
+`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -286,6 +286,10 @@ Writes `~/.claude/settings.json` to spawn `al launchmcpserver` via stdio. Entry 
 ## AL Extension Installer (`lua/al/install.lua`)
 
 Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com — returns non-ZIP redirect). Required headers: `Accept: application/octet-stream`, `X-Market-Client-Id: VSCode`, `User-Agent: VSCode/...`. Verifies ZIP magic bytes (`PK`). Calls `ext.reload()` + `doautocmd FileType al` after install. Registered before `ext_path` guard — always available.
+
+`M.update()` — queries marketplace for latest, compares with `installed_version()` (scans `~/.vscode*/extensions/ms-dynamics-smb.al-*`), downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`.
+
+`M.install_dotnet_tool()` — checks if `~/.dotnet/tools/al[.exe]` exists, runs `dotnet tool install` (first time) or `dotnet tool update` (already installed), streams output live. Registered as `:ALInstallDotnetTool`. Requires `dotnet` on PATH.
 
 ## AL Text Objects (`lua/al/textobj.lua`)
 

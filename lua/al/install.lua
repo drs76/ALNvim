@@ -1,6 +1,8 @@
 -- AL Extension Installer
 -- Downloads the MS AL VSCode extension from the marketplace without requiring VS Code.
 -- Entry point: M.install()  →  :ALInstallExtension
+--              M.update()   →  :ALUpdateExtension
+--              M.install_dotnet_tool()  →  :ALInstallDotnetTool
 --
 -- Requirements: curl (built into Windows 10+, standard on Linux/macOS),
 --               unzip (Linux/macOS) or tar.exe (Windows 10+)
@@ -77,6 +79,40 @@ local function is_zip(path)
   local magic = f:read(2)
   f:close()
   return magic == "PK"
+end
+
+-- Compare two version strings (e.g. "16.3.2065053" vs "16.4.2100000").
+-- Returns true if a > b.
+local function version_gt(a, b)
+  local function parts(s)
+    local t = {}
+    for n in s:gmatch("%d+") do t[#t + 1] = tonumber(n) end
+    return t
+  end
+  local va, vb = parts(a), parts(b)
+  for i = 1, math.max(#va, #vb) do
+    local na, nb = va[i] or 0, vb[i] or 0
+    if na ~= nb then return na > nb end
+  end
+  return false
+end
+
+-- Return the newest installed extension version string, or nil.
+local function installed_version()
+  local home    = vim.fn.expand("~")
+  local newest  = nil
+  for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
+    local base    = home .. "/" .. subdir .. "/extensions"
+    local matched = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
+    for _, d in ipairs(matched) do
+      local ver = d:match("ms%-dynamics%-smb%.al%-(.-)/?$")
+      local stat = vim.uv.fs_stat(d)
+      if ver and stat and stat.type == "directory" then
+        if not newest or version_gt(ver, newest) then newest = ver end
+      end
+    end
+  end
+  return newest
 end
 
 -- Download the VSIX for a given version.
@@ -220,10 +256,9 @@ local function extract_vsix(tmpfile, version, log, cb)
   })
 end
 
--- ── Public API ────────────────────────────────────────────────────────────────
+-- ── Shared UI ─────────────────────────────────────────────────────────────────
 
-function M.install()
-  -- Floating progress window (same style as compile.lua).
+local function make_window(title)
   local buf    = vim.api.nvim_create_buf(false, true)
   local width  = math.min(90, vim.o.columns - 4)
   local height = math.min(22, vim.o.lines - 4)
@@ -235,7 +270,7 @@ function M.install()
     col       = math.floor((vim.o.columns - width)  / 2),
     style     = "minimal",
     border    = "rounded",
-    title     = " AL Extension Installer ",
+    title     = " " .. title .. " ",
     title_pos = "center",
   })
   vim.bo[buf].buftype    = "nofile"
@@ -254,18 +289,23 @@ function M.install()
     end)
   end
 
-  local function done(success)
+  local function done(success, msg)
     vim.schedule(function()
       log("")
-      log(success
-        and "Done.  Open an .al file to verify LSP attaches, or run :ALInfo."
-        or  "FAILED — see messages above.")
+      log(success and (msg or "Done.") or ("FAILED — " .. (msg or "see messages above.")))
       for _, key in ipairs({ "q", "<Esc>" }) do
         vim.keymap.set("n", key, "<cmd>bdelete!<CR>", { buffer = buf, silent = true })
       end
     end)
   end
 
+  return buf, win, log, done, width
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
+
+function M.install()
+  local _, _, log, done, width = make_window("AL Extension Installer")
   log("AL Extension Installer")
   log(string.rep("─", width - 2))
   log("Querying VS Code marketplace…")
@@ -313,10 +353,168 @@ function M.install()
             end
           end)
         end
-        done(ok)
+        done(ok, ok and "Done.  Open an .al file to verify LSP attaches, or run :ALInfo." or nil)
       end)
     end)
   end)
+end
+
+-- Check for a newer VSIX on the marketplace and install if one is available.
+function M.update()
+  local _, _, log, done, width = make_window("AL Extension Updater")
+  log("AL Extension Updater")
+  log(string.rep("─", width - 2))
+
+  local cur = installed_version()
+  if cur then
+    log("Installed : " .. cur)
+  else
+    log("No extension installed yet — run :ALInstallExtension first.")
+    done(false, "not installed")
+    return
+  end
+
+  log("Querying VS Code marketplace…")
+  fetch_version(function(version)
+    if not version then
+      log("ERROR: marketplace query failed — check network and try again.")
+      done(false)
+      return
+    end
+    log("Latest    : " .. version)
+
+    if not version_gt(version, cur) then
+      log("")
+      log("Already on latest version (" .. cur .. ").")
+      done(true, "Already up to date.")
+      return
+    end
+
+    log("New version available — downloading…")
+    download_vsix(version, log, function(tmpfile)
+      if not tmpfile then
+        done(false)
+        return
+      end
+      extract_vsix(tmpfile, version, log, function(ok)
+        if ok then
+          local ok2, ext_path = pcall(function() return require("al.ext").reload() end)
+          if ok2 and ext_path then
+            log("Extension path: " .. ext_path)
+          end
+          vim.schedule(function()
+            local triggered = 0
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+              if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].filetype == "al" then
+                vim.api.nvim_buf_call(bufnr, function()
+                  pcall(vim.cmd, "doautocmd FileType al")
+                end)
+                triggered = triggered + 1
+              end
+            end
+            if triggered > 0 then
+              log(string.format("LSP restarted for %d open AL buffer(s).", triggered))
+            end
+          end)
+        end
+        done(ok, ok and "Updated to v" .. version .. ".  Restart Neovim to use the new server." or nil)
+      end)
+    end)
+  end)
+end
+
+-- Install or update the dotnet AL MCP tool (Microsoft.Dynamics.Nav.Al).
+-- Requires dotnet SDK/runtime to be installed and on PATH.
+function M.install_dotnet_tool()
+  local _, _, log, done, width = make_window("AL Dotnet Tool Installer")
+  log("AL Dotnet Tool Installer")
+  log(string.rep("─", width - 2))
+  log("Tool: Microsoft.Dynamics.Nav.Al")
+  log("")
+
+  -- Verify dotnet is available.
+  if vim.fn.executable("dotnet") == 0 then
+    log("ERROR: 'dotnet' not found on PATH.")
+    log("Install the .NET SDK: https://dot.net/")
+    done(false, "'dotnet' not found")
+    return
+  end
+
+  local al_bin = vim.fn.expand("~/.dotnet/tools/al")
+  if platform.is_windows then
+    al_bin = vim.fn.expand("~/.dotnet/tools/al.exe")
+  end
+  local already_installed = vim.fn.filereadable(al_bin) == 1
+
+  local subcmd = already_installed and "update" or "install"
+  local label  = already_installed and "Updating" or "Installing"
+  log(label .. " dotnet tool (this may take a minute)…")
+  if already_installed then
+    log("Current binary: " .. al_bin)
+  end
+  log("")
+
+  local out_lines = {}
+  vim.fn.jobstart(
+    { "dotnet", "tool", subcmd, "-g", "Microsoft.Dynamics.Nav.Al" },
+    {
+      stdout_buffered = false,
+      stderr_buffered = false,
+      on_stdout = function(_, data)
+        for _, line in ipairs(data) do
+          if line ~= "" then
+            out_lines[#out_lines + 1] = line
+            log(line)
+          end
+        end
+      end,
+      on_stderr = function(_, data)
+        for _, line in ipairs(data) do
+          if line ~= "" then log("  " .. line) end
+        end
+      end,
+      on_exit = function(_, code)
+        vim.schedule(function()
+          if code == 0 then
+            -- dotnet tool update exits 0 even when already on latest
+            local already_latest = false
+            for _, l in ipairs(out_lines) do
+              if l:lower():match("already the latest") then
+                already_latest = true
+                break
+              end
+            end
+            log("")
+            if already_latest then
+              log("Already on the latest version.")
+              done(true, "Already up to date.")
+            else
+              platform.ensure_executable(al_bin)
+              log("Binary: " .. al_bin)
+              done(true, "Done.  Run :ALMcpSetup to register for the current project.")
+            end
+          else
+            -- dotnet tool install exits 1 if already installed; suggest update
+            local suggest_update = false
+            for _, l in ipairs(out_lines) do
+              if l:lower():match("already installed") then
+                suggest_update = true
+                break
+              end
+            end
+            if suggest_update then
+              log("")
+              log("Tool already installed. Run :ALInstallDotnetTool again to update it,")
+              log("or :ALMcpSetup to configure MCP for the current project.")
+              done(true, "Already installed.")
+            else
+              done(false, "dotnet exited " .. code)
+            end
+          end
+        end)
+      end,
+    }
+  )
 end
 
 return M

@@ -35,6 +35,11 @@ M.defaults = {
   -- in the file explorer without needing to open an AL file first.
   auto_start = true,
 
+  -- Automatically add missing `using` statements on save via source.organizeImports.
+  -- Runs synchronously in BufWritePre, before the formatter, so the formatter also
+  -- cleans up the newly added using lines. Set to false to manage manually via <leader>acn.
+  organize_imports_on_save = true,
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

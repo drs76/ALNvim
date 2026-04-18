@@ -22,10 +22,19 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 _al_apply_hl_overrides()
 
 
--- ── ALInstallExtension — always available, even before extension is installed ─
+-- ── ALInstallExtension / ALUpdateExtension / ALInstallDotnetTool ─────────────
+-- Always available — even before extension is installed.
 vim.api.nvim_create_user_command("ALInstallExtension", function()
   require("al.install").install()
 end, { desc = "Download and install the MS AL VSCode extension (no VS Code required)" })
+
+vim.api.nvim_create_user_command("ALUpdateExtension", function()
+  require("al.install").update()
+end, { desc = "Check for a newer MS AL extension and install it if available" })
+
+vim.api.nvim_create_user_command("ALInstallDotnetTool", function()
+  require("al.install").install_dotnet_tool()
+end, { desc = "Install or update the dotnet AL MCP tool (Microsoft.Dynamics.Nav.Al)" })
 
 -- ── ALUpdate — pull latest ALNvim from GitHub ─────────────────────────────────
 vim.api.nvim_create_user_command("ALUpdate", function()

@@ -28,6 +28,78 @@ vim.api.nvim_create_autocmd("BufEnter", {
   buffer   = 0,
   callback = function() vim.wo.statusline = _AL_STL end,
 })
+-- Add missing `using` statements on save via source.organizeImports.
+-- Runs synchronously in BufWritePre (before format) so using lines are also formatted.
+--
+-- Crash guard: vim.diagnostic uses once_buf_loaded to defer diagnostic rendering for
+-- unloaded buffers. If apply_workspace_edit loads a buffer (via vim.fn.bufload), that
+-- triggers BufRead → the deferred render fires → nvim_buf_get_lines with stale lnum →
+-- "Index out of bounds". Fix: only apply edits when ALL referenced buffers are already
+-- loaded. Also reset stale diagnostics for this buffer after modification so any
+-- deferred renders use fresh positions from the next publishDiagnostics.
+vim.api.nvim_create_autocmd("BufWritePre", {
+  buffer   = 0,
+  callback = function()
+    if require("al").config.organize_imports_on_save == false then return end
+    -- Skip when LSP is still indexing; codeAction during indexing can trigger
+    -- project-wide re-analysis and send diagnostics with inconsistent positions.
+    if not require("al.status").is_ready() then return end
+    local bufnr  = vim.api.nvim_get_current_buf()
+    local clients = vim.lsp.get_clients({ name = "al_language_server", bufnr = bufnr })
+    if #clients == 0 then return end
+    local params = {
+      textDocument = vim.lsp.util.make_text_document_params(bufnr),
+      range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
+      context      = { only = { "source.organizeImports" }, diagnostics = {} },
+    }
+    local result = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", params, 5000)
+    if not result then return end
+    local enc = clients[1].offset_encoding or "utf-16"
+    local applied = false
+    for _, res in pairs(result) do
+      for _, action in ipairs(res.result or {}) do
+        if action.disabled then goto continue end
+        if action.edit then
+          -- Verify every buffer referenced in the workspace edit is already loaded.
+          -- If any isn't, applying would call bufload → BufRead → stale diagnostic crash.
+          local safe = true
+          local edit = action.edit
+          if edit.documentChanges then
+            for _, dc in ipairs(edit.documentChanges) do
+              if dc.textDocument then
+                local b = vim.fn.bufnr(vim.uri_to_fname(dc.textDocument.uri))
+                if b == -1 or not vim.api.nvim_buf_is_loaded(b) then
+                  safe = false; break
+                end
+              end
+            end
+          elseif edit.changes then
+            for uri2 in pairs(edit.changes) do
+              local b = vim.fn.bufnr(vim.uri_to_fname(uri2))
+              if b == -1 or not vim.api.nvim_buf_is_loaded(b) then
+                safe = false; break
+              end
+            end
+          end
+          if safe then
+            vim.lsp.util.apply_workspace_edit(edit, enc)
+            applied = true
+          end
+        elseif action.command then
+          local cmd = type(action.command) == "table" and action.command or action
+          clients[1]:request("workspace/executeCommand", cmd, nil, bufnr)
+          applied = true
+        end
+        ::continue::
+      end
+    end
+    -- After modifying buffer content, clear this buffer's diagnostics so any
+    -- deferred once_buf_loaded renders don't fire with pre-modification line positions.
+    if applied then
+      vim.diagnostic.reset(nil, bufnr)
+    end
+  end,
+})
 -- Format on save using the AL language server formatter.
 -- Runs synchronously in BufWritePre so the formatted content is what gets written.
 vim.api.nvim_create_autocmd("BufWritePre", {
