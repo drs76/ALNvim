@@ -36,6 +36,35 @@ function M.get_root(bufnr)
   return choices[choice] or nil
 end
 
+-- Return the path of the first *.code-workspace file in dir, or nil.
+function M.find_workspace_file(dir)
+  local hits = vim.fn.glob(dir .. "/*.code-workspace", false, true)
+  return hits[1]
+end
+
+-- Parse a *.code-workspace file and return absolute paths of folders that
+-- contain app.json. Paths in the file are relative to the workspace file dir.
+function M.workspace_roots(ws_file)
+  local f = io.open(ws_file, "r")
+  if not f then return {} end
+  local content = f:read("*a")
+  f:close()
+  local ok, decoded = pcall(vim.fn.json_decode, content)
+  if not ok or type(decoded) ~= "table" then return {} end
+  local base = vim.fs.dirname(ws_file)
+  local roots = {}
+  for _, folder in ipairs(decoded.folders or {}) do
+    local rel = folder.path or folder.name
+    if rel then
+      local abs = base .. "/" .. rel
+      if vim.fn.filereadable(abs .. "/app.json") == 1 then
+        table.insert(roots, abs)
+      end
+    end
+  end
+  return roots
+end
+
 -- Read and decode app.json from a project root, or nil on failure
 function M.read_app_json(root)
   root = root or M.get_root()

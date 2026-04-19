@@ -121,6 +121,17 @@ vim.api.nvim_create_autocmd("BufWritePost", {
   end,
 })
 
+-- Re-run alc after save to refresh vim.diagnostic (file-tree badges + quickfix).
+-- Skips when LSP is still indexing to avoid queuing compiles during startup.
+vim.api.nvim_create_autocmd("BufWritePost", {
+  buffer   = 0,
+  callback = function()
+    if not require("al.status").is_ready() then return end
+    local root = require("al.lsp").get_root()
+    if root then require("al.compile").analyze_diagnostics(root) end
+  end,
+})
+
 vim.bo.commentstring = "// %s"
 vim.bo.tabstop       = 4
 vim.bo.shiftwidth    = 4

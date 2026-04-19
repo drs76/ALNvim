@@ -334,6 +334,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
     -- Use empty array — avoids hanging on network-mounted .netpackages directories.
+    local al_cfg = require("al").config
     local ws_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
       assemblyProbingPaths   = {},
@@ -342,6 +343,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       backgroundCodeAnalysis = "Project",
       enableCodeActions      = true,
       incrementalBuild       = true,
+      ruleSetPath            = (al_cfg.ruleset_path and al_cfg.ruleset_path ~= "") and al_cfg.ruleset_path or vim.NIL,
     }
 
     -- Tell the server which workspace is active and what its settings are.
@@ -732,42 +734,47 @@ vim.api.nvim_create_autocmd("VimEnter", {
     -- Respect opt-out (only skip if explicitly set to false; nil = default on).
     if require("al").config.auto_start == false then return end
 
-    local cwd = vim.fn.getcwd()
-    -- Only trigger when app.json is directly in the cwd (project root).
-    if vim.fn.filereadable(cwd .. "/app.json") ~= 1 then return end
+    local cwd    = vim.fn.getcwd()
+    local lsp_m  = require("al.lsp")
+
+    -- Collect project roots: either the cwd itself (has app.json) or folders
+    -- declared in a *.code-workspace file (VS Code multi-root workspace).
+    local roots = {}
+    if vim.fn.filereadable(cwd .. "/app.json") == 1 then
+      roots = { cwd }
+    else
+      local ws = lsp_m.find_workspace_file(cwd)
+      if ws then roots = lsp_m.workspace_roots(ws) end
+    end
+    if #roots == 0 then return end
 
     -- Skip if Neovim was opened with AL file arguments — FileType fires naturally.
     for i = 0, vim.fn.argc() - 1 do
       if tostring(vim.fn.argv(i)):match("%.[Aa][Ll]$") then return end
     end
 
-    -- Skip if a language server is already running for this root.
-    for _, client in ipairs(vim.lsp.get_clients({ name = "al_language_server" })) do
-      if client.root_dir == cwd then return end
+    -- For each project root: create a scratch anchor buffer so the FileType
+    -- autocmd fires and vim.lsp.start() starts a client with the correct root_dir.
+    local existing = {}
+    for _, c in ipairs(vim.lsp.get_clients({ name = "al_language_server" })) do
+      existing[c.root_dir] = true
+    end
+    for _, root in ipairs(roots) do
+      if not existing[root] then
+        local buf = vim.api.nvim_create_buf(false, false)
+        vim.api.nvim_buf_set_name(buf, root .. "/_al_startup_.al")
+        vim.api.nvim_buf_set_var(buf, "_al_background", true)
+        vim.api.nvim_buf_call(buf, function() vim.cmd("setfiletype al") end)
+      end
     end
 
-    -- Always use a scratch buffer as the LSP anchor — never a real project file.
-    -- Using a real file taints that buffer with _al_background=true; if the user
-    -- later opens it, Neovim reuses the existing buffer (filetype already set,
-    -- ftplugin won't re-run) and the statusline/keymaps are never registered.
-    -- A scratch buffer named inside the project root is sufficient: lsp.get_root()
-    -- resolves app.json from it, and vim.lsp.start() attaches normally.
-    local buf = vim.api.nvim_create_buf(false, false)
-    vim.api.nvim_buf_set_name(buf, cwd .. "/_al_startup_.al")
-
-    -- Mark this as a background anchor buffer so ftplugin/al.lua skips
-    -- the statusline and keymap setup (which would corrupt the active window).
-    vim.api.nvim_buf_set_var(buf, "_al_background", true)
-
-    -- setfiletype is idempotent (no-op if ftdetect already set it).
-    -- For the scratch/empty-project path it is the only trigger.
-    vim.api.nvim_buf_call(buf, function() vim.cmd("setfiletype al") end)
-
-    -- Poll until the LSP is ready, then run a full analyze so the server
-    -- pushes diagnostics for all project files (visible in the file explorer).
-    -- Poll every second; give up after 60 seconds.
-    -- Use the client's own root_dir (not cwd) to avoid path normalisation mismatches.
-    local polls = 0
+    -- Poll until all expected clients are ready, then run silent alc compile for
+    -- each root so vim.diagnostic is populated and file-tree badges appear.
+    -- cops.apply() is NOT called here — _al_second_init_done in the
+    -- al/progressNotification handler already sends the second setActiveWorkspace.
+    -- Calling it again here causes a third reindex cycle that the user sees as
+    -- "LSP settling multiple times".
+    local polls  = 0
     local status = require("al.status")
     local timer  = vim.uv.new_timer()
     timer:start(2000, 1000, vim.schedule_wrap(function()
@@ -777,17 +784,14 @@ vim.api.nvim_create_autocmd("VimEnter", {
         timer:close()
         return
       end
-      if status.is_ready() then
+      local clients = vim.lsp.get_clients({ name = "al_language_server" })
+      if status.is_ready() and #clients >= #roots then
         timer:stop()
         timer:close()
-        local al_clients = vim.lsp.get_clients({ name = "al_language_server" })
-        local client = al_clients[1]
-        if client then
+        local compile = require("al.compile")
+        for _, client in ipairs(clients) do
           local root = client.root_dir or client.config.root_dir
-          if root then
-            local cops_mod = require("al.cops")
-            cops_mod.apply(root, cops_mod.get_active(root))
-          end
+          if root then compile.analyze_diagnostics(root) end
         end
       end
     end))
@@ -802,10 +806,12 @@ vim.api.nvim_create_user_command("ALAnalyze", function()
     vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
     return
   end
-  -- Re-send al/setActiveWorkspace — this triggers the server to re-index the project
-  -- and push fresh publishDiagnostics for all open buffers.
+  -- Re-send al/setActiveWorkspace — triggers server re-index + publishDiagnostics for
+  -- open buffers. Then run alc silently to populate vim.diagnostic for all project files
+  -- (including closed ones) so file-tree plugins show error/warning badges.
   require("al.status").set_lsp_loading(0)
   cops.apply(root, cops.get_active(root))
+  require("al.compile").analyze_diagnostics(root)
 end, { desc = "AL: Force re-analysis of the current project (refreshes diagnostics)" })
 
 vim.api.nvim_create_user_command("ALDiff", function(opts)

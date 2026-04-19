@@ -83,9 +83,7 @@ function M.configure(root)
   }
 
   write_settings(settings)
-  vim.notify(
-    "AL MCP: configured '" .. key .. "'\n"
-    .. "Restart Claude Code (or run /mcp) to activate the AL tools.",
+  vim.notify("AL MCP: configured '" .. key .. "' — restart Claude Code or run /mcp to activate.",
     vim.log.levels.INFO)
   return true
 end

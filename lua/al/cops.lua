@@ -87,6 +87,7 @@ function M.apply(root, cops, silent)
     end
   end
 
+  local al_cfg = require("al").config
   client:request("al/setActiveWorkspace", {
     currentWorkspaceFolderPath = {
       uri   = "file://" .. root,
@@ -103,6 +104,7 @@ function M.apply(root, cops, silent)
         backgroundCodeAnalysis = "Project",
         enableCodeActions      = true,
         incrementalBuild       = true,
+        ruleSetPath            = (al_cfg.ruleset_path and al_cfg.ruleset_path ~= "") and al_cfg.ruleset_path or vim.NIL,
       },
       setActiveWorkspace                  = true,
       dependencyParentWorkspacePath       = vim.NIL,

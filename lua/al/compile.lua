@@ -5,6 +5,9 @@ local EXT_PATH = require("al.ext").path or ""
 local ALC      = EXT_PATH .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc")
 local lsp      = require("al.lsp")
 
+-- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
+local DIAG_NS = vim.api.nvim_create_namespace("al_compile")
+
 -- Map VSCode cop tokens to the actual analyzer DLL paths that alc accepts.
 local ANALYZER_DLLS = {
   ["${CodeCop}"]               = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.CodeCop.dll",
@@ -171,9 +174,29 @@ local function buf_highlight(buf)
   end
 end
 
+local function push_diagnostics(qf)
+  vim.diagnostic.reset(DIAG_NS)
+  local diag_by_buf = {}
+  for _, item in ipairs(qf) do
+    if item.filename then
+      local bufnr = vim.fn.bufadd(item.filename)
+      diag_by_buf[bufnr] = diag_by_buf[bufnr] or {}
+      table.insert(diag_by_buf[bufnr], {
+        lnum     = math.max(0, (item.lnum or 1) - 1),
+        col      = math.max(0, (item.col  or 1) - 1),
+        message  = item.text,
+        severity = item.type == "E" and vim.diagnostic.severity.ERROR
+                                     or vim.diagnostic.severity.WARN,
+      })
+    end
+  end
+  for bufnr, diags in pairs(diag_by_buf) do
+    vim.diagnostic.set(DIAG_NS, bufnr, diags)
+  end
+end
+
 local function finish(buf, qf, exit_code, on_success)
   vim.schedule(function()
-    -- Summary line
     local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
     local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
     local summary
@@ -190,11 +213,9 @@ local function finish(buf, qf, exit_code, on_success)
     buf_highlight(buf)
 
     require("al.status").set_compile_result(#errors, #warnings)
-
-    -- Populate quickfix (for jump-to-error with <leader>aq)
     vim.fn.setqflist(qf, "r")
+    push_diagnostics(qf)
 
-    -- Success = clean exit and no errors. Warnings are allowed — they don't block publish.
     if exit_code == 0 and #errors == 0 then
       if on_success then on_success() end
     end
@@ -267,6 +288,52 @@ function M.compile(project_dir, extra_args, on_success)
     end,
     on_exit = function(_, code)
       finish(buf, parse_output(output), code, on_success)
+    end,
+  })
+end
+
+-- Run alc silently (no build window, no quickfix) and push results to vim.diagnostic.
+-- Used by ALAnalyze to populate file-tree badges after LSP re-analysis.
+function M.analyze_diagnostics(project_dir)
+  project_dir = project_dir or lsp.get_root()
+  if not project_dir then return end
+
+  ensure_executable(ALC)
+
+  local cfg          = require("al").config
+  local packagecache = project_dir .. "/" .. (cfg.packagecachepath or ".alpackages")
+  local cmd = {
+    ALC,
+    "/project:" .. project_dir,
+    "/packagecachepath:" .. packagecache,
+  }
+  for _, token in ipairs(require("al.cops").get_active(project_dir)) do
+    local dll = ANALYZER_DLLS[token]
+    if dll and vim.fn.filereadable(dll) == 1 then
+      table.insert(cmd, "/analyzer:" .. dll)
+    end
+  end
+  if cfg.ruleset_path and vim.fn.filereadable(cfg.ruleset_path) == 1 then
+    table.insert(cmd, "/ruleset:" .. cfg.ruleset_path)
+  end
+
+  local output = {}
+  vim.fn.jobstart(cmd, {
+    on_stdout = function(_, data)
+      vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
+    end,
+    on_stderr = function(_, data)
+      vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
+    end,
+    on_exit = function(_, code)
+      local qf = parse_output(output)
+      local errors = vim.tbl_filter(function(e) return e.type == "E" end, qf)
+      local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
+      vim.schedule(function()
+        push_diagnostics(qf)
+        vim.notify(string.format("AL: analyze complete — %d error(s), %d warning(s)",
+          #errors, #warnings), vim.log.levels.INFO)
+      end)
     end,
   })
 end
