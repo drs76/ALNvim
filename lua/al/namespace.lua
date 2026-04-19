@@ -112,6 +112,14 @@ local function apply_organize_imports(bufnr, on_done)
   end)
 end
 
+-- Apply source.organizeImports to the current buffer (no picker).
+function M.add_usings(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  apply_organize_imports(bufnr, function()
+    vim.notify("AL: using statements applied", vim.log.levels.INFO)
+  end)
+end
+
 -- Sequentially apply source.organizeImports to each file in the list.
 -- Shows progress notifications. Calls on_done() when all files are processed.
 function M.fix_usings(files, on_done)
@@ -136,13 +144,23 @@ function M.fix_usings(files, on_done)
     local buf = vim.fn.bufadd(path)
     vim.fn.bufload(buf)
 
-    -- Give the LSP 600 ms to process textDocument/didOpen before requesting
-    -- code actions. The server needs to analyse the file first.
+    -- bufadd/bufload does not fire FileType, so LSP never attaches. Attach
+    -- the existing client manually so buf_request can reach it.
+    local al_clients = vim.lsp.get_clients({ name = "al_language_server" })
+    if #al_clients > 0 then
+      local already = vim.lsp.get_clients({ bufnr = buf, name = "al_language_server" })
+      if #already == 0 then
+        vim.lsp.buf_attach_client(buf, al_clients[1].id)
+      end
+    end
+
+    -- Give the LSP time to process textDocument/didOpen and run diagnostics
+    -- before requesting code actions.
     vim.defer_fn(function()
       apply_organize_imports(buf, function()
         process(idx + 1)
       end)
-    end, 600)
+    end, 800)
   end
 
   process(1)

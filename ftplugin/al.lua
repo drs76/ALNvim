@@ -175,6 +175,8 @@ end, vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fi
 vim.keymap.set("n", "<leader>acn", function()
   vim.lsp.buf.code_action({ context = { only = { "source.organizeImports" } } })
 end, vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
+vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements (silent, no picker)" }))
 vim.keymap.set("n", "<leader>acr", function()
   vim.lsp.buf.code_action({ context = { only = { "refactor" } } })
 end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))

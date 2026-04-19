@@ -823,3 +823,9 @@ end, {
   complete = "dir",
   desc     = "AL: Add namespace declaration to all source files and fix using statements",
 })
+
+vim.api.nvim_create_user_command("ALAddUsings", function()
+  require("al.namespace").add_usings()
+end, {
+  desc = "AL: Add missing using statements to current buffer via LSP",
+})
