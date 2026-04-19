@@ -187,29 +187,13 @@ After `:ALDebugSetup`, use standard nvim-dap keys (install nvim-dap separately):
 
 ---
 
-## AI Assistant (CodeCompanion + Claude)
+## AI Assistant (Claude Code)
 
 | Key | Mode | Action |
 |---|---|---|
-| `<Space>cc` | n / v | Toggle chat window |
-| `<Space>ci` | n / v | Inline assist (edits current buffer) |
-| `<Space>cx` | v | Add visual selection to chat |
-| `<Space>cm` | n | Action menu (prompts, explain, test…) |
+| `<Space>cc` | n | Toggle Claude Code terminal (40% split) |
 
-**Inside the chat buffer:**
-
-| Key | Action |
-|---|---|
-| `<CR>` | Send message |
-| `q` | Close chat |
-| `gg` | Jump to top of conversation |
-| `gc` | Clear chat |
-
-**Useful prompts for AL:**
-- *"Write a codeunit that posts a journal line for this table"*
-- *"Add an EventSubscriber for OnBeforeModifyEvent on Customer"*
-- *"Explain what this trigger does"* (with code selected, `<Space>cx` first)
-- *"Write a unit test codeunit for this procedure"*
+Chat persists when hidden — toggle reopens same session.
 
 ---
 
