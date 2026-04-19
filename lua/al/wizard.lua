@@ -427,7 +427,7 @@ local function find_obj_decl(bufnr)
     -- With ID: keyword <num> "Name"  or  keyword <num> Name
     local name = line:match('^%s*%a+%s+%d+%s+"([^"]+)"')
               or line:match("^%s*%a+%s+%d+%s+'([^']+)'")
-              or line:match('^%s*%a+%s+%d+%s+([^%s{"\'][^{]*)')
+              or line:match('^%s*%a+%s+%d+%s+([^%s{"\']+)')
     -- Interface (no ID): interface "Name"
     if not name then
       name = line:match('^%s*interface%s+"([^"]+)"')

@@ -40,6 +40,11 @@ M.defaults = {
   -- cleans up the newly added using lines. Set to false to manage manually via <leader>acn.
   organize_imports_on_save = true,
 
+  -- Diagnostic rule IDs to suppress in both alc output and LSP publishDiagnostics.
+  -- AA0215 (object name must be suffixed) is suppressed by default because the
+  -- file-organiser adds the suffix during save, causing a transient false positive.
+  suppressed_diagnostics = { "AA0215" },
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

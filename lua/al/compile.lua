@@ -257,8 +257,13 @@ function M.compile(project_dir, extra_args, on_success)
 
   -- Ruleset: suppress/adjust specific diagnostic severities.
   -- Set via require("al").setup({ ruleset_path = "/path/to/codeanalyzer.json" })
-  if cfg.ruleset_path and vim.fn.filereadable(cfg.ruleset_path) == 1 then
-    table.insert(cmd, "/ruleset:" .. cfg.ruleset_path)
+  local ruleset_path = cfg.ruleset_path and vim.fn.expand(cfg.ruleset_path) or nil
+  if ruleset_path and vim.fn.filereadable(ruleset_path) == 1 then
+    table.insert(cmd, "/ruleset:" .. ruleset_path)
+  end
+
+  for _, id in ipairs(cfg.suppressed_diagnostics or {}) do
+    table.insert(cmd, "/nowarn:" .. id)
   end
 
   for _, arg in ipairs(extra_args or cfg.alc_extra_args or {}) do
@@ -313,8 +318,13 @@ function M.analyze_diagnostics(project_dir)
       table.insert(cmd, "/analyzer:" .. dll)
     end
   end
-  if cfg.ruleset_path and vim.fn.filereadable(cfg.ruleset_path) == 1 then
-    table.insert(cmd, "/ruleset:" .. cfg.ruleset_path)
+  local ruleset_path = cfg.ruleset_path and vim.fn.expand(cfg.ruleset_path) or nil
+  if ruleset_path and vim.fn.filereadable(ruleset_path) == 1 then
+    table.insert(cmd, "/ruleset:" .. ruleset_path)
+  end
+
+  for _, id in ipairs(cfg.suppressed_diagnostics or {}) do
+    table.insert(cmd, "/nowarn:" .. id)
   end
 
   local output = {}

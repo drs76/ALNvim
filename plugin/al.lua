@@ -39,7 +39,9 @@ end, { desc = "Install or update the dotnet AL MCP tool (Microsoft.Dynamics.Nav.
 -- ── ALUpdate — pull latest ALNvim from GitHub ─────────────────────────────────
 vim.api.nvim_create_user_command("ALUpdate", function()
   local dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h")
-  local out = vim.fn.system({ "git", "-C", dir, "pull", "--ff-only" })
+  vim.fn.system({ "git", "-C", dir, "fetch", "origin" })
+  vim.fn.system({ "git", "-C", dir, "checkout", "master" })
+  local out = vim.fn.system({ "git", "-C", dir, "merge", "--ff-only", "origin/master" })
   vim.notify("ALNvim :ALUpdate\n" .. vim.trim(out),
     vim.v.shell_error == 0 and vim.log.levels.INFO or vim.log.levels.ERROR)
 end, { desc = "Pull latest ALNvim from GitHub" })
@@ -122,6 +124,14 @@ vim.api.nvim_create_autocmd("FileType", {
             if bufnr == -1 or not vim.api.nvim_buf_is_loaded(bufnr) then
               return
             end
+          end
+          local suppressed = require("al").config.suppressed_diagnostics or {}
+          if result and result.diagnostics and #suppressed > 0 then
+            local suppress_set = {}
+            for _, id in ipairs(suppressed) do suppress_set[id] = true end
+            result.diagnostics = vim.tbl_filter(function(d)
+              return not suppress_set[d.code]
+            end, result.diagnostics)
           end
           vim.lsp.diagnostic.on_publish_diagnostics(err, result, ctx, config)
         end,
@@ -834,4 +844,10 @@ vim.api.nvim_create_user_command("ALAddUsings", function()
   require("al.namespace").add_usings()
 end, {
   desc = "AL: Add missing using statements to current buffer via LSP",
+})
+
+vim.api.nvim_create_user_command("ALExtractLabel", function()
+  require("al.refactor").extract_label()
+end, {
+  desc = "AL: Extract single-quoted string under cursor to a Label variable",
 })

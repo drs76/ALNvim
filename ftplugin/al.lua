@@ -191,6 +191,8 @@ vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
 vim.keymap.set("n", "<leader>acr", function()
   vim.lsp.buf.code_action({ context = { only = { "refactor" } } })
 end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
+vim.keymap.set("n", "<leader>acl", "<cmd>ALExtractLabel<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Extract string to Label variable" }))
 vim.keymap.set("n", "<leader>aN", "<cmd>ALAddNamespace<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Add namespace to all source files" }))
 vim.keymap.set("n", "<leader>aD", "<cmd>ALDiff<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Git diff explorer — changed files" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))
