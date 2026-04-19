@@ -434,7 +434,11 @@ local function find_obj_decl(bufnr)
           or line:match("^%s*interface%s+'([^']+)'")
           or line:match('^%s*interface%s+([^%s{"\']+)')
     end
-    if name then return i - 1, line, vim.trim(name) end
+    if name then
+      -- Strip "extends ..." subtype clause (reserved keyword; never part of name).
+      name = vim.trim(name:match("^(.-)%s+[Ee]xtends%s") or name:match("^(.-)%s+[Ee]xtends$") or name)
+      return i - 1, line, name
+    end
   end
 end
 
