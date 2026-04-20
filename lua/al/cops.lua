@@ -241,14 +241,19 @@ local function browser_choices()
 end
 
 -- Read the configured browser for a project ("" = system default).
+-- Priority: per-project alnvim.json → global setup() browser option.
 function M.get_browser(root)
-  if not root then return "" end
-  local path = config_path(root)
-  local ok, lines = pcall(vim.fn.readfile, path)
-  if not ok or not lines or #lines == 0 then return "" end
-  local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
-  if not ok2 or type(data) ~= "table" then return "" end
-  return data.browser or ""
+  if root then
+    local path = config_path(root)
+    local ok, lines = pcall(vim.fn.readfile, path)
+    if ok and lines and #lines > 0 then
+      local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+      if ok2 and type(data) == "table" and data.browser and data.browser ~= "" then
+        return data.browser
+      end
+    end
+  end
+  return require("al").config.browser or ""
 end
 
 -- Persist the browser choice for a project.

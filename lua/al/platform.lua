@@ -39,10 +39,11 @@ end
 --                Windows: executable name (e.g. "chrome", "msedge", "firefox").
 function M.open_url(url, browser)
   -- WSL: Linux browser names (e.g. "brave-browser") won't be installed.
-  -- Use BROWSER env var (Windows exe path) or explorer.exe fallback.
+  -- Walk candidates in order, use first executable one.
   if M.is_wsl then
+    local env_browser = os.getenv("BROWSER")
     local wb = (browser and browser ~= "" and vim.fn.executable(browser) == 1 and browser)
-            or os.getenv("BROWSER")
+            or (env_browser and vim.fn.executable(env_browser) == 1 and env_browser)
             or "/mnt/c/Windows/explorer.exe"
     vim.fn.jobstart({ wb, url }, { detach = true })
     return

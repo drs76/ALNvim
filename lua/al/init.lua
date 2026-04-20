@@ -45,6 +45,12 @@ M.defaults = {
   -- file-organiser adds the suffix during save, causing a transient false positive.
   suppressed_diagnostics = { "AA0215" },
 
+  -- Global browser override — used when no per-project browser is set in alnvim.json.
+  -- Set to an executable path for your machine, e.g. on WSL:
+  --   browser = "/mnt/c/Program Files/Mozilla Firefox/firefox.exe"
+  -- Leave nil to use the system default (xdg-open / open).
+  browser = nil,
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }
