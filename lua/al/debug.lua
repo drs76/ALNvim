@@ -225,13 +225,24 @@ local function ensure_xdg_stub()
   local dir  = vim.fn.stdpath("cache") .. "/alnvim"
   local stub = dir .. "/xdg-open"
   vim.fn.mkdir(dir, "p")
-  if vim.fn.filereadable(stub) == 0 then
-    local f = io.open(stub, "w")
-    if f then
-      f:write("#!/bin/sh\n# no-op stub — ALNvim handles browser open from Lua\nexit 0\n")
-      f:close()
-      vim.uv.fs_chmod(stub, 493)   -- 0755 decimal
+  local content
+  if vim.fn.has("wsl") == 1 then
+    -- WSL: open URLs in the Windows browser so MSAL's OAuth callback
+    -- (localhost:37405) can complete. WSL2 localhost forwarding makes the
+    -- redirect reachable from the Windows browser back into WSL.
+    if vim.fn.executable("wslview") == 1 then
+      content = "#!/bin/sh\nexec wslview \"$@\"\n"
+    else
+      content = "#!/bin/sh\nexec /mnt/c/Windows/System32/cmd.exe /c start \"\" \"$1\"\n"
     end
+  else
+    content = "#!/bin/sh\n# no-op stub — ALNvim handles browser open from Lua\nexit 0\n"
+  end
+  local f = io.open(stub, "w")
+  if f then
+    f:write(content)
+    f:close()
+    vim.uv.fs_chmod(stub, 493)   -- 0755 decimal
   end
   _xdg_stub_dir = dir
   return dir
