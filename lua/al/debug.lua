@@ -233,7 +233,7 @@ local function ensure_xdg_stub()
     if vim.fn.executable("wslview") == 1 then
       content = "#!/bin/sh\nexec wslview \"$@\"\n"
     else
-      content = "#!/bin/sh\nexec /mnt/c/Windows/System32/cmd.exe /c start \"\" \"$1\"\n"
+      content = "#!/bin/sh\nexec /mnt/c/Windows/explorer.exe \"$1\"\n"
     end
   else
     content = "#!/bin/sh\n# no-op stub — ALNvim handles browser open from Lua\nexit 0\n"
