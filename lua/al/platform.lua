@@ -6,6 +6,7 @@ local M = {}
 
 M.is_windows = vim.fn.has("win32") == 1
 M.is_mac     = vim.fn.has("mac")   == 1
+M.is_wsl     = vim.fn.has("wsl")   == 1
 
 -- Subdirectory under <ext>/bin/ for the current OS.
 function M.bin_subdir()
@@ -37,6 +38,15 @@ end
 --                macOS app name (e.g. "Google Chrome") is passed to `open -a`.
 --                Windows: executable name (e.g. "chrome", "msedge", "firefox").
 function M.open_url(url, browser)
+  -- WSL: Linux browser names (e.g. "brave-browser") won't be installed.
+  -- Use BROWSER env var (Windows exe path) or explorer.exe fallback.
+  if M.is_wsl then
+    local wb = (browser and browser ~= "" and vim.fn.executable(browser) == 1 and browser)
+            or os.getenv("BROWSER")
+            or "/mnt/c/Windows/explorer.exe"
+    vim.fn.jobstart({ wb, url }, { detach = true })
+    return
+  end
   if browser and browser ~= "" then
     if M.is_windows then
       vim.fn.jobstart({ "cmd", "/c", "start", "", browser, url }, { detach = true })
