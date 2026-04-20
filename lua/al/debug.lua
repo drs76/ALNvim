@@ -230,11 +230,10 @@ local function ensure_xdg_stub()
     -- WSL: open URLs in the Windows browser so MSAL's OAuth callback
     -- (localhost:37405) can complete. WSL2 localhost forwarding makes the
     -- redirect reachable from the Windows browser back into WSL.
-    if vim.fn.executable("wslview") == 1 then
-      content = "#!/bin/sh\nexec wslview \"$@\"\n"
-    else
-      content = "#!/bin/sh\nexec /mnt/c/Windows/explorer.exe \"$1\"\n"
-    end
+    local browser = (vim.fn.executable("wslview") == 1 and "wslview")
+                 or os.getenv("BROWSER")
+                 or "/mnt/c/Windows/explorer.exe"
+    content = "#!/bin/sh\nexec \"" .. browser .. "\" \"$@\"\n"
   else
     content = "#!/bin/sh\n# no-op stub — ALNvim handles browser open from Lua\nexit 0\n"
   end
