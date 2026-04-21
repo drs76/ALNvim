@@ -17,6 +17,8 @@ local M    = {}
 -- Set when launch/setup_adapter is called; used by global DAP listeners to
 -- open URLs in the project-configured browser rather than the system default.
 local _current_root = nil
+-- Buffer that was active when ALLaunch was invoked — restored by M.close_debug().
+local _pre_debug_buf = nil
 
 -- The DAP adapter (16.x+) deserialises breakOnError / breakOnRecordWrite as
 -- strict booleans even though the VSCode schema accepts string enum values.
@@ -695,6 +697,7 @@ function M.launch(root)
     return
   end
 
+  _pre_debug_buf = vim.api.nvim_get_current_buf()
   root = root or lsp.get_root()
   _current_root = root or _current_root
   if not root then
@@ -827,5 +830,28 @@ function M.launch(root)
 end
 
 M.show_output = show_output_win
+
+function M.close_debug()
+  local ok, dap = pcall(require, "dap")
+  if ok and dap.session() then
+    pcall(dap.terminate)
+  end
+  if _out_win and vim.api.nvim_win_is_valid(_out_win) then
+    pcall(vim.api.nvim_win_close, _out_win, true)
+    _out_win = nil
+  end
+  pcall(function() require("dapui").close() end)
+  vim.schedule(function()
+    if _pre_debug_buf and vim.api.nvim_buf_is_valid(_pre_debug_buf) then
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == _pre_debug_buf then
+          vim.api.nvim_set_current_win(win)
+          return
+        end
+      end
+      pcall(vim.api.nvim_set_current_buf, _pre_debug_buf)
+    end
+  end)
+end
 
 return M

@@ -984,4 +984,17 @@ function M.new_object(root)
   end)
 end
 
+function M.generate_permissionset(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL Wizard: no project root found", vim.log.levels.ERROR)
+    return
+  end
+  local info
+  for _, t in ipairs(TYPES) do
+    if t.key == "permissionset" then info = t; break end
+  end
+  run_wizard(root, info)
+end
+
 return M

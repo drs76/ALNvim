@@ -194,10 +194,12 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 | `<leader>am/aM` | McpSetup / McpStatus |
 | `<leader>ah/aH/aG` | Help / HelpTopics / Guidelines |
 | `<leader>an/aw/aW` | NewObject / ReportLayout / OpenLayout |
+| `<leader>aR` | GeneratePermissionSet — scan all project objects and create a `.PermissionSet.al` file |
 | `<leader>aN` | AddNamespace — add namespace to all source files |
 | `<leader>aA/aD/ae/af/ag` | Analyze / Diff / Explorer / ExplorerProcs / Search |
 | `<leader>aca/acf/acF/acn/acr` | Code actions (all/fix/fixAll/organise/refactor) |
 | `<F5>`/`<leader>adl/ads/adf/add` | Launch / SnapshotStart / SnapshotFinish / DebugSetup |
+| `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
 | `<C-Space>`/`<Nul>` (insert) | Object ID completion (`<C-x><C-u>`) |
 
@@ -205,7 +207,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALInfo`, `:ALUpdate`
+`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 

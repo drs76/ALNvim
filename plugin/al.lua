@@ -586,6 +586,10 @@ vim.api.nvim_create_user_command("ALDapOutput", function()
   require("al.debug").show_output()
 end, { desc = "Show (or reopen) the AL adapter output floating window" })
 
+vim.api.nvim_create_user_command("ALDapClose", function()
+  require("al.debug").close_debug()
+end, { desc = "Terminate DAP session and close all debug windows" })
+
 vim.api.nvim_create_user_command("ALOpenAppJson", function()
   require("al.compile").open_app_json()
 end, { desc = "Open the project's app.json" })
@@ -624,6 +628,14 @@ end, {
   nargs    = "?",
   complete = "dir",
   desc     = "AL Object Wizard: create a new AL object file",
+})
+
+vim.api.nvim_create_user_command("ALGeneratePermissionSet", function(opts)
+  require("al.wizard").generate_permissionset(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs    = "?",
+  complete = "dir",
+  desc     = "Generate a PermissionSet file covering all project objects",
 })
 
 vim.api.nvim_create_user_command("ALPreviewPage", function()
