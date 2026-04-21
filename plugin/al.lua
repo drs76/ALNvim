@@ -863,3 +863,9 @@ vim.api.nvim_create_user_command("ALExtractLabel", function()
 end, {
   desc = "AL: Extract single-quoted string under cursor to a Label variable",
 })
+
+vim.api.nvim_create_user_command("ALExtractProcedure", function()
+  require("al.refactor").extract_to_procedure()
+end, {
+  desc = "AL: Extract visual selection into a new local procedure",
+})

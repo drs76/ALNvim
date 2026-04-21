@@ -125,7 +125,164 @@ local function suggest_name(text)
   return (base ~= '' and base or 'MyLabel') .. 'Lbl'
 end
 
+-- ── Extract-to-procedure helpers ─────────────────────────────────────────────
+
+-- Parse the local var block (lines var_lnum+1 .. beg_lnum-1, 1-based) into a
+-- map keyed on lower-case name.  Skips Label/TextConst (can't be parameters).
+local function parse_var_map(lines, var_lnum, beg_lnum)
+  local vars = {}
+  if not var_lnum then return vars end
+  for i = var_lnum + 1, beg_lnum - 1 do
+    local line = (lines[i] or ""):gsub("\r$", "")
+    -- Greedy (.+) to handle Label 'text; with semicolons', Locked = true;
+    local name, type_str = line:match("^%s*([%a_][%w_]*)%s*:%s*(.+)%s*;%s*$")
+    if name and type_str then
+      type_str = vim.trim(type_str)
+      local tl = type_str:lower()
+      -- Labels and TextConst are compile-time constants, not passable as params
+      if not (tl:match("^label[%s']") or tl:match("^textconst%s")) then
+        vars[name:lower()] = { name = name, type_str = type_str }
+      end
+    end
+  end
+  return vars
+end
+
+-- True when a variable should become a 'var' (by-reference) parameter.
+-- Records, arrays, lists, dictionaries always pass by reference (AL convention).
+-- Any type that is assigned inside the selection also needs var.
+local function needs_var_param(var_info, sel_lines)
+  local tl = var_info.type_str:lower()
+  if tl:match("^record%s") or tl:match("^temporary%s") then return true end
+  if tl:match("^list%s")   or tl:match("^dictionary%s")  then return true end
+  if tl:match("^array%s*%[")                              then return true end
+  local nl = vim.pesc(var_info.name:lower())
+  for _, line in ipairs(sel_lines) do
+    if line:lower():match(nl .. "%s*:=") then return true end
+  end
+  return false
+end
+
+-- Collect variables from var_map that are referenced in sel_lines (in order).
+local function collect_params(sel_lines, var_map)
+  local seen, params = {}, {}
+  for _, line in ipairs(sel_lines) do
+    line = line:gsub("\r$", "")
+    if vim.trim(line):sub(1, 2) ~= "//" then  -- skip comment lines
+      for word in line:gmatch("[%a_][%w_]*") do
+        local lower = word:lower()
+        if var_map[lower] and not seen[lower] then
+          seen[lower] = true
+          local v = var_map[lower]
+          table.insert(params, {
+            name     = v.name,
+            type_str = v.type_str,
+            is_var   = needs_var_param(v, sel_lines),
+          })
+        end
+      end
+    end
+  end
+  return params
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
+
+-- Extract the current visual selection into a new local procedure.
+-- Uses '< / '> marks so call via <cmd> from a { "n", "v" } keymap.
+function M.extract_to_procedure()
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  local sel_start = vim.api.nvim_buf_get_mark(bufnr, "<")[1]  -- 1-based
+  local sel_end   = vim.api.nvim_buf_get_mark(bufnr, ">")[1]  -- 1-based
+  if sel_start == 0 then
+    vim.notify("AL: select code lines first (visual mode), then run ALExtractProcedure",
+      vim.log.levels.WARN)
+    return
+  end
+  if sel_start > sel_end then sel_start, sel_end = sel_end, sel_start end
+
+  local lines     = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local sel_lines = vim.list_slice(lines, sel_start, sel_end)  -- 1-indexed, inclusive
+
+  local bounds = find_proc_bounds(lines, sel_start)
+  if not bounds then
+    vim.notify("AL: selection is not inside a procedure or trigger", vim.log.levels.WARN)
+    return
+  end
+  if sel_start <= bounds.beg or sel_end >= bounds.fin then
+    vim.notify("AL: selection must be inside the procedure body (between begin and end)",
+      vim.log.levels.WARN)
+    return
+  end
+
+  local var_map   = parse_var_map(lines, bounds.var, bounds.beg)
+  local params    = collect_params(sel_lines, var_map)
+  local proc_indent = lines[bounds.hdr]:match("^(%s*)") or "    "
+  local body_indent = proc_indent .. "    "
+
+  -- Minimum indentation across non-blank selection lines (for re-indenting body)
+  local min_ind = math.huge
+  for _, ln in ipairs(sel_lines) do
+    if vim.trim(ln) ~= "" then
+      local sp = #(ln:match("^(%s*)"))
+      if sp < min_ind then min_ind = sp end
+    end
+  end
+  if min_ind == math.huge then min_ind = 0 end
+
+  vim.ui.input({ prompt = "Procedure name: " }, function(proc_name)
+    if not proc_name or vim.trim(proc_name) == "" then return end
+    proc_name = vim.trim(proc_name)
+
+    vim.schedule(function()
+      -- Re-read lines in case the buffer changed while the input was open
+      local buf = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local b   = find_proc_bounds(buf, sel_start)
+      if not b then
+        vim.notify("AL: could not re-locate procedure bounds", vim.log.levels.ERROR)
+        return
+      end
+
+      -- Call line: same indentation as the first selected line
+      local call_indent = buf[sel_start]:match("^(%s*)") or body_indent
+      local arg_list    = table.concat(
+        vim.tbl_map(function(p) return p.name end, params), ", ")
+      local call_line   = call_indent .. proc_name .. "(" .. arg_list .. ");"
+
+      -- Procedure signature
+      local sig_parts = {}
+      for _, p in ipairs(params) do
+        sig_parts[#sig_parts + 1] = (p.is_var and "var " or "") .. p.name .. ": " .. p.type_str
+      end
+      local sig = proc_indent .. "local procedure " .. proc_name
+        .. "(" .. table.concat(sig_parts, "; ") .. ")"
+
+      -- Body lines: strip min_ind, add body_indent (preserves relative indentation)
+      local body = {}
+      for _, ln in ipairs(sel_lines) do
+        local stripped = (#ln >= min_ind) and ln:sub(min_ind + 1) or vim.trim(ln)
+        body[#body + 1] = body_indent .. stripped
+      end
+
+      local new_proc = { "", sig, proc_indent .. "begin" }
+      vim.list_extend(new_proc, body)
+      new_proc[#new_proc + 1] = proc_indent .. "end;"
+
+      -- Insert AFTER b.fin first (bottom-up → sel line numbers stay valid)
+      vim.api.nvim_buf_set_lines(bufnr, b.fin, b.fin, false, new_proc)
+      -- Replace selection with call
+      vim.api.nvim_buf_set_lines(bufnr, sel_start - 1, sel_end, false, { call_line })
+
+      vim.notify(
+        string.format("AL: extracted %d line%s → %s (%d param%s)",
+          sel_end - sel_start + 1,
+          sel_end - sel_start + 1 == 1 and "" or "s",
+          proc_name, #params, #params == 1 and "" or "s"),
+        vim.log.levels.INFO)
+    end)
+  end)
+end
 
 function M.extract_label()
   local bufnr   = vim.api.nvim_get_current_buf()

@@ -189,9 +189,11 @@ vim.keymap.set("n", "<leader>acn", function()
 end, vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
 vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements (silent, no picker)" }))
-vim.keymap.set("n", "<leader>acr", function()
+vim.keymap.set({ "n", "v" }, "<leader>acr", function()
   vim.lsp.buf.code_action({ context = { only = { "refactor" } } })
 end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
+vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
 vim.keymap.set("n", "<leader>acl", "<cmd>ALExtractLabel<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract string to Label variable" }))
 vim.keymap.set("n", "<leader>aN", "<cmd>ALAddNamespace<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Add namespace to all source files" }))
