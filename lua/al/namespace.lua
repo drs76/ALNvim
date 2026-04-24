@@ -87,29 +87,31 @@ local function apply_organize_imports(bufnr, on_done)
     return
   end
 
+  local client = clients[1]
+  local enc    = client.offset_encoding or "utf-16"
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    range = {
-      start = { line = 0, character = 0 },
-      ["end"] = { line = 0, character = 0 },
-    },
-    context = { only = { "source.organizeImports" }, diagnostics = {} },
+    range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
+    context      = { only = { "source.organizeImports" }, diagnostics = {} },
   }
 
-  vim.lsp.buf_request(bufnr, "textDocument/codeAction", params, function(err, result)
-    if not err and result and #result > 0 then
-      local action = result[1]
-      if action.edit then
-        vim.lsp.util.apply_workspace_edit(action.edit, "utf-8")
-      elseif action.command then
-        local cmd = type(action.command) == "table" and action.command or action
-        vim.lsp.buf.execute_command(cmd)
+  client:request("textDocument/codeAction", params, function(err, result)
+    if not err and result then
+      for _, action in ipairs(result) do
+        if not action.disabled then
+          if action.edit then
+            vim.lsp.util.apply_workspace_edit(action.edit, enc)
+            pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
+          elseif action.command then
+            local cmd = type(action.command) == "table" and action.command or action
+            client:request("workspace/executeCommand", cmd, nil, bufnr)
+            pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
+          end
+        end
       end
-      -- Save silently so the using statements are persisted.
-      pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
     end
     if on_done then on_done() end
-  end)
+  end, bufnr)
 end
 
 -- Apply source.organizeImports to the current buffer (no picker).
@@ -145,12 +147,12 @@ function M.fix_usings(files, on_done)
     vim.fn.bufload(buf)
 
     -- bufadd/bufload does not fire FileType, so LSP never attaches. Attach
-    -- the existing client manually so buf_request can reach it.
+    -- the existing client manually so the request can reach it.
     local al_clients = vim.lsp.get_clients({ name = "al_language_server" })
     if #al_clients > 0 then
       local already = vim.lsp.get_clients({ bufnr = buf, name = "al_language_server" })
       if #already == 0 then
-        vim.lsp.buf_attach_client(buf, al_clients[1].id)
+        al_clients[1]:attach(buf)
       end
     end
 
