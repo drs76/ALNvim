@@ -36,6 +36,56 @@ function M.set_country_region(root, cr)
   write_alnvim_json(root, data)
 end
 
+-- Collect custom NuGet feed URLs for global symbol download.
+-- Priority: alnvim.json nugetFeeds → .vscode/settings.json al.nugetFeeds → vim.NIL
+-- Feeds must be public unauthenticated NuGet v3 URLs (AL extension constraint).
+local function read_nuget_feeds(root)
+  local feeds, seen = {}, {}
+  local function add(f)
+    if type(f) == "string" and f ~= "" and not seen[f] then
+      seen[f] = true; table.insert(feeds, f)
+    end
+  end
+  local al_feeds = read_alnvim_json(root).nugetFeeds
+  if type(al_feeds) == "table" then
+    for _, f in ipairs(al_feeds) do add(f) end
+  end
+  local ok, lines = pcall(vim.fn.readfile, root .. "/.vscode/settings.json")
+  if ok and lines then
+    local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+    if ok2 and type(data) == "table" and type(data["al.nugetFeeds"]) == "table" then
+      for _, f in ipairs(data["al.nugetFeeds"]) do add(f) end
+    end
+  end
+  return #feeds > 0 and feeds or vim.NIL
+end
+
+function M.set_nuget_feeds(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root found", vim.log.levels.ERROR)
+    return
+  end
+  local current = read_alnvim_json(root).nugetFeeds or {}
+  vim.ui.input({
+    prompt  = "NuGet feed URLs (comma-separated, blank to clear): ",
+    default = table.concat(current, ", "),
+  }, function(input)
+    if input == nil then return end
+    local data = read_alnvim_json(root)
+    if input:match("^%s*$") then
+      data.nugetFeeds = nil
+      vim.notify("AL: NuGet feeds cleared from alnvim.json", vim.log.levels.INFO)
+    else
+      data.nugetFeeds = vim.tbl_map(
+        function(s) return s:match("^%s*(.-)%s*$") end,
+        vim.split(input, ","))
+      vim.notify("AL: " .. #data.nugetFeeds .. " NuGet feed(s) saved to alnvim.json", vim.log.levels.INFO)
+    end
+    write_alnvim_json(root, data)
+  end)
+end
+
 -- ── Global source download via LSP ───────────────────────────────────────────
 
 local function get_lsp_client(root)
@@ -114,7 +164,7 @@ function M.download_global(root)
     client:request("al/downloadSymbolsFromGlobalSources", {
       symbolsCountryRegion = country_region,
       force                = true,
-      nugetFeeds           = vim.NIL,
+      nugetFeeds           = read_nuget_feeds(root),
       useOnlyCustomFeeds   = false,
       enforceMinorVersion  = false,
       browserInfo          = { browser = vim.NIL, incognito = false },

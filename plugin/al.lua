@@ -570,6 +570,14 @@ end, {
   desc  = "Download AL symbols from global sources (NuGet/AppSource) — no server required",
 })
 
+vim.api.nvim_create_user_command("ALSetNuGetFeeds", function(opts)
+  require("al.symbols").set_nuget_feeds(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs = "?",
+  complete = "dir",
+  desc = "AL: Set custom NuGet feed URLs for global symbol download (saved to alnvim.json)",
+})
+
 vim.api.nvim_create_user_command("ALSnapshotStart", function()
   require("al.debug").snapshot_start()
 end, { desc = "Start a BC snapshot debugging session" })

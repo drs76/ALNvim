@@ -19,6 +19,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALDownloadSymbols") end },
   { name = "Download Symbols (Global)",key = "",            desc = "Download symbols from NuGet/AppSource directly (no server needed)",
     run = function() vim.cmd("ALDownloadSymbolsGlobal") end },
+  { name = "Set NuGet Feeds",          key = "",            desc = "Configure custom public NuGet feed URLs for global symbol download",
+    run = function() vim.cmd("ALSetNuGetFeeds") end },
 
   -- Debug ----------------------------------------------------------------
   { name = "Launch Debug",             key = "<F5>",        desc = "Compile, publish and attach BC debugger via DAP",

@@ -224,7 +224,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -244,12 +244,19 @@ All commands use `lsp.get_root()` — `compile.lua` has no separate `find_projec
 
 **Global download** — sends `al/downloadSymbolsFromGlobalSources` to the running LSP client. The server handles NuGet/AppSource auth internally. Requires `symbolsCountryRegion` (ISO 3166-1 alpha-2 or `w1`). Prompted on first use; saved to `alnvim.json`. Requires an AL LSP client to be active (open an `.al` file first).
 
+AppSource-registered ISV packages (Continia, etc.) are resolved automatically via built-in feeds — no custom feed config needed for those. Custom `nugetFeeds` are for additional **public, unauthenticated** NuGet v3 feeds only; authenticated/private feeds are not supported by this LSP method.
+
+**`nugetFeeds` resolution** (in `symbols.lua`):
+1. `alnvim.json` `nugetFeeds` array — set via `:ALSetNuGetFeeds`
+2. `.vscode/settings.json` `al.nugetFeeds` array — VSCode-compatible fallback (file can exist without VSCode)
+3. `vim.NIL` if neither — server uses built-in AppSource/NuGet defaults
+
 **Payload:**
 ```lua
 {
   symbolsCountryRegion = "w1",  -- or "us", "gb", "de", etc.
   force                = true,
-  nugetFeeds           = vim.NIL,
+  nugetFeeds           = read_nuget_feeds(root),  -- array or vim.NIL
   useOnlyCustomFeeds   = false,
   enforceMinorVersion  = false,
   browserInfo          = { browser = vim.NIL, incognito = false },
