@@ -196,6 +196,8 @@ vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
 vim.keymap.set("n", "<leader>acl", "<cmd>ALExtractLabel<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract string to Label variable" }))
+vim.keymap.set("x", "<leader>acs", "<cmd>ALCreateSnippet<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Create user snippet from selection" }))
 vim.keymap.set("n", "<leader>aN", "<cmd>ALAddNamespace<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Add namespace to all source files" }))
 vim.keymap.set("n", "<leader>aD", "<cmd>ALDiff<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Git diff explorer — changed files" }))
 vim.keymap.set("n", "<leader>ae", "<cmd>ALExplorer<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Explorer — browse objects" }))

@@ -19,20 +19,22 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `~/.claude/settings.json` for AL MCP server |
-| `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files |
+| `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
+| `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish) |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
-| `lua/al/snippets.lua` | Loads `snippets/al.json` into LuaSnip |
+| `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
 | `colors/bc_dark.lua` | BC Dark colorscheme |
 | `colors/bc_yellow.lua` | Alias for bc_dark with different `colors_name` — global default in `init.lua` |
-| `snippets/al.json` | VSCode-format snippets |
-| `package.json` | Tells LuaSnip's `from_vscode` loader about `snippets/al.json` |
+| `snippets/al.json` | VSCode-format snippets (committed, read-only) |
+| `snippets/al-user.json` | User-created snippets via `:ALCreateSnippet`; committed empty seed `{}` |
+| `package.json` | Tells LuaSnip's `from_vscode` loader about both snippet files |
 
 ## Windows compatibility
 
@@ -196,9 +198,10 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 | `<leader>an/aw/aW` | NewObject / ReportLayout / OpenLayout |
 | `<leader>aR` | GeneratePermissionSet — scan all project objects and create a `.PermissionSet.al` file |
 | `<leader>aN` | AddNamespace — add namespace to all source files |
-| `<leader>aA/aD/ae/af/ag` | Analyze / Diff / Explorer / ExplorerProcs / Search |
+| `<leader>aA/aD/ae/af/ag` | Analyze (silent alc pass) / Diff / Explorer / ExplorerProcs / Search |
 | `<leader>aca/acf/acF/acn/acr` | Code actions (all/fix/fixAll/organise/refactor) — `acr` works in visual mode |
 | `<leader>ace` | ExtractProcedure — extract visual selection into a new `local procedure` (auto-detects params from var block) |
+| `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
 | `<F5>`/`<leader>adl/ads/adf/add` | Launch / SnapshotStart / SnapshotFinish / DebugSetup |
 | `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
@@ -208,7 +211,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALInfo`, `:ALUpdate`
+`:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -220,7 +223,28 @@ All commands use `lsp.get_root()` — `compile.lua` has no separate `find_projec
 
 ## Symbol downloads
 
-Always include implicit Microsoft base packages even with empty `app.json` dependencies:
+`<leader>as` / `:ALDownloadSymbols` prompts for source:
+- **Server / Sandbox / Docker** — direct curl to BC dev endpoint; requires `launch.json`
+- **Global (NuGet / AppSource)** — LSP request `al/downloadSymbolsFromGlobalSources`; no server needed
+
+`:ALDownloadSymbolsGlobal` skips the picker and goes straight to global.
+
+**Global download** — sends `al/downloadSymbolsFromGlobalSources` to the running LSP client. The server handles NuGet/AppSource auth internally. Requires `symbolsCountryRegion` (ISO 3166-1 alpha-2 or `w1`). Prompted on first use; saved to `alnvim.json`. Requires an AL LSP client to be active (open an `.al` file first).
+
+**Payload:**
+```lua
+{
+  symbolsCountryRegion = "w1",  -- or "us", "gb", "de", etc.
+  force                = true,
+  nugetFeeds           = vim.NIL,
+  useOnlyCustomFeeds   = false,
+  enforceMinorVersion  = false,
+  browserInfo          = { browser = vim.NIL, incognito = false },
+  environmentInfo      = { env = vim.NIL },
+}
+```
+
+**Server download** — always includes implicit Microsoft base packages even with empty `app.json` dependencies:
 - `Microsoft/System` — version from `app.platform`
 - `Microsoft/System Application`, `Business Foundation`, `Base Application`, `Application` — version from `app.application`
 
@@ -305,9 +329,48 @@ Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com �
 
 12 types: Table (DataClassification), TableExtension (extends picker), Page (PageType + SourceTable), PageExtension (extends), Codeunit, Report (SourceTable), Query (SourceTable), XmlPort, Enum (Extensible), EnumExtension (extends), Interface (no ID), PermissionSet (auto-generates permissions).
 
+`M.generate_permissionset(root)` — skips the type picker, goes directly to ID → name → scan. Mirrors VS Code "AL: Generate Permission Set". Calls `run_wizard` with the permissionset entry directly.
+
 File naming (CRS): `src/<obj_type>/<id>.<SanitisedName>.<FileType>.al`. Interface: `src/interface/<Name>.Interface.al`. Auto-moves on `:w` (`wizard.M.organise_file` via `BufWritePost` in `ftplugin/al.lua`) — uses `vim.fn.rename` + `nvim_buf_set_name`, no reload needed.
 
 PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` — not available on Windows). Tables generate two entries (`tabledata RIMD` + `table X`); others get `X`.
+
+## AL Refactoring (`lua/al/refactor.lua`)
+
+**`find_proc_bounds(lines, cursor_lnum)`** — all line numbers 1-based. Returns `{ hdr, var, beg, fin }`. `var` is nil if no var block. Used by both `extract_label` and `extract_to_procedure`.
+
+**`M.extract_to_procedure()`** — extracts visual selection (`'<`/`'>` marks) into a new `local procedure`:
+1. Parses `var` block (lines `b.var+1`..`b.beg-1`) — greedy regex captures full type including `Record "Name" temporary`, `List of [...]`, etc. Skips `Label`/`TextConst` (compile-time constants, not passable as params).
+2. Finds referenced vars in selection → parameters. `var` prefix when: type is `Record`/`array`/`List`/`Dictionary`, OR assigned (`:=`) in selection.
+3. Re-indents body by stripping `min_indent` then adding `proc_indent .. "    "`.
+4. **Bottom-up edit order**: insert new procedure at `b.fin` first (below selection), then replace selection. This keeps selection line numbers valid — do not reverse.
+
+**V1 limits**: only detects local `var` block vars (not outer procedure params); identifiers inside string literals may false-match.
+
+**`M.extract_label()`** — cursor inside single-quoted string → prompts for Label var name → replaces all occurrences in proc body → inserts `var` declaration (local or global scope).
+
+## Snippets (`lua/al/snippets.lua`)
+
+`M.load()` / `M.reload()` — load both `snippets/al.json` (committed, read-only) and `snippets/al-user.json` (user-created) via `from_vscode.load({ paths = { PLUGIN_ROOT } })`. Both files listed in `package.json`; LuaSnip picks them up automatically.
+
+`M.create_from_selection()` — wizard to create a user snippet from visual selection:
+
+1. Read `'<`/`'>` marks → extract lines. Guard: `sel_start == 0` → WARN + return.
+2. Suggest prefix: first `%a[%w_]*` identifier in first non-blank line, lowercased, max 20 chars.
+3. Four chained `vim.ui.input` prompts (nested callbacks):
+   - **Name** — display name (default `"My AL Snippet"`)
+   - **Prefix/trigger** — expansion trigger (default = suggested prefix)
+   - **Description** — optional; omitted from JSON if blank
+   - **Tabstop words** — comma-separated; `<Esc>` cancels wizard
+4. Body transform (inside `vim.schedule`):
+   - Strip common leading indent (ignores blank lines for min-indent calc)
+   - Escape literal `$` → `\$` before inserting tabstop markers
+   - Apply tabstop substitutions: word N → `${N:word}` first occurrence, `$N` subsequent; uses `%f[%w_]` frontier pattern for word boundaries
+   - Append `"$0"` as final cursor position
+5. Read `al-user.json` → merge → `vim.fn.json_encode` → `writefile` (compact JSON; overwrites corrupt file silently).
+6. Call `M.reload()` → notify success.
+
+`snippets/al-user.json` — committed empty `{}` seed; never overwritten by plugin updates. Duplicate snippet name → silent overwrite.
 
 ## Report Layout Wizard (`lua/al/layout.lua`)
 
@@ -332,6 +395,8 @@ Without `/startDebugging`: hangs in LSP mode. Without `/projectRoot`: can't loca
 **`breakOnError`/`breakOnRecordWrite` must be booleans** (adapter 16.x+). `"All"` → `true`, `"None"`/`nil` → `false` via `to_break_bool()`.
 
 **`launchBrowser`**: Linux/macOS → force `false` (adapter xdg-open causes SIGABRT, open from Lua instead). Windows on-prem → must be `true` (adapter requires it; `false` → "internal error"). Windows cloud → `false` (URL comes via `al/openUri` event).
+
+**`M.close_debug()`** (`<leader>adX` / `:ALDapClose`): terminates DAP session, closes adapter output float (`_out_win`), calls `dapui.close()` silently (no-op if dap-ui absent), restores `_pre_debug_buf` (captured at `M.launch()` start). Scans windows first; falls back to `nvim_set_current_buf` if pre-debug buf is not currently displayed.
 
 **⚠️ On-prem ALLaunch on Windows — NOT WORKING**: fails with "Could not publish the package". Cloud works on both platforms. Root cause unknown. Use cloud sandboxes or VSCode for on-prem debugging.
 
