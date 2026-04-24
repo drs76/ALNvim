@@ -888,3 +888,11 @@ vim.api.nvim_create_user_command("ALCreateSnippet", function()
 end, {
   desc = "AL: Create user snippet from visual selection",
 })
+
+vim.api.nvim_create_user_command("ALActions", function()
+  require("al.actions").picker()
+end, {
+  desc = "AL: Actions picker — browse and run all AL commands",
+})
+
+vim.keymap.set("n", "<leader>aa", "<cmd>ALActions<CR>", { desc = "AL: Actions picker", silent = true })

@@ -25,13 +25,17 @@ end
 -- Two formats:
 --   /path/to/file.al(line,col): error|warning ALxxxx: message   (file diagnostic)
 --   error|warning ALxxxx: message                               (no file, e.g. AL1022 missing package)
-local function parse_output(lines)
+local function parse_output(lines, project_dir)
   local qf = {}
   for _, line in ipairs(lines) do
     -- File-scoped diagnostic (has filename + position)
     local file, lnum, col, kind, code, msg =
       line:match("^(.+)%((%d+),(%d+)%)%s*:%s*(%a+)%s+(%S+):%s+(.+)$")
     if file then
+      file = file:gsub("\\", "/")
+      if project_dir and not (file:match("^[A-Za-z]:/") or file:match("^/")) then
+        file = project_dir .. "/" .. file
+      end
       table.insert(qf, {
         filename = file,
         lnum     = tonumber(lnum),
@@ -61,7 +65,7 @@ local _analyze_job = nil
 
 -- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
 -- The window above (where the file is) is used for <CR> jump-to-error.
-local function open_build_win(title, project_dir)
+local function open_build_win(title, project_dir, build_cwd)
   -- Close any existing build window before opening a new one.
   if _build_win and vim.api.nvim_win_is_valid(_build_win) then
     vim.api.nvim_win_close(_build_win, true)
@@ -95,7 +99,7 @@ local function open_build_win(title, project_dir)
   -- Remember the current window — the user ran :ALCompile from here.
   -- Fall back if it's a sidebar or plugin window.
   local cur = vim.api.nvim_get_current_win()
-  local file_win = is_edit_win(cur) and cur or find_edit_win(nil)
+  local file_win = is_edit_win(cur) and cur or find_edit_win(nil)  -- mutable: updated if we create a split
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -124,17 +128,34 @@ local function open_build_win(title, project_dir)
     local line = vim.api.nvim_get_current_line()
     local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
     if not file then return end
-    -- Normalize path separators (Windows alc uses backslashes).
     file = file:gsub("\\", "/")
-    -- alc on Windows emits relative paths; resolve against the project root.
     if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
-      file = project_dir .. "/" .. file
+      file = (build_cwd or project_dir) .. "/" .. file
     end
     local target = (file_win and vim.api.nvim_win_is_valid(file_win) and is_edit_win(file_win) and file_win)
                    or find_edit_win(win)
-    if not target then return end
+    if not target then
+      -- Fall back to any non-floating, non-build window (e.g. alpha dashboard).
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then
+          target = w
+          file_win = w
+          break
+        end
+      end
+    end
+    if not target then
+      -- Last resort: split above build window.
+      vim.api.nvim_win_call(win, function() vim.cmd("aboveleft split") end)
+      target = vim.api.nvim_get_current_win()
+      file_win = target
+    end
     vim.api.nvim_win_call(target, function()
-      vim.cmd("edit " .. vim.fn.fnameescape(file))
+      local ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(file))
+      if not ok then
+        vim.notify("AL: cannot open " .. file .. "\n" .. tostring(err), vim.log.levels.ERROR)
+        return
+      end
       pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
       vim.cmd("normal! zz")
     end)
@@ -237,6 +258,7 @@ function M.compile(project_dir, extra_args, on_success)
     return
   end
 
+  local build_cwd = vim.fn.getcwd()
   ensure_executable(ALC)
   require("al.status").set_compiling()
 
@@ -274,7 +296,7 @@ function M.compile(project_dir, extra_args, on_success)
   end
 
   local proj_name = vim.fn.fnamemodify(project_dir, ":t")
-  local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir)
+  local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir, build_cwd)
   buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
 
   -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
@@ -295,7 +317,7 @@ function M.compile(project_dir, extra_args, on_success)
       vim.schedule(function() buf_append(buf, clean) end)
     end,
     on_exit = function(_, code)
-      finish(buf, parse_output(output), code, on_success)
+      finish(buf, parse_output(output, build_cwd), code, on_success)
     end,
   })
 end
@@ -306,6 +328,7 @@ function M.analyze_diagnostics(project_dir)
   project_dir = project_dir or lsp.get_root()
   if not project_dir then return end
 
+  local build_cwd = vim.fn.getcwd()
   -- Cancel any in-progress analyze job before starting a new one.
   if _analyze_job then
     pcall(vim.fn.jobstop, _analyze_job)
@@ -346,7 +369,7 @@ function M.analyze_diagnostics(project_dir)
     end,
     on_exit = function(_, code)
       _analyze_job = nil
-      local qf = parse_output(output)
+      local qf = parse_output(output, build_cwd)
       local errors = vim.tbl_filter(function(e) return e.type == "E" end, qf)
       local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
       vim.schedule(function()
