@@ -79,6 +79,7 @@ function M.add_namespace_to_project(root, ns)
 end
 
 -- Apply source.organizeImports to a single buffer (already loaded).
+-- Uses buf_request_sync (same pattern as BufWritePre) — proven to work.
 -- Calls on_done() when finished (success or failure).
 local function apply_organize_imports(bufnr, on_done)
   local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "al_language_server" })
@@ -87,31 +88,32 @@ local function apply_organize_imports(bufnr, on_done)
     return
   end
 
-  local client = clients[1]
-  local enc    = client.offset_encoding or "utf-16"
+  local enc    = clients[1].offset_encoding or "utf-16"
   local params = {
     textDocument = vim.lsp.util.make_text_document_params(bufnr),
     range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
     context      = { only = { "source.organizeImports" }, diagnostics = {} },
   }
 
-  client:request("textDocument/codeAction", params, function(err, result)
-    if not err and result then
-      for _, action in ipairs(result) do
+  local result = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", params, 5000)
+  if result then
+    for _, res in pairs(result) do
+      for _, action in ipairs(res.result or {}) do
         if not action.disabled then
           if action.edit then
             vim.lsp.util.apply_workspace_edit(action.edit, enc)
             pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
           elseif action.command then
             local cmd = type(action.command) == "table" and action.command or action
-            client:request("workspace/executeCommand", cmd, nil, bufnr)
+            clients[1]:request("workspace/executeCommand", cmd, nil, bufnr)
             pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
           end
         end
       end
     end
-    if on_done then on_done() end
-  end, bufnr)
+  end
+
+  if on_done then vim.schedule(on_done) end
 end
 
 -- Apply source.organizeImports to the current buffer (no picker).
