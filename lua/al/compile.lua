@@ -56,6 +56,9 @@ end
 -- Track the last build window so re-running compile closes the previous one first.
 local _build_win = nil
 
+-- Track the running silent-analyze job so repeated calls cancel the previous one.
+local _analyze_job = nil
+
 -- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
 -- The window above (where the file is) is used for <CR> jump-to-error.
 local function open_build_win(title, project_dir)
@@ -298,10 +301,16 @@ function M.compile(project_dir, extra_args, on_success)
 end
 
 -- Run alc silently (no build window, no quickfix) and push results to vim.diagnostic.
--- Used by ALAnalyze to populate file-tree badges after LSP re-analysis.
+-- Used by ALAnalyze to populate file-tree badges for all project files.
 function M.analyze_diagnostics(project_dir)
   project_dir = project_dir or lsp.get_root()
   if not project_dir then return end
+
+  -- Cancel any in-progress analyze job before starting a new one.
+  if _analyze_job then
+    pcall(vim.fn.jobstop, _analyze_job)
+    _analyze_job = nil
+  end
 
   ensure_executable(ALC)
 
@@ -328,7 +337,7 @@ function M.analyze_diagnostics(project_dir)
   end
 
   local output = {}
-  vim.fn.jobstart(cmd, {
+  _analyze_job = vim.fn.jobstart(cmd, {
     on_stdout = function(_, data)
       vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
     end,
@@ -336,6 +345,7 @@ function M.analyze_diagnostics(project_dir)
       vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
     end,
     on_exit = function(_, code)
+      _analyze_job = nil
       local qf = parse_output(output)
       local errors = vim.tbl_filter(function(e) return e.type == "E" end, qf)
       local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)

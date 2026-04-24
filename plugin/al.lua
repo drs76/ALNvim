@@ -559,7 +559,15 @@ vim.api.nvim_create_user_command("ALDownloadSymbols", function(opts)
 end, {
   nargs = "?",
   complete = "dir",
-  desc  = "Download AL symbol packages (.app) from Business Central",
+  desc  = "Download AL symbol packages — prompts for Server or Global (NuGet/AppSource)",
+})
+
+vim.api.nvim_create_user_command("ALDownloadSymbolsGlobal", function(opts)
+  require("al.symbols").download_global(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs = "?",
+  complete = "dir",
+  desc  = "Download AL symbols from global sources (NuGet/AppSource) — no server required",
 })
 
 vim.api.nvim_create_user_command("ALSnapshotStart", function()
@@ -821,20 +829,25 @@ vim.api.nvim_create_autocmd("VimEnter", {
 })
 
 vim.api.nvim_create_user_command("ALAnalyze", function()
-  local lsp_mod = require("al.lsp")
-  local cops    = require("al.cops")
-  local root    = lsp_mod.get_root()
+  local root = require("al.lsp").get_root()
   if not root then
     vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
     return
   end
-  -- Re-send al/setActiveWorkspace — triggers server re-index + publishDiagnostics for
-  -- open buffers. Then run alc silently to populate vim.diagnostic for all project files
-  -- (including closed ones) so file-tree plugins show error/warning badges.
+  require("al.compile").analyze_diagnostics(root)
+end, { desc = "AL: Run silent alc pass to refresh vim.diagnostic entries (file-tree badges)" })
+
+vim.api.nvim_create_user_command("ALReindex", function()
+  local root = require("al.lsp").get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+  local cops = require("al.cops")
   require("al.status").set_lsp_loading(0)
   cops.apply(root, cops.get_active(root))
-  require("al.compile").analyze_diagnostics(root)
-end, { desc = "AL: Force re-analysis of the current project (refreshes diagnostics)" })
+  vim.notify("AL: Re-indexing project…", vim.log.levels.INFO)
+end, { desc = "AL: Force server re-index via al/setActiveWorkspace (use after adding deps/changing cops)" })
 
 vim.api.nvim_create_user_command("ALDiff", function(opts)
   require("al.diff").explore(opts.args ~= "" and opts.args or nil)
@@ -868,4 +881,10 @@ vim.api.nvim_create_user_command("ALExtractProcedure", function()
   require("al.refactor").extract_to_procedure()
 end, {
   desc = "AL: Extract visual selection into a new local procedure",
+})
+
+vim.api.nvim_create_user_command("ALCreateSnippet", function()
+  require("al.snippets").create_from_selection()
+end, {
+  desc = "AL: Create user snippet from visual selection",
 })

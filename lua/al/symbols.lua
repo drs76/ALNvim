@@ -1,14 +1,158 @@
--- Download AL symbol packages (.app files) from the Business Central dev endpoint
--- into the project's .alpackages/ directory.
+-- Download AL symbol packages (.app files) from either:
+--   Server/Sandbox/Docker — direct curl calls to the BC dev endpoint
+--   Global (NuGet/AppSource) — LSP request al/downloadSymbolsFromGlobalSources
 --
--- Each entry in app.json "dependencies" maps to one GET request:
---   <base>/dev/packages?publisher=<p>&appName=<n>&versionText=<v>&tenant=<t>
---
--- All downloads run in parallel via vim.fn.jobstart.
+-- All server downloads run in parallel via vim.fn.jobstart.
 
 local M   = {}
 local conn = require("al.connection")
 local lsp  = require("al.lsp")
+
+-- ── Country-region helpers (stored in .vscode/alnvim.json) ───────────────────
+
+local function config_path(root)
+  return root .. "/.vscode/alnvim.json"
+end
+
+local function read_alnvim_json(root)
+  local ok, lines = pcall(vim.fn.readfile, config_path(root))
+  if not ok or not lines or #lines == 0 then return {} end
+  local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
+  return (ok2 and type(data) == "table") and data or {}
+end
+
+local function write_alnvim_json(root, data)
+  vim.fn.mkdir(root .. "/.vscode", "p")
+  vim.fn.writefile({ vim.fn.json_encode(data) }, config_path(root))
+end
+
+function M.get_country_region(root)
+  return read_alnvim_json(root).symbolsCountryRegion
+end
+
+function M.set_country_region(root, cr)
+  local data = read_alnvim_json(root)
+  data.symbolsCountryRegion = cr
+  write_alnvim_json(root, data)
+end
+
+-- ── Global source download via LSP ───────────────────────────────────────────
+
+local function get_lsp_client(root)
+  local clients = vim.lsp.get_clients({ name = "al_language_server" })
+  for _, c in ipairs(clients) do
+    if c.config.root_dir == root then return c end
+  end
+  return nil
+end
+
+function M.download_global(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+
+  local client = get_lsp_client(root)
+  if not client then
+    vim.notify(
+      "AL: No active LSP client — open an .al file in this project first",
+      vim.log.levels.ERROR)
+    return
+  end
+
+  local cr = M.get_country_region(root)
+
+  local function do_download(country_region)
+    -- Progress float
+    local lines = {
+      "  Global (NuGet / AppSource)  [" .. country_region .. "]  ",
+      "",
+      "  …  Downloading symbols…",
+    }
+    local width = 0
+    for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 4) end
+    width = math.max(width, 52)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "wipe"
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    local ui  = vim.api.nvim_list_uis()[1]
+    local win = vim.api.nvim_open_win(buf, false, {
+      relative  = "editor",
+      width     = width,
+      height    = #lines,
+      row       = math.floor((ui.height - #lines) / 2),
+      col       = math.floor((ui.width  - width)  / 2),
+      style     = "minimal",
+      border    = "rounded",
+      title     = " AL: Downloading Symbols ",
+      title_pos = "center",
+      noautocmd = true,
+    })
+    vim.wo[win].wrap = false
+    local ns = vim.api.nvim_create_namespace("al_symbols_global")
+    vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+
+    local function finish(ok, msg)
+      if not vim.api.nvim_buf_is_valid(buf) then return end
+      local icon = ok and "✓" or "✗"
+      local hl   = ok and "DiagnosticOk" or "DiagnosticError"
+      vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "  " .. icon .. "  " .. msg })
+      vim.api.nvim_buf_add_highlight(buf, ns, hl, 2, 0, -1)
+      if ok then
+        vim.defer_fn(function()
+          if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+        end, 3000)
+      else
+        vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+        vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+      end
+    end
+
+    local bufnr = vim.tbl_keys(client.attached_buffers or {})[1] or 0
+
+    client:request("al/downloadSymbolsFromGlobalSources", {
+      symbolsCountryRegion = country_region,
+      force                = true,
+      nugetFeeds           = vim.NIL,
+      useOnlyCustomFeeds   = false,
+      enforceMinorVersion  = false,
+      browserInfo          = { browser = vim.NIL, incognito = false },
+      environmentInfo      = { env = vim.NIL },
+    }, function(err, result)
+      if err then
+        finish(false, "Failed: " .. (type(err) == "table" and (err.message or vim.inspect(err)) or tostring(err)))
+      elseif result and result.success == false then
+        finish(false, "Download failed — check :messages")
+      else
+        finish(true, "All symbols downloaded successfully")
+      end
+    end, bufnr)
+  end
+
+  if cr and cr ~= "" then
+    do_download(cr)
+  else
+    -- Prompt for country/region code and optionally save it
+    vim.ui.input({
+      prompt  = "Country/region code (e.g. w1, us, gb, de): ",
+      default = "w1",
+    }, function(input)
+      if not input or input == "" then return end
+      local code = input:lower():match("^%s*(.-)%s*$")
+      vim.ui.select(
+        { "Yes — save for this project", "No — use once" },
+        { prompt = "Save '" .. code .. "' in alnvim.json?" },
+        function(choice)
+          if not choice then return end
+          if choice:sub(1, 1) == "Y" then
+            M.set_country_region(root, code)
+          end
+          do_download(code)
+        end)
+    end)
+  end
+end
 
 local function packages_url(base, dep, tenant)
   return string.format(
@@ -109,13 +253,7 @@ local function finish_win(buf, win, ns, failed_count)
   end
 end
 
-function M.download(root)
-  root = root or lsp.get_root()
-  if not root then
-    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
-    return
-  end
-
+local function download_server(root)
   local app = lsp.read_app_json(root)
   if not app then
     vim.notify("AL: Cannot read app.json", vim.log.levels.ERROR)
@@ -206,6 +344,29 @@ function M.download(root)
     })
   end
   end) -- conn.get_auth
+end
+
+-- ── Public entry point ────────────────────────────────────────────────────────
+
+function M.download(root)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+
+  local cr = M.get_country_region(root)
+  local choices = {
+    { label = "Server / Sandbox / Docker  (launch.json)", fn = function() download_server(root) end },
+    { label = "Global (NuGet / AppSource)" .. (cr and ("  [" .. cr .. "]") or ""), fn = function() M.download_global(root) end },
+  }
+
+  vim.ui.select(
+    vim.tbl_map(function(c) return c.label end, choices),
+    { prompt = "AL: Download symbols from:" },
+    function(_, idx)
+      if idx then choices[idx].fn() end
+    end)
 end
 
 return M
