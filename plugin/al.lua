@@ -61,6 +61,10 @@ for _, name in ipairs({ "Microsoft.Dynamics.Nav.EditorServices.Host", "alc" }) d
   platform.ensure_executable(bin_dir .. platform.exe(name))
 end
 
+-- Track PIDs of AL server processes started in this session so VimLeavePre
+-- can kill them and their .NET child processes (which survive plain SIGTERM).
+local _al_server_pids = {}
+
 -- vim.lsp.config/enable does not support on_new_config (nvim-lspconfig concept only),
 -- so init_options cannot be set dynamically that way. Use a FileType autocmd with
 -- vim.lsp.start instead, where root_dir is resolved before the client is created.
@@ -108,6 +112,11 @@ vim.api.nvim_create_autocmd("FileType", {
       -- so on_init is the only reliable interception point.
       on_init = function(client)
         client.server_capabilities.semanticTokensProvider = nil
+        -- Record PID so VimLeavePre can kill the whole process tree on exit.
+        pcall(function()
+          local pid = client.rpc.handle:get_pid()
+          if pid and pid > 0 then _al_server_pids[pid] = true end
+        end)
       end,
       -- AL server sends publishDiagnostics for all project files during background
       -- analysis, including files the user has never opened. For unloaded buffers,
@@ -844,6 +853,25 @@ vim.api.nvim_create_user_command("ALAnalyze", function()
   end
   require("al.compile").analyze_diagnostics(root)
 end, { desc = "AL: Run silent alc pass to refresh vim.diagnostic entries (file-tree badges)" })
+
+-- Kill AL server processes (and their .NET child workers) on exit.
+-- EditorServices.Host forks a second .NET process that ignores plain SIGTERM
+-- from Neovim's job cleanup, leaving orphaned pairs accumulating across sessions.
+-- Sending SIGKILL to the process GROUP (-pid) catches both.
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  once = false,
+  callback = function()
+    for pid in pairs(_al_server_pids) do
+      if platform.is_windows then
+        vim.fn.system(string.format("taskkill /F /PID %d /T 2>nul", pid))
+      else
+        -- Kill the process group (catches .NET child workers in the same group)
+        vim.fn.system(string.format(
+          "kill -9 -%d 2>/dev/null; kill -9 %d 2>/dev/null", pid, pid))
+      end
+    end
+  end,
+})
 
 vim.api.nvim_create_user_command("ALReindex", function()
   local root = require("al.lsp").get_root()
