@@ -102,10 +102,13 @@ local function apply_organize_imports(bufnr, on_done)
         if not action.disabled then
           if action.edit then
             vim.lsp.util.apply_workspace_edit(action.edit, enc)
-            pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
           elseif action.command then
             local cmd = type(action.command) == "table" and action.command or action
             clients[1]:request("workspace/executeCommand", cmd, nil, bufnr)
+          end
+          -- Auto-save only for background buffers not visible in any window.
+          -- For open buffers let the user see the change and save explicitly.
+          if #vim.fn.win_findbuf(bufnr) == 0 then
             pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
           end
         end
