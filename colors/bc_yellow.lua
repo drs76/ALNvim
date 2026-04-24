@@ -44,6 +44,9 @@ hi(0, "Pmenu",        { bg = "#0d0d0d", fg = "#efefef" })
 hi(0, "PmenuSel",     { bg = "#1a3a1a", fg = "#efefef" })
 hi(0, "PmenuSbar",    { bg = "#222222" })
 hi(0, "PmenuThumb",   { bg = "#04b925" })
+-- nvim-cmp documentation/info float
+hi(0, "CmpDocumentation",       { bg = "#252525", fg = "#efefef" })
+hi(0, "CmpDocumentationBorder", { bg = "#252525", fg = "#444444" })
 
 -- ── Syntax ────────────────────────────────────────────────────────────────────
 hi(0, "Comment",      { fg = "#04b925", italic = true })

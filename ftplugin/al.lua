@@ -246,3 +246,17 @@ vim.keymap.set({ "o", "x" }, "af", _to.around_proc,  { buffer = true, silent = t
 vim.keymap.set({ "o", "x" }, "if", _to.inside_proc,  { buffer = true, silent = true, desc = "AL: inside procedure/trigger" })
 vim.keymap.set({ "o", "x" }, "aF", _to.around_block, { buffer = true, silent = true, desc = "AL: around begin/end block" })
 vim.keymap.set({ "o", "x" }, "iF", _to.inside_block, { buffer = true, silent = true, desc = "AL: inside begin/end block" })
+
+-- Tighten completions for AL buffers: LSP + snippets only.
+-- The global cmp config includes cmp-buffer (all buffer words as Text kind) which
+-- drowns out LSP results for AL. AL LSP provides full symbol coverage so buffer
+-- words are noise.
+local ok_cmp, cmp = pcall(require, "cmp")
+if ok_cmp then
+  cmp.setup.buffer({
+    sources = cmp.config.sources({
+      { name = "nvim_lsp" },
+      { name = "luasnip" },
+    }),
+  })
+end
