@@ -78,8 +78,8 @@ function M.add_namespace_to_project(root, ns)
   return { added = added, skipped = skipped }
 end
 
--- Apply source.organizeImports to a single buffer (already loaded).
--- Uses buf_request_sync (same pattern as BufWritePre) — proven to work.
+-- Apply source.organizeImports to a single buffer via vim.lsp.buf.code_action.
+-- Uses the same code path as <leader>acn but auto-applies without a picker.
 -- Calls on_done() when finished (success or failure).
 local function apply_organize_imports(bufnr, on_done)
   local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "al_language_server" })
@@ -88,35 +88,23 @@ local function apply_organize_imports(bufnr, on_done)
     return
   end
 
-  local enc    = clients[1].offset_encoding or "utf-16"
-  local params = {
-    textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
-    context      = { only = { "source.organizeImports" }, diagnostics = {} },
-  }
+  -- Use code_action with apply=true — this mirrors what the LSP picker does
+  -- and uses Neovim's built-in range/context construction which the server expects.
+  vim.api.nvim_buf_call(bufnr, function()
+    vim.lsp.buf.code_action({
+      context = { only = { "source.organizeImports" } },
+      apply   = true,
+      filter  = function(action)
+        local kind = action.kind or ""
+        return kind == "source.organizeImports" or kind == "source"
+      end,
+    })
+  end)
 
-  local result = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", params, 5000)
-  if result then
-    for _, res in pairs(result) do
-      for _, action in ipairs(res.result or {}) do
-        if not action.disabled then
-          if action.edit then
-            vim.lsp.util.apply_workspace_edit(action.edit, enc)
-          elseif action.command then
-            local cmd = type(action.command) == "table" and action.command or action
-            clients[1]:request("workspace/executeCommand", cmd, nil, bufnr)
-          end
-          -- Auto-save only for background buffers not visible in any window.
-          -- For open buffers let the user see the change and save explicitly.
-          if #vim.fn.win_findbuf(bufnr) == 0 then
-            pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent! write") end)
-          end
-        end
-      end
-    end
-  end
-
-  if on_done then vim.schedule(on_done) end
+  -- code_action is async; give it a moment then call on_done.
+  vim.defer_fn(function()
+    if on_done then on_done() end
+  end, 500)
 end
 
 -- Apply source.organizeImports to the current buffer (no picker).
@@ -165,6 +153,10 @@ function M.fix_usings(files, on_done)
     -- before requesting code actions.
     vim.defer_fn(function()
       apply_organize_imports(buf, function()
+        -- Auto-save only for background buffers not visible in any window.
+        if #vim.fn.win_findbuf(buf) == 0 then
+          pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent! write") end)
+        end
         process(idx + 1)
       end)
     end, 800)

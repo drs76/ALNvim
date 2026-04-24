@@ -857,19 +857,25 @@ end, { desc = "AL: Run silent alc pass to refresh vim.diagnostic entries (file-t
 -- Kill AL server processes (and their .NET child workers) on exit.
 -- EditorServices.Host forks a second .NET process that ignores plain SIGTERM
 -- from Neovim's job cleanup, leaving orphaned pairs accumulating across sessions.
--- Sending SIGKILL to the process GROUP (-pid) catches both.
 vim.api.nvim_create_autocmd("VimLeavePre", {
   once = false,
   callback = function()
-    for pid in pairs(_al_server_pids) do
-      if platform.is_windows then
+    if platform.is_windows then
+      for pid in pairs(_al_server_pids) do
         vim.fn.system(string.format("taskkill /F /PID %d /T 2>nul", pid))
-      else
-        -- Kill the process group (catches .NET child workers in the same group)
-        vim.fn.system(string.format(
-          "kill -9 -%d 2>/dev/null; kill -9 %d 2>/dev/null", pid, pid))
       end
+      return
     end
+    -- Kill any tracked PIDs and their process groups.
+    for pid in pairs(_al_server_pids) do
+      vim.fn.system(string.format(
+        "kill -9 -%d 2>/dev/null; kill -9 %d 2>/dev/null", pid, pid))
+    end
+    -- Fallback: kill all EditorServices.Host children of this Neovim PID.
+    -- Covers the case where handle:get_pid() failed and _al_server_pids is empty.
+    local nvim_pid = vim.fn.getpid()
+    vim.fn.system(string.format(
+      "pkill -9 -P %d -f EditorServices.Host 2>/dev/null", nvim_pid))
   end,
 })
 
