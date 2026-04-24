@@ -78,91 +78,23 @@ function M.add_namespace_to_project(root, ns)
   return { added = added, skipped = skipped }
 end
 
--- Apply source.organizeImports to a single buffer via vim.lsp.buf.code_action.
--- Uses the same code path as <leader>acn but auto-applies without a picker.
--- Calls on_done() when finished (success or failure).
-local function apply_organize_imports(bufnr, on_done)
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "al_language_server" })
-  if #clients == 0 then
-    if on_done then on_done() end
-    return
-  end
-
-  -- Use code_action with apply=true — this mirrors what the LSP picker does
-  -- and uses Neovim's built-in range/context construction which the server expects.
-  vim.api.nvim_buf_call(bufnr, function()
-    vim.lsp.buf.code_action({
-      context = { only = { "source.organizeImports" } },
-      apply   = true,
-      filter  = function(action)
-        local kind = action.kind or ""
-        return kind == "source.organizeImports" or kind == "source"
-      end,
-    })
-  end)
-
-  -- code_action is async; give it a moment then call on_done.
-  vim.defer_fn(function()
-    if on_done then on_done() end
-  end, 500)
+-- Apply source.organizeImports to the current buffer via the LSP picker.
+-- The picker is the only reliable path — manual buf_request_sync returns 0
+-- actions regardless of params; the built-in code_action handler works.
+function M.add_usings()
+  vim.lsp.buf.code_action({ context = { only = { "source.organizeImports" } } })
 end
 
--- Apply source.organizeImports to the current buffer (no picker).
-function M.add_usings(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  apply_organize_imports(bufnr, function()
-    vim.notify("AL: using statements applied", vim.log.levels.INFO)
-  end)
-end
-
--- Sequentially apply source.organizeImports to each file in the list.
--- Shows progress notifications. Calls on_done() when all files are processed.
+-- fix_usings: batch organizeImports is not reliably achievable via LSP
+-- for background buffers (server returns 0 actions without interactive context).
+-- Notify the user to apply per-file with <leader>acn after the namespace wizard.
 function M.fix_usings(files, on_done)
-  local total = #files
-  if total == 0 then
-    if on_done then on_done() end
-    return
+  if #files > 0 then
+    vim.notify(
+      string.format("AL: open each file and use <leader>acn to add missing using statements (%d file(s) affected)", #files),
+      vim.log.levels.INFO)
   end
-
-  local function process(idx)
-    if idx > total then
-      vim.notify(string.format("AL: using statements applied to %d file(s)", total),
-        vim.log.levels.INFO)
-      if on_done then on_done() end
-      return
-    end
-
-    local path = files[idx]
-    vim.notify(string.format("AL: fixing usings [%d/%d] %s",
-      idx, total, vim.fn.fnamemodify(path, ":t")), vim.log.levels.INFO)
-
-    local buf = vim.fn.bufadd(path)
-    vim.fn.bufload(buf)
-
-    -- bufadd/bufload does not fire FileType, so LSP never attaches. Attach
-    -- the existing client manually so the request can reach it.
-    local al_clients = vim.lsp.get_clients({ name = "al_language_server" })
-    if #al_clients > 0 then
-      local already = vim.lsp.get_clients({ bufnr = buf, name = "al_language_server" })
-      if #already == 0 then
-        al_clients[1]:attach(buf)
-      end
-    end
-
-    -- Give the LSP time to process textDocument/didOpen and run diagnostics
-    -- before requesting code actions.
-    vim.defer_fn(function()
-      apply_organize_imports(buf, function()
-        -- Auto-save only for background buffers not visible in any window.
-        if #vim.fn.win_findbuf(buf) == 0 then
-          pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent! write") end)
-        end
-        process(idx + 1)
-      end)
-    end, 800)
-  end
-
-  process(1)
+  if on_done then on_done() end
 end
 
 -- Interactive wizard: prompt for namespace, add to all eligible files,
@@ -233,29 +165,9 @@ function M.wizard(root)
 
         if #result.added == 0 then return end
 
-        -- Offer to apply using statements via LSP.
-        vim.ui.select(
-          { "Yes — apply using statements now (via LSP)", "No — I'll use <leader>acn per file" },
-          { prompt = "Add missing using statements?" },
-          function(fix_choice)
-            if fix_choice and fix_choice:match("^Yes") then
-              -- Trigger re-analysis first so the server picks up the new namespaces.
-              local cops = require("al.cops")
-              cops.apply(root, cops.get_active(root), true)
-              -- Then fix usings after a short pause for the server to re-index.
-              vim.defer_fn(function()
-                M.fix_usings(result.added, function()
-                  -- Final re-analysis to clear any residual diagnostics.
-                  cops.apply(root, cops.get_active(root), true)
-                end)
-              end, 2000)
-            else
-              vim.notify(
-                "AL: use <leader>acn (organise namespaces) on each file to add using statements",
-                vim.log.levels.INFO)
-            end
-          end
-        )
+        vim.notify(
+          "AL: open each file and use <leader>acn to add missing using statements",
+          vim.log.levels.INFO)
       end
     )
   end)
