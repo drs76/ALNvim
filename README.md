@@ -21,6 +21,40 @@ language server that ships with the [AL VSCode extension](https://marketplace.vi
 - Two colour schemes: **bc_dark** (VS Code Business Central Dark) and **bc_yellow** (high-contrast)
 - Text objects for procedures/triggers and begin/end blocks
 
+## Screenshots
+
+**AL Actions** — searchable picker for all 40+ commands with descriptions and keymaps
+
+![AL Actions](docs/images/ALActions.png)
+
+**AL Explorer** — Telescope object browser across project source and downloaded symbol packages, with live preview
+
+![AL Explorer](docs/images/ALExplorer.png)
+
+**AL Object Wizard** — interactive new-object creation with all 12 AL object types
+
+![AL Object Wizard](docs/images/ALNewObject.png)
+
+**Go-to-definition** — `gd` fetches `al-preview://` source and renders it in a read-only scratch buffer
+
+![Go-to-definition preview](docs/images/ALPreviewPage_HostCard.png)
+
+**LSP completions** — property value completions with type information
+
+![LSP completions](docs/images/ALActionImagePicker.png)
+
+**Code Cops** — toggle analyzers live without restarting the language server
+
+![Select Code Cops](docs/images/ALSelectCodeCops.png)
+
+**Download Symbols** — choose between server/sandbox/Docker (launch.json) or global NuGet/AppSource
+
+![Download Symbols picker](docs/images/DownloadSymbolsPicker.png)
+
+![Server download](docs/images/DownloadSymbolsServer.png)
+
+![Global download](docs/images/DownloadSymbolsGlobal.png)
+
 ## Quick start
 
 ```lua
