@@ -80,6 +80,44 @@ local function build_app_json(name, publisher, rv, id_from)
   )
 end
 
+-- Default launch.json mirroring VSCode's initializeCurrentFolder output.
+-- Both the cloud-sandbox and on-prem stubs are included so the user only
+-- needs to fill in their specific server details before launching/debugging.
+local LAUNCH_JSON = [[{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Microsoft cloud sandbox",
+      "request": "launch",
+      "type": "al",
+      "environmentType": "Sandbox",
+      "environmentName": "sandbox",
+      "startupObjectId": 22,
+      "startupObjectType": "Page",
+      "breakOnError": "All",
+      "launchBrowser": true,
+      "enableLongRunningSqlStatements": true,
+      "enableSqlInformationDebugger": true
+    },
+    {
+      "name": "Your own server",
+      "request": "launch",
+      "type": "al",
+      "environmentType": "OnPrem",
+      "server": "http://bcserver",
+      "serverInstance": "BC",
+      "authentication": "UserPassword",
+      "startupObjectId": 22,
+      "startupObjectType": "Page",
+      "breakOnError": "All",
+      "launchBrowser": true,
+      "enableLongRunningSqlStatements": true,
+      "enableSqlInformationDebugger": true,
+      "tenant": "default"
+    }
+  ]
+}]]
+
 local function build_hello_world(name, publisher, rv, id_from)
   local header = "// Welcome to your new AL extension.\n"
     .. "// Remember that object names and IDs should be unique across all extensions.\n"
@@ -151,8 +189,9 @@ function M.new_project()
               local app_content = build_app_json(name, publisher, rv, id_from)
               local hw_content  = build_hello_world(name, publisher, rv, id_from)
 
-              vim.fn.writefile(vim.split(app_content, "\n", { plain = true }), proj_dir .. "/app.json")
-              vim.fn.writefile(vim.split(hw_content,  "\n", { plain = true }), proj_dir .. "/HelloWorld.al")
+              vim.fn.writefile(vim.split(app_content,  "\n", { plain = true }), proj_dir .. "/app.json")
+              vim.fn.writefile(vim.split(hw_content,   "\n", { plain = true }), proj_dir .. "/HelloWorld.al")
+              vim.fn.writefile(vim.split(LAUNCH_JSON,  "\n", { plain = true }), proj_dir .. "/.vscode/launch.json")
 
               vim.schedule(function()
                 vim.cmd("edit " .. vim.fn.fnameescape(proj_dir .. "/HelloWorld.al"))
