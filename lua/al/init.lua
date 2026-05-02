@@ -51,6 +51,15 @@ M.defaults = {
   -- Leave nil to use the system default (xdg-open / open).
   browser = nil,
 
+  -- Ollama backend for routine AL tasks (via mcphost MCP client).
+  -- mcphost binary name or full path; must be on PATH or absolute.
+  -- Install: go install github.com/mark3labs/mcphost@latest
+  ollama_binary = "mcphost",
+  -- Model passed as "ollama:<model>" to mcphost (any model served by Ollama).
+  ollama_model  = "qwen2.5-coder:32b",
+  -- Ollama server base URL; forwarded via OLLAMA_HOST env var to mcphost.
+  ollama_host   = "http://localhost:11434",
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

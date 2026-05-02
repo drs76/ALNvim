@@ -157,6 +157,7 @@ vim.keymap.set("n", "<leader>ac", "<cmd>ALSelectCops<CR>",       vim.tbl_extend(
 vim.keymap.set("n", "<leader>aB", "<cmd>ALSelectBrowser<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Select browser for BC launch" }))
 vim.keymap.set("n", "<leader>am", "<cmd>ALMcpSetup<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Configure MCP server for Claude Code" }))
 vim.keymap.set("n", "<leader>aM", "<cmd>ALMcpStatus<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Show configured AL MCP entries" }))
+vim.keymap.set("n", "<leader>ai", "<cmd>ALOllamaChat<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Ollama chat with AL MCP tools (mcphost)" }))
 vim.keymap.set("n", "<leader>ad", function()
   if pcall(require, "telescope.builtin") then
     require("telescope.builtin").diagnostics({ bufnr = 0 })

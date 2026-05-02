@@ -77,6 +77,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALMcpSetup") end },
   { name = "MCP Status",               key = "<leader>aM",  desc = "Show configured AL MCP server entries",
     run = function() vim.cmd("ALMcpStatus") end },
+  { name = "Ollama Chat",              key = "<leader>ai",  desc = "Open Ollama chat with AL MCP tools in terminal (mcphost)",
+    run = function() vim.cmd("ALOllamaChat") end },
 
   -- Files ----------------------------------------------------------------
   { name = "Open app.json",            key = "<leader>ao",  desc = "Open project app.json",

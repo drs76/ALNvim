@@ -112,6 +112,66 @@ function M.deconfigure(root)
   vim.notify("AL MCP: removed '" .. key .. "'", vim.log.levels.INFO)
 end
 
+-- Open an Ollama chat session in a terminal buffer with the AL MCP server wired in.
+-- Requires mcphost (github.com/mark3labs/mcphost) on PATH or via config.ollama_binary.
+-- Writes a temp config file so mcphost can spawn the AL MCP server for this project.
+function M.launch_ollama(root)
+  if not root then
+    vim.notify("AL Ollama: no project root", vim.log.levels.WARN)
+    return
+  end
+
+  local cfg    = require("al").config
+  local mcpbin = cfg.ollama_binary or "mcphost"
+  if vim.fn.executable(mcpbin) == 0 then
+    vim.notify(
+      "AL Ollama: '" .. mcpbin .. "' not found.\n"
+        .. "Install: go install github.com/mark3labs/mcphost@latest",
+      vim.log.levels.ERROR)
+    return
+  end
+
+  if vim.fn.executable(AL_BINARY) == 0 then
+    vim.notify(
+      "AL Ollama: al binary not found at " .. AL_BINARY .. "\n"
+        .. "Install with :ALInstallDotnetTool",
+      vim.log.levels.ERROR)
+    return
+  end
+
+  local model = cfg.ollama_model or "qwen2.5-coder:32b"
+  local host  = cfg.ollama_host  or "http://localhost:11434"
+
+  -- Write a temp config file in the same mcpServers format as ~/.claude/settings.json.
+  local tmp_cfg = vim.fn.tempname() .. ".json"
+  vim.fn.writefile({
+    vim.fn.json_encode({
+      mcpServers = {
+        [entry_key(root)] = {
+          command = AL_BINARY,
+          args    = build_args(root),
+        },
+      },
+    }),
+  }, tmp_cfg)
+
+  -- Open a 15-line horizontal split at the bottom for the chat session.
+  vim.cmd("botright 15new")
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(buf,
+    "AL: Ollama Chat (" .. vim.fn.fnamemodify(root, ":t") .. ")")
+
+  vim.fn.termopen({
+    mcpbin,
+    "--model",  "ollama:" .. model,
+    "--config", tmp_cfg,
+  }, {
+    env     = { OLLAMA_HOST = host },
+    on_exit = function() pcall(os.remove, tmp_cfg) end,
+  })
+  vim.cmd("startinsert")
+end
+
 -- Return a table of all "al:*" MCP entries currently in settings.json.
 function M.status()
   local settings = read_settings()
