@@ -462,16 +462,23 @@ vim.api.nvim_create_autocmd("LspAttach", {
       vim.keymap.set("n", "gd", function()
         local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
         client:request("al/gotodefinition", {
+          configuration             = vim.NIL,  -- required by server; null for runtime >= 5.2
           textDocumentPositionParams = params,
         }, function(err, result)
           if err then
             vim.notify("AL gd error: " .. vim.inspect(err), vim.log.levels.WARN)
             return
           end
-          if not result then return end
+          if not result then
+            vim.notify("AL: no definition found", vim.log.levels.INFO)
+            return
+          end
           local uri   = result.uri or result.targetUri
           local range = result.range or result.targetSelectionRange or result.targetRange
-          if not uri or not range then return end
+          if not uri or not range then
+            vim.notify("AL gd: unexpected result: " .. vim.inspect(result), vim.log.levels.WARN)
+            return
+          end
           local function jump_to(bufnr)
             vim.api.nvim_set_current_buf(bufnr)
             local line = math.min((range.start.line or 0) + 1,
