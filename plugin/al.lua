@@ -647,6 +647,10 @@ vim.api.nvim_create_user_command("ALExplorerProcs", function()
   require("al.explorer").procedures()
 end, { desc = "AL Explorer: browse procedures/triggers in the current file" })
 
+vim.api.nvim_create_user_command("ALNewProject", function()
+  require("al.project").new_project()
+end, { desc = "AL Go! — create a new AL project from scratch (app.json, HelloWorld.al, .alpackages)" })
+
 vim.api.nvim_create_user_command("ALNewObject", function(opts)
   require("al.wizard").new_object(opts.args ~= "" and opts.args or nil)
 end, {

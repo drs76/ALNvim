@@ -45,6 +45,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALDiff") end },
 
   -- Objects / Wizard -----------------------------------------------------
+  { name = "New Project",              key = "",            desc = "AL Go! — create new AL project (app.json, HelloWorld.al, .alpackages)",
+    run = function() vim.cmd("ALNewProject") end },
   { name = "New Object",               key = "<leader>an",  desc = "Object wizard — create new AL object file (table, page, codeunit…)",
     run = function() vim.cmd("ALNewObject") end },
   { name = "Generate Permission Set",  key = "<leader>aR",  desc = "Scan all project objects and generate a PermissionSet file",
