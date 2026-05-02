@@ -219,7 +219,22 @@ local function push_diagnostics(qf)
   end
 end
 
-local function finish(buf, qf, exit_code, on_success)
+-- After a clean build, reset the AL LSP's diagnostic namespace for all
+-- attached buffers so stale server-side false positives don't linger.
+local function clear_lsp_diagnostics(project_dir)
+  local clients = vim.lsp.get_clients({ name = "al_language_server" })
+  for _, c in ipairs(clients) do
+    if c.config.root_dir == project_dir then
+      local ns = vim.lsp.diagnostic.get_namespace(c.id)
+      for bufnr in pairs(c.attached_buffers or {}) do
+        vim.diagnostic.reset(ns, bufnr)
+      end
+      return
+    end
+  end
+end
+
+local function finish(buf, qf, exit_code, on_success, project_dir)
   vim.schedule(function()
     local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
     local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
@@ -241,6 +256,7 @@ local function finish(buf, qf, exit_code, on_success)
     push_diagnostics(qf)
 
     if exit_code == 0 and #errors == 0 then
+      if project_dir then clear_lsp_diagnostics(project_dir) end
       if on_success then on_success() end
     end
   end)
@@ -317,7 +333,7 @@ function M.compile(project_dir, extra_args, on_success)
       vim.schedule(function() buf_append(buf, clean) end)
     end,
     on_exit = function(_, code)
-      finish(buf, parse_output(output, build_cwd), code, on_success)
+      finish(buf, parse_output(output, build_cwd), code, on_success, project_dir)
     end,
   })
 end
