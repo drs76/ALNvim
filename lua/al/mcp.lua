@@ -146,29 +146,41 @@ function M.launch_ollama(root)
   local tmp_cfg = vim.fn.tempname() .. ".json"
   vim.fn.writefile({
     vim.fn.json_encode({
+      systemPrompt = "You are an AL developer assistant. After calling tools to gather information, always write a detailed text response explaining what you found. Never finish without providing a written summary.",
       mcpServers = {
         [entry_key(root)] = {
           command = AL_BINARY,
           args    = build_args(root),
+        },
+        filesystem = {
+          command = "npx",
+          args    = { "-y", "@modelcontextprotocol/server-filesystem", root },
         },
       },
     }),
   }, tmp_cfg)
 
   -- Open a 15-line horizontal split at the bottom for the chat session.
-  vim.cmd("botright 15new")
+  vim.cmd("botright 40new")
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_name(buf,
     "AL: Ollama Chat (" .. vim.fn.fnamemodify(root, ":t") .. ")")
 
-  vim.fn.termopen({
-    mcpbin,
-    "--model",  "ollama:" .. model,
-    "--config", tmp_cfg,
-  }, {
-    env     = { OLLAMA_HOST = host },
-    on_exit = function() pcall(os.remove, tmp_cfg) end,
-  })
+  vim.ui.input({ prompt = "AL Ollama> " }, function(question)
+    if not question or question == "" then
+      pcall(os.remove, tmp_cfg)
+      return
+    end
+    vim.fn.termopen({
+      mcpbin,
+      "--model",  "ollama:" .. model,
+      "--config", tmp_cfg,
+      "--prompt", question,
+    }, {
+      env     = { OLLAMA_HOST = host, ANTHROPIC_API_KEY = "" },
+      on_exit = function() pcall(os.remove, tmp_cfg) end,
+    })
+  end)
   vim.cmd("startinsert")
 end
 
