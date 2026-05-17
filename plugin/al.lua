@@ -767,14 +767,6 @@ vim.api.nvim_create_user_command("ALMcpRemove", function(opts)
   require("al.mcp").deconfigure(root)
 end, { nargs = "?", complete = "dir", desc = "Remove AL MCP server config for current project" })
 
-vim.api.nvim_create_user_command("ALOllamaChat", function(opts)
-  local root = (opts.args ~= "" and opts.args) or require("al.lsp").get_root()
-  if not root then
-    vim.notify("AL Ollama: no project root found (missing app.json)", vim.log.levels.ERROR)
-    return
-  end
-  require("al.mcp").launch_ollama(root)
-end, { nargs = "?", complete = "dir", desc = "Open Ollama chat with AL MCP tools (mcphost)" })
 
 vim.api.nvim_create_user_command("ALMcpStatus", function()
   local entries = require("al.mcp").status()
