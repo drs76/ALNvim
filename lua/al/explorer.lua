@@ -232,9 +232,8 @@ function M.objects(root)
     finder        = make_finder(),
     sorter        = conf.generic_sorter({}),
     previewer     = conf.grep_previewer({}),
-    layout_config = {
-      preview_width = 0.35,   -- preview takes 35% of width; results get the rest
-    },
+    layout_strategy = "vertical",
+    layout_config   = { mirror = true, preview_height = 0.5 },
     attach_mappings = function(prompt_bufnr, map)
       actions.select_default:replace(function()
         local sel = action_state.get_selected_entry()
@@ -324,8 +323,10 @@ function M.procedures()
   pickers.new({}, {
     prompt_title = "AL Procedures — " .. vim.fn.fnamemodify(file, ":t"),
     finder = finders.new_table({ results = entries, entry_maker = make_entry }),
-    sorter    = conf.generic_sorter({}),
-    previewer = conf.grep_previewer({}),
+    sorter          = conf.generic_sorter({}),
+    previewer       = conf.grep_previewer({}),
+    layout_strategy = "vertical",
+    layout_config   = { mirror = true, preview_height = 0.5 },
     attach_mappings = function(prompt_bufnr)
       actions.select_default:replace(function()
         local sel = action_state.get_selected_entry()
@@ -359,10 +360,12 @@ function M.search(root)
   local search_dirs = build_search_dirs(root)
 
   builtin.live_grep({
-    prompt_title  = "AL Search",
-    search_dirs   = search_dirs,
-    glob_pattern  = { "*.al", "*.AL" },
+    prompt_title    = "AL Search",
+    search_dirs     = search_dirs,
+    glob_pattern    = { "*.al", "*.AL" },
     additional_args = { "--smart-case" },
+    layout_strategy = "vertical",
+    layout_config   = { mirror = true, preview_height = 0.5 },
   })
 end
 
