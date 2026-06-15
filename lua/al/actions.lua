@@ -57,6 +57,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALOpenLayout") end },
 
   -- Refactor / Code ------------------------------------------------------
+  { name = "Ghost Toggle",               key = "<leader>aI",  desc = "Toggle inline AI ghost completions from Larry (Ollama FIM, accept with <M-l>)",
+    run = function() vim.cmd("ALGhostToggle") end },
   { name = "Rename Object",             key = "grn",         desc = "Rename quoted identifier (object/field name) across all project .al files",
     run = function() vim.cmd("ALRenameObject") end },
   { name = "Extract Label",            key = "<leader>acl", desc = "Cursor inside string → extract to Label variable",

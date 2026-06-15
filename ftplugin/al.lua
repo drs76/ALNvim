@@ -195,6 +195,11 @@ vim.keymap.set({ "n", "v" }, "<leader>acr", function()
 end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
 vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
+vim.keymap.set("n", "<leader>aI", "<cmd>ALGhostToggle<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Toggle inline AI ghost completions (Larry)" }))
+vim.keymap.set("i", "<M-l>", function()
+  require("al.ghost").accept()
+end, vim.tbl_extend("force", opts, { desc = "AL: Accept ghost text completion" }))
 vim.keymap.set("n", "grn",        "<cmd>ALRenameObject<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Rename quoted identifier project-wide (falls back to LSP rename)" }))
 vim.keymap.set("n", "<leader>rn", "<cmd>ALRenameObject<CR>",

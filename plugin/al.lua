@@ -949,6 +949,12 @@ end, {
   desc = "AL: Create user snippet from visual selection",
 })
 
+vim.api.nvim_create_user_command("ALGhostToggle", function()
+  require("al.ghost").toggle()
+end, {
+  desc = "AL: Toggle inline AI ghost completions via Larry (Ollama FIM)",
+})
+
 vim.api.nvim_create_user_command("ALActions", function()
   require("al.actions").picker()
 end, {
