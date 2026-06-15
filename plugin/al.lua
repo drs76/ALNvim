@@ -925,6 +925,12 @@ end, {
   desc = "AL: Add missing using statements to current buffer via LSP",
 })
 
+vim.api.nvim_create_user_command("ALRenameObject", function()
+  require("al.refactor").rename_object()
+end, {
+  desc = "AL: Rename quoted identifier (object/field name) project-wide",
+})
+
 vim.api.nvim_create_user_command("ALExtractLabel", function()
   require("al.refactor").extract_label()
 end, {

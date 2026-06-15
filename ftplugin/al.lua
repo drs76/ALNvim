@@ -195,6 +195,10 @@ vim.keymap.set({ "n", "v" }, "<leader>acr", function()
 end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
 vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
+vim.keymap.set("n", "grn",        "<cmd>ALRenameObject<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Rename quoted identifier project-wide (falls back to LSP rename)" }))
+vim.keymap.set("n", "<leader>rn", "<cmd>ALRenameObject<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Rename quoted identifier project-wide (falls back to LSP rename)" }))
 vim.keymap.set("n", "<leader>acl", "<cmd>ALExtractLabel<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract string to Label variable" }))
 vim.keymap.set("x", "<leader>acs", "<cmd>ALCreateSnippet<CR>",

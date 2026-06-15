@@ -57,6 +57,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALOpenLayout") end },
 
   -- Refactor / Code ------------------------------------------------------
+  { name = "Rename Object",             key = "grn",         desc = "Rename quoted identifier (object/field name) across all project .al files",
+    run = function() vim.cmd("ALRenameObject") end },
   { name = "Extract Label",            key = "<leader>acl", desc = "Cursor inside string → extract to Label variable",
     run = function() vim.cmd("ALExtractLabel") end },
   { name = "Extract Procedure",        key = "<leader>ace", desc = "Visual selection → new local procedure (auto-detects params)",

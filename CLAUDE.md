@@ -215,6 +215,7 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 | `<leader>aca/acf/acF/acn/acr` | Code actions (all/fix/fixAll/organise/refactor) — `acr` works in visual mode |
 | `<leader>ace` | ExtractProcedure — extract visual selection into a new `local procedure` (auto-detects params from var block) |
 | `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
+| `grn` | RenameObject — rename quoted AL identifier project-wide (falls back to LSP rename for unquoted symbols) |
 | `<F5>`/`<leader>adl/ads/adf/add` | Launch / SnapshotStart / SnapshotFinish / DebugSetup |
 | `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
@@ -224,7 +225,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 

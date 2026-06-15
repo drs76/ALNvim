@@ -284,6 +284,90 @@ function M.extract_to_procedure()
   end)
 end
 
+-- Find the double-quoted AL identifier at cursor by scanning left/right for " delimiters.
+-- Returns the name string (without quotes), or nil when cursor is not inside one.
+local function dquoted_id_at_cursor()
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1]
+  if not line then return nil end
+  local col1 = col + 1  -- convert to 1-based
+
+  local q_open = nil
+  for i = col1, 1, -1 do
+    if line:sub(i, i) == '"' then q_open = i; break end
+  end
+  if not q_open then return nil end
+
+  local q_close = nil
+  for i = q_open + 1, #line do
+    if line:sub(i, i) == '"' then q_close = i; break end
+  end
+  if not q_close or col1 > q_close then return nil end
+
+  local name = line:sub(q_open + 1, q_close - 1)
+  return name ~= '' and name or nil
+end
+
+-- Rename a quoted AL identifier (object name, field name, etc.) project-wide.
+-- The AL server tokenises by word boundaries, so standard LSP rename breaks for
+-- multi-word identifiers like "Inv. Status TSG". This command:
+--   1. Extracts the full "Name" at cursor (double-quote delimited).
+--   2. Prompts for the new name.
+--   3. Greps all .al files in the project for "Name" (literal) and replaces.
+-- Falls back to vim.lsp.buf.rename() when cursor is not inside a quoted identifier.
+function M.rename_object()
+  local root = lsp_mod.get_root()
+  if not root then
+    vim.notify('AL: no project root found', vim.log.levels.WARN)
+    return
+  end
+
+  local old_name = dquoted_id_at_cursor()
+  if not old_name then
+    vim.lsp.buf.rename()
+    return
+  end
+
+  vim.ui.input({ prompt = 'Rename "' .. old_name .. '" to: ', default = old_name }, function(new_name)
+    if not new_name or vim.trim(new_name) == '' or new_name == old_name then return end
+    new_name = vim.trim(new_name)
+    vim.schedule(function()
+      local rg_out = vim.fn.system({
+        'rg', '--files-with-matches', '--fixed-strings',
+        '--glob', '*.al', '"' .. old_name .. '"', root,
+      })
+      local files = {}
+      for _, f in ipairs(vim.split(vim.trim(rg_out), '\n', { plain = true })) do
+        if f ~= '' then table.insert(files, f) end
+      end
+      if #files == 0 then
+        vim.notify('AL rename: "' .. old_name .. '" not found in project .al files', vim.log.levels.WARN)
+        return
+      end
+      local old_pat = '"' .. vim.pesc(old_name) .. '"'
+      local new_str = '"' .. new_name .. '"'
+      local changed = 0
+      for _, fpath in ipairs(files) do
+        local bufnr2 = vim.fn.bufadd(fpath)
+        vim.fn.bufload(bufnr2)
+        local lines = vim.api.nvim_buf_get_lines(bufnr2, 0, -1, false)
+        local modified = false
+        for i, ln in ipairs(lines) do
+          local new_ln = ln:gsub(old_pat, new_str)
+          if new_ln ~= ln then lines[i] = new_ln; modified = true end
+        end
+        if modified then
+          vim.api.nvim_buf_set_lines(bufnr2, 0, -1, false, lines)
+          changed = changed + 1
+        end
+      end
+      vim.notify(string.format(
+        'AL rename: "%s" → "%s" in %d file(s) — :wa to save all',
+        old_name, new_name, changed), vim.log.levels.INFO)
+    end)
+  end)
+end
+
 function M.extract_label()
   local bufnr   = vim.api.nvim_get_current_buf()
   local pos     = vim.api.nvim_win_get_cursor(0)
