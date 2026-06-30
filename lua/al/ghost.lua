@@ -1,4 +1,4 @@
--- Inline AI ghost-text completions via Larry (Ollama FIM endpoint).
+-- Inline AI ghost-text completions via an Ollama FIM endpoint.
 -- Uses fill-in-middle (FIM) via /api/generate with prefix+suffix context.
 -- Toggle: :ALGhostToggle / <leader>aI
 -- Accept: <M-l> (insert mode, buffer-local in AL files)
@@ -12,12 +12,15 @@ local _last    = nil   -- { text, row, col, bufnr } of visible ghost
 
 -- ── Defaults (override via require("al").setup({ ghost = { ... } })) ─────────
 
+-- Inline FIM ghost completions from an Ollama server. Override via
+-- require("al").setup({ ghost = { endpoint = ..., model = ... } }).
 local DEFAULTS = {
-  endpoint    = "http://larry:11434",
-  model       = "al-coder-gpt-oss-20b",
+  endpoint    = "http://localhost:11434",  -- Ollama /api/generate base (point at your server)
+  model       = "qwen2.5-coder",           -- any FIM-capable code model on that server
   debounce_ms = 600,
   max_tokens  = 80,
   temperature = 0.1,
+  insecure    = false,  -- set true if endpoint is HTTPS with a self-signed/local-CA cert
 }
 
 local function cfg()
@@ -116,13 +119,17 @@ local function request(bufnr)
     stream  = false,
   })
 
+  local curl_args = { "curl", "-s", "-X", "POST" }
+  if c.insecure then table.insert(curl_args, "-k") end  -- self-signed/local-CA HTTPS
+  vim.list_extend(curl_args, {
+    c.endpoint .. "/api/generate",
+    "-H", "Content-Type: application/json",
+    "-d", payload,
+    "--max-time", "8" })
+
   local out = {}
   _pending  = vim.fn.jobstart(
-    { "curl", "-s", "-X", "POST",
-      c.endpoint .. "/api/generate",
-      "-H", "Content-Type: application/json",
-      "-d", payload,
-      "--max-time", "8" },
+    curl_args,
     {
       stdout_buffered = true,
       on_stdout = function(_, data)

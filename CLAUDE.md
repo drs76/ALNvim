@@ -440,3 +440,17 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 ```
 <project>/app.json  .alpackages/  .snapshots/  .vscode/launch.json  src/*.al
 ```
+
+## AI agents (Claude Code / Pi)
+
+`lua/al/agent.lua` opens an AI coding agent in a terminal split at the project root:
+- `:ALClaude` / `<leader>ai` → **Claude Code** (`claude` CLI; uses the al-mcp entry `al.mcp` registers in `~/.claude/settings.json`).
+- `:ALPi` / `<leader>ak` → **Pi** ([pi.dev](https://pi.dev)). Built as `{ pi, -e <pi_provider>, --model <pi_model> }` unless `agent.pi_cmd` is set.
+
+Configure via `require("al").setup({ agent = { claude_cmd, pi_cmd, pi_provider, pi_model, pi_env } })`.
+Per-machine Pi + Ollama setup (Node 22, provider extension, HTTPS/TLS) — see `docs/pi-setup.md`.
+
+`ALOllamaChat` is a deprecated alias → `:ALClaude`.
+
+## Ghost completions
+`lua/al/ghost.lua` — inline FIM ghost text from an Ollama server (`<leader>aI` toggle, `<M-l>` accept). Defaults to `http://localhost:11434` / `qwen2.5-coder`; override `ghost = { endpoint, model, insecure }` via `setup()`. Set `insecure = true` for an HTTPS endpoint with a self-signed/local-CA cert.

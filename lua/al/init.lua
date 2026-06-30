@@ -51,6 +51,22 @@ M.defaults = {
   -- Leave nil to use the system default (xdg-open / open).
   browser = nil,
 
+  -- In-editor AI agents opened in a terminal split at the project root
+  -- (:ALClaude / :ALPi, <leader>ai / <leader>ak).
+  agent = {
+    -- Claude Code (claude CLI must be installed + logged in).
+    claude_cmd  = { "claude" },
+    -- Pi (https://pi.dev): built as { pi, -e <pi_provider>, --model <pi_model> }
+    -- unless pi_cmd is set. See docs/pi-setup.md.
+    pi_cmd      = nil,
+    pi_provider = "~/.pi/ollama-provider.ts",   -- a Pi extension registering your provider
+    pi_model    = "ollama/qwen2.5-coder",       -- "<provider>/<model>"
+    -- Extra env when launching Pi, e.g. for an HTTPS endpoint with a local CA:
+    --   pi_env = { NODE_OPTIONS = "--use-system-ca" }            (CA in OS store)
+    --   pi_env = { NODE_TLS_REJECT_UNAUTHORIZED = "0" }          (LAN-only, insecure)
+    pi_env      = {},
+  },
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

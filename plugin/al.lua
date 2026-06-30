@@ -630,6 +630,19 @@ vim.api.nvim_create_user_command("ALOpenLaunchJson", function()
   require("al.compile").open_launch_json()
 end, { desc = "Open .vscode/launch.json for the AL project" })
 
+vim.api.nvim_create_user_command("ALClaude", function()
+  require("al.agent").claude()
+end, { desc = "Open Claude Code in a terminal split at the AL project root" })
+
+vim.api.nvim_create_user_command("ALPi", function()
+  require("al.agent").pi()
+end, { desc = "Open Pi agent in a terminal split at the AL project root" })
+
+-- Back-compat: old stub command name -> Claude Code.
+vim.api.nvim_create_user_command("ALOllamaChat", function()
+  require("al.agent").claude()
+end, { desc = "Deprecated alias -> ALClaude" })
+
 vim.api.nvim_create_user_command("ALReloadSnippets", function()
   require("al.snippets").reload()
 end, { desc = "Reload AL LuaSnip snippets" })
@@ -952,7 +965,7 @@ end, {
 vim.api.nvim_create_user_command("ALGhostToggle", function()
   require("al.ghost").toggle()
 end, {
-  desc = "AL: Toggle inline AI ghost completions via Larry (Ollama FIM)",
+  desc = "AL: Toggle inline AI ghost completions (Ollama FIM)",
 })
 
 vim.api.nvim_create_user_command("ALActions", function()

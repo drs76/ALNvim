@@ -157,7 +157,8 @@ vim.keymap.set("n", "<leader>ac", "<cmd>ALSelectCops<CR>",       vim.tbl_extend(
 vim.keymap.set("n", "<leader>aB", "<cmd>ALSelectBrowser<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Select browser for BC launch" }))
 vim.keymap.set("n", "<leader>am", "<cmd>ALMcpSetup<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Configure MCP server for Claude Code" }))
 vim.keymap.set("n", "<leader>aM", "<cmd>ALMcpStatus<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Show configured AL MCP entries" }))
-vim.keymap.set("n", "<leader>ai", "<cmd>ALOllamaChat<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Ollama chat with AL MCP tools (mcphost)" }))
+vim.keymap.set("n", "<leader>ai", "<cmd>ALClaude<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Claude Code agent (terminal, project root)" }))
+vim.keymap.set("n", "<leader>ak", "<cmd>ALPi<CR>",             vim.tbl_extend("force", opts, { desc = "AL: Pi agent (terminal, project root)" }))
 vim.keymap.set("n", "<leader>ad", function()
   if pcall(require, "telescope.builtin") then
     require("telescope.builtin").diagnostics({ bufnr = 0 })
@@ -196,7 +197,7 @@ end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with,
 vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
 vim.keymap.set("n", "<leader>aI", "<cmd>ALGhostToggle<CR>",
-  vim.tbl_extend("force", opts, { desc = "AL: Toggle inline AI ghost completions (Larry)" }))
+  vim.tbl_extend("force", opts, { desc = "AL: Toggle inline AI ghost completions" }))
 vim.keymap.set("i", "<M-l>", function()
   require("al.ghost").accept()
 end, vim.tbl_extend("force", opts, { desc = "AL: Accept ghost text completion" }))
