@@ -35,6 +35,23 @@ M.defaults = {
   -- in the file explorer without needing to open an AL file first.
   auto_start = true,
 
+  -- EXPERIMENTAL: use the standard `al launchlspserver` language server (from the
+  -- Microsoft.Dynamics.BusinessCentral.Development.Tools dotnet tool, BC 2026 wave 1+)
+  -- instead of the VSCode extension's EditorServices.Host binary.
+  --
+  -- The agentic server speaks *standard* LSP over stdio — native textDocument/definition,
+  -- find-references (cross-project), rename, completion, hover, inlay hints — so none of
+  -- the EditorServices custom-protocol workarounds (al/setActiveWorkspace, gd override,
+  -- completion-label patch, al-preview://) apply. Runs as a distinct client
+  -- (al_agentic_lsp) and coexists with the AL MCP server (both are the same `al` binary).
+  --
+  -- Requires: dotnet tool install/update Microsoft.Dynamics.BusinessCentral.Development.Tools
+  --           --prerelease --global   (must expose `al launchlspserver`).
+  -- Known gaps vs EditorServices: no server-driven progress/loaded events (statusline goes
+  -- straight to ready), symbol download still uses the EditorServices global-sources method,
+  -- al-preview:// base-object browsing not available.
+  experimental_lsp = false,
+
   -- Automatically add missing `using` statements on save via source.organizeImports.
   -- Runs synchronously in BufWritePre, before the formatter, so the formatter also
   -- cleans up the newly added using lines. Set to false to manage manually via <leader>acn.

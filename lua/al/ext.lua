@@ -59,6 +59,9 @@ local function find()
       once    = true,
       pattern = "*",
       callback = function()
+        -- Agentic backend (al launchlspserver) needs no extension — stay quiet.
+        local ok, al = pcall(require, "al")
+        if ok and al.config and al.config.experimental_lsp then return end
         vim.notify(
           "ALNvim: MS AL extension not found.\nSearched:\n"
           .. "  " .. searched[1] .. "\n"

@@ -2,23 +2,79 @@ local M = {}
 
 local platform = require("al.platform")
 local EXT_PATH = require("al.ext").path or ""
-local ALC      = EXT_PATH .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc")
+-- Extension alc binary (nil when no VSCode extension is installed).
+local ALC      = EXT_PATH ~= ""
+  and (EXT_PATH .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc"))
+  or  nil
 local lsp      = require("al.lsp")
 
 -- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
 local DIAG_NS = vim.api.nvim_create_namespace("al_compile")
 
--- Map VSCode cop tokens to the actual analyzer DLL paths that alc accepts.
-local ANALYZER_DLLS = {
-  ["${CodeCop}"]               = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.CodeCop.dll",
-  ["${PerTenantExtensionCop}"] = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.PerTenantExtensionCop.dll",
-  ["${UICop}"]                 = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.UICop.dll",
-  ["${AppSourceCop}"]          = EXT_PATH .. "/bin/Analyzers/Microsoft.Dynamics.Nav.AppSourceCop.dll",
-}
-
 -- Ensure alc is executable (no-op on Windows; sets exec bit on Linux/macOS)
 local function ensure_executable(path)
   platform.ensure_executable(path)
+end
+
+-- Resolve the compiler invocation prefix.
+--   1. VSCode extension's alc binary, if installed.
+--   2. Fallback: `al compile` from the dotnet tool (Microsoft.Dynamics.BusinessCentral.
+--      Development.Tools) — forwards its args straight to a bundled alc, so the same
+--      /project: /packagecachepath: /analyzer: flags work with no extension present.
+-- Returns a fresh array (safe to append to), or nil if neither compiler is available.
+local function compiler_prefix()
+  if ALC and vim.fn.filereadable(ALC) == 1 then
+    ensure_executable(ALC)
+    return { ALC }
+  end
+  local al_bin = require("al.agentic_lsp").binary()
+  if vim.fn.executable(al_bin) == 1 then
+    return { al_bin, "compile" }
+  end
+  return nil
+end
+
+-- Map VSCode cop tokens to analyzer DLL basenames. Resolved to a full path by
+-- analyzer_dll() below, preferring the extension's shared Analyzers dir and
+-- falling back to the DLLs bundled inside the dotnet tool store.
+local COP_DLL = {
+  ["${CodeCop}"]               = "Microsoft.Dynamics.Nav.CodeCop.dll",
+  ["${PerTenantExtensionCop}"] = "Microsoft.Dynamics.Nav.PerTenantExtensionCop.dll",
+  ["${UICop}"]                 = "Microsoft.Dynamics.Nav.UICop.dll",
+  ["${AppSourceCop}"]          = "Microsoft.Dynamics.Nav.AppSourceCop.dll",
+}
+
+-- Analyzer directory inside the dotnet tool store. Cached: nil = not yet probed,
+-- false = probed and absent, string = the resolved directory.
+local _store_analyzer_dir = nil
+local function dotnet_analyzer_dir()
+  if _store_analyzer_dir ~= nil then return _store_analyzer_dir or nil end
+  local base = vim.fn.expand("~/.dotnet/tools/.store/microsoft.dynamics.businesscentral.development.tools")
+  local hits = vim.fn.glob(base .. "/**/Microsoft.Dynamics.Nav.CodeCop.dll", false, true)
+  -- Prefer a net8.0 build for broad runtime compatibility, else take the first.
+  local chosen
+  for _, h in ipairs(hits) do
+    if h:match("/net8%.0/") then chosen = h break end
+  end
+  chosen = chosen or hits[1]
+  _store_analyzer_dir = chosen and vim.fn.fnamemodify(chosen, ":h") or false
+  return _store_analyzer_dir or nil
+end
+
+-- Resolve a cop token to an analyzer DLL path (or nil if unavailable).
+local function analyzer_dll(token)
+  local base = COP_DLL[token]
+  if not base then return nil end
+  if EXT_PATH ~= "" then
+    local p = EXT_PATH .. "/bin/Analyzers/" .. base
+    if vim.fn.filereadable(p) == 1 then return p end
+  end
+  local dir = dotnet_analyzer_dir()
+  if dir then
+    local p = dir .. "/" .. base
+    if vim.fn.filereadable(p) == 1 then return p end
+  end
+  return nil
 end
 
 -- Parse alc compiler output into a quickfix-compatible list.
@@ -275,23 +331,29 @@ function M.compile(project_dir, extra_args, on_success)
   end
 
   local build_cwd = vim.fn.getcwd()
-  ensure_executable(ALC)
+  local prefix = compiler_prefix()
+  if not prefix then
+    vim.notify(
+      "AL: no compiler found — run :ALInstallExtension or :ALInstallDotnetTool",
+      vim.log.levels.ERROR)
+    return
+  end
   require("al.status").set_compiling()
 
   local cfg          = require("al").config
   local packagecache = project_dir .. "/" .. (cfg.packagecachepath or ".alpackages")
 
-  local cmd = {
-    ALC,
+  local cmd = vim.deepcopy(prefix)
+  vim.list_extend(cmd, {
     "/project:" .. project_dir,
     "/packagecachepath:" .. packagecache,
-  }
+  })
 
   -- Add active code analyzers so warnings from CodeCop etc. appear in compile output.
   -- Uses the same cop selection as the LSP (saved in .vscode/alnvim.json or defaults).
   for _, token in ipairs(require("al.cops").get_active(project_dir)) do
-    local dll = ANALYZER_DLLS[token]
-    if dll and vim.fn.filereadable(dll) == 1 then
+    local dll = analyzer_dll(token)
+    if dll then
       table.insert(cmd, "/analyzer:" .. dll)
     end
   end
@@ -351,18 +413,19 @@ function M.analyze_diagnostics(project_dir)
     _analyze_job = nil
   end
 
-  ensure_executable(ALC)
+  local prefix = compiler_prefix()
+  if not prefix then return end
 
   local cfg          = require("al").config
   local packagecache = project_dir .. "/" .. (cfg.packagecachepath or ".alpackages")
-  local cmd = {
-    ALC,
+  local cmd = vim.deepcopy(prefix)
+  vim.list_extend(cmd, {
     "/project:" .. project_dir,
     "/packagecachepath:" .. packagecache,
-  }
+  })
   for _, token in ipairs(require("al.cops").get_active(project_dir)) do
-    local dll = ANALYZER_DLLS[token]
-    if dll and vim.fn.filereadable(dll) == 1 then
+    local dll = analyzer_dll(token)
+    if dll then
       table.insert(cmd, "/analyzer:" .. dll)
     end
   end

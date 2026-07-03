@@ -19,6 +19,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `~/.claude/settings.json` for AL MCP server |
+| `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
@@ -176,6 +177,30 @@ if not client._al_completion_patched then
 end
 ```
 
+### Experimental agentic LSP (`al launchlspserver`)
+
+Opt-in `require("al").setup({ experimental_lsp = true })`. Swaps the VSCode-extension
+`EditorServices.Host` for the **standard** LSP shipped by the AL dotnet tool
+(`al launchlspserver <root> --packagecachepath <root>/.alpackages`), BC 2026 wave 1+.
+
+- Runs as a distinct client **`al_agentic_lsp`** — every EditorServices workaround in
+  `plugin/al.lua` is guarded on the `al_language_server` name, so none apply. Native
+  `textDocument/definition`, find-references (cross-project), rename, completion, hover.
+- `lua/al/agentic_lsp.lua` — `M.start(bufnr, root)`, `M.available()` (checks binary +
+  `launchlspserver` in `--help`), `M.binary()`, `M.pids` (VimLeavePre kills the tree).
+- `on_attach`: sets project statusline + `set_lsp_ready()` (no server progress/loaded
+  events), auto-configures MCP once, forces native `gd` (scheduled to win over user maps).
+- Same `al` binary as the MCP server — different subcommand; run both together.
+- **Extension-independent**: needs only `~/.dotnet/tools/al` + `.alpackages`. The VSCode
+  extension (`ext_path`) is optional — `plugin/al.lua` no longer aborts when it is missing;
+  the `ext_path` guard now only skips the EditorServices-specific setup (`lsp_bin`,
+  `ensure_executable`). Non-agentic FileType path notifies + returns when `lsp_bin` is nil.
+- Verified e2e: attaches with `definition/hover/references/rename/completion` = true,
+  resolves `documentSymbol` against `.alpackages`, and attaches even with `ext.path = nil`.
+- **Known gaps**: no `al-preview://` base-object browsing; symbol download still uses the
+  EditorServices global-sources method. `:ALInfo` shows the active backend. (Compile is
+  extension-independent — see the fallback note under Compiling.)
+
 ## Compiling
 
 `:ALCompile` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` async. Full-width horizontal split (~30% height) streams output live. `<CR>` on diagnostic opens file at line/col. `q`/`<Esc>` closes panel. Quickfix also populated (`<leader>aq`).
@@ -185,6 +210,15 @@ Code analyzers from `alnvim.json` auto-included as `/analyzer:` flags. `ruleset_
 Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): error|warning ALxxxx: message`.
 
 `M.compile(dir, extra_args, on_success)` — `on_success()` called in `vim.schedule` only on clean build. `publish.lua` chains upload via this.
+
+**Compiler resolution (`compiler_prefix()`)** — no VSCode extension required. Prefers the
+extension's `alc` binary; falls back to `al compile` from the dotnet tool (`al` = the same
+binary as the MCP/agentic-LSP server), which forwards `/project:` `/packagecachepath:`
+`/analyzer:` straight to a bundled alc. Returns nil → notify to run `:ALInstallExtension`
+or `:ALInstallDotnetTool`. Analyzer DLLs (`analyzer_dll()`) resolve from the extension's
+shared `bin/Analyzers/` first, else the `net8.0` build bundled in the dotnet tool store
+(`~/.dotnet/tools/.store/.../tools/net8.0/any/*.dll`, globbed + cached). So cops work in
+either mode. Verified e2e: compiles ALTest via `al compile` with `ext.path = nil`.
 
 **`<CR>` path resolution** — `alc` inherits Neovim's cwd, which may differ from `project_dir` (e.g. cwd = parent of project). `build_cwd = vim.fn.getcwd()` captured at compile time; relative paths in `alc` output resolved against `build_cwd`, not `project_dir`. Same applies to `parse_output` (fixes quickfix/diagnostic filenames).
 

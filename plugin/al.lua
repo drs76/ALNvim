@@ -52,13 +52,19 @@ end, { desc = "Pull latest ALNvim from GitHub" })
 -- platform.ensure_executable fixes that. No-op on Windows.
 local platform  = require("al.platform")
 local ext_path  = require("al.ext").path
-if not ext_path then return end   -- ext.lua already notified the user
-local bin_dir   = ext_path .. "/bin/" .. platform.bin_subdir() .. "/"
-local lsp_bin   = bin_dir .. platform.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
-
--- Ensure both binaries are executable (no-op on Windows)
-for _, name in ipairs({ "Microsoft.Dynamics.Nav.EditorServices.Host", "alc" }) do
-  platform.ensure_executable(bin_dir .. platform.exe(name))
+-- ext_path is the MS AL VSCode extension dir (may be installed by :ALInstallExtension
+-- without VS Code itself). It provides the EditorServices.Host LSP and alc compiler.
+-- It is OPTIONAL: the experimental agentic backend (al launchlspserver) needs none of
+-- it, so we no longer abort the whole plugin when it is missing — only the
+-- EditorServices-specific setup is skipped. ext.lua has already warned the user.
+local bin_dir, lsp_bin
+if ext_path then
+  bin_dir = ext_path .. "/bin/" .. platform.bin_subdir() .. "/"
+  lsp_bin = bin_dir .. platform.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+  -- Ensure both binaries are executable (no-op on Windows)
+  for _, name in ipairs({ "Microsoft.Dynamics.Nav.EditorServices.Host", "alc" }) do
+    platform.ensure_executable(bin_dir .. platform.exe(name))
+  end
 end
 
 -- Track PIDs of AL server processes started in this session so VimLeavePre
@@ -83,6 +89,26 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     local root = vim.fs.root(args.buf, "app.json")
     if not root then return end
+
+    -- EXPERIMENTAL: standard `al launchlspserver` backend. Runs as a distinct
+    -- client (al_agentic_lsp) so none of the EditorServices custom-protocol
+    -- code below (all guarded on the "al_language_server" name) applies.
+    if require("al").config.experimental_lsp then
+      require("al.agentic_lsp").start(args.buf, root)
+      return
+    end
+
+    -- EditorServices path needs the VSCode extension binary. Without it, point the
+    -- user at the two ways forward instead of crashing on a nil cmd.
+    if not lsp_bin then
+      vim.notify(
+        "ALNvim: MS AL extension not found — EditorServices LSP unavailable.\n"
+        .. "Run :ALInstallExtension, or set experimental_lsp=true to use the "
+        .. "dotnet-tool LSP (al launchlspserver).",
+        vim.log.levels.WARN)
+      return
+    end
+
     -- assemblyProbingPaths must be a non-null array; omitting it crashes the server.
     -- The default in the VSCode extension is ['./.netpackages'], but probing a
     -- network-mounted path blocks indefinitely. Send an empty array — the server
@@ -531,6 +557,10 @@ vim.api.nvim_create_autocmd("LspDetach", {
   group = vim.api.nvim_create_augroup("ALNvimLspDetach", { clear = true }),
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
+    if client and client.name == "al_agentic_lsp" then
+      require("al.status").set_lsp_off()
+      return
+    end
     if client and client.name == "al_language_server" then
       require("al.status").set_lsp_off()
       if client._al_keepalive then
@@ -728,13 +758,18 @@ vim.api.nvim_create_user_command("ALInfo", function()
   local conn = require("al.connection")
   local root = lsp.get_root()
   local app  = lsp.read_app_json(root)
+  local agentic = require("al").config.experimental_lsp
   local lines = {
     "ALNvim info",
     "──────────────────────────────────",
-    "Extension : " .. ext_path,
-    "LSP binary: " .. lsp_bin,
+    "Extension : " .. (ext_path or "(not installed)"),
+    "LSP mode  : " .. (agentic and "agentic (al launchlspserver) [experimental]" or "editorservices"),
+    "LSP binary: " .. (agentic and require("al.agentic_lsp").binary() or (lsp_bin or "(none — install extension)")),
     "Project   : " .. (root or "(not found)"),
   }
+  if agentic and not require("al.agentic_lsp").available() then
+    table.insert(lines, "  ⚠ al launchlspserver not available — update the dotnet tool (--prerelease)")
+  end
   if app then
     table.insert(lines, string.format("App       : %s – %s (v%s)",
       app.publisher or "?", app.name or "?", app.version or "?"))
@@ -825,10 +860,13 @@ vim.api.nvim_create_autocmd("VimEnter", {
       if tostring(vim.fn.argv(i)):match("%.[Aa][Ll]$") then return end
     end
 
+    -- Client name depends on backend: agentic (al launchlspserver) vs EditorServices.
+    local lsp_name = require("al").config.experimental_lsp and "al_agentic_lsp" or "al_language_server"
+
     -- For each project root: create a scratch anchor buffer so the FileType
     -- autocmd fires and vim.lsp.start() starts a client with the correct root_dir.
     local existing = {}
-    for _, c in ipairs(vim.lsp.get_clients({ name = "al_language_server" })) do
+    for _, c in ipairs(vim.lsp.get_clients({ name = lsp_name })) do
       existing[c.root_dir] = true
     end
     for _, root in ipairs(roots) do
@@ -856,7 +894,7 @@ vim.api.nvim_create_autocmd("VimEnter", {
         timer:close()
         return
       end
-      local clients = vim.lsp.get_clients({ name = "al_language_server" })
+      local clients = vim.lsp.get_clients({ name = lsp_name })
       if status.is_ready() and #clients >= #roots then
         timer:stop()
         timer:close()
@@ -885,14 +923,23 @@ end, { desc = "AL: Run silent alc pass to refresh vim.diagnostic entries (file-t
 vim.api.nvim_create_autocmd("VimLeavePre", {
   once = false,
   callback = function()
+    -- Include agentic-LSP (al launchlspserver) PIDs in the cleanup set.
+    local agentic_pids = require("al.agentic_lsp").pids
     if platform.is_windows then
       for pid in pairs(_al_server_pids) do
+        vim.fn.system(string.format("taskkill /F /PID %d /T 2>nul", pid))
+      end
+      for pid in pairs(agentic_pids) do
         vim.fn.system(string.format("taskkill /F /PID %d /T 2>nul", pid))
       end
       return
     end
     -- Kill any tracked PIDs and their process groups.
     for pid in pairs(_al_server_pids) do
+      vim.fn.system(string.format(
+        "kill -9 -%d 2>/dev/null; kill -9 %d 2>/dev/null", pid, pid))
+    end
+    for pid in pairs(agentic_pids) do
       vim.fn.system(string.format(
         "kill -9 -%d 2>/dev/null; kill -9 %d 2>/dev/null", pid, pid))
     end
