@@ -200,6 +200,15 @@ Opt-in `require("al").setup({ experimental_lsp = true })`. Swaps the VSCode-exte
 - **Known gaps**: no `al-preview://` base-object browsing; symbol download still uses the
   EditorServices global-sources method. `:ALInfo` shows the active backend. (Compile is
   extension-independent — see the fallback note under Compiling.)
+- **⚠ Base-symbol navigation broken (beta backend)**: `al launchlspserver` only parses the
+  project's own `.al` files — it does NOT load the `.alpackages` base symbol packages, even
+  though it accepts `--packagecachepath` (verbose log: only `Parsing Codeunit/Report <project>`,
+  no Base Application/System package load). So `gd`/references/rename/hover return **nil** for
+  base-app objects (`"Sales Header"`, base methods — i.e. most real AL). EditorServices loads
+  base symbols because ALNvim injects implicit base packages via `al/setActiveWorkspace`; the
+  standard server has no equivalent when `app.json` `dependencies` is empty. Net: agentic is
+  fine for completion + project-local nav, but not base-symbol nav. Keep desktop on
+  EditorServices; on a no-extension box, expect crippled navigation until MS fixes this.
 
 ## Compiling
 
