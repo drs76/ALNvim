@@ -82,6 +82,35 @@ function M.start(bufnr, root)
       end)
     end,
     on_attach = function(client, buf)
+      -- The AL server (both EditorServices and launchlspserver) sends completion
+      -- labels as { label = "..." } objects instead of plain strings, which crashes
+      -- nvim-cmp's matcher (bad argument to 'byte'). nvim-cmp calls client:request
+      -- directly, bypassing vim.lsp.handlers, so patch client.request once to
+      -- normalise labels (and CompletionList.items) in the response.
+      if not client._al_completion_patched then
+        client._al_completion_patched = true
+        local _orig = client.request
+        client.request = function(self, method, params, callback, bufnr_)
+          if method == "textDocument/completion" and type(callback) == "function" then
+            local _cb = callback
+            callback = function(err, result, ...)
+              if not err and result then
+                local items = (type(result) == "table" and result.items) or result
+                if type(items) == "table" then
+                  for _, item in ipairs(items) do
+                    if type(item.label) == "table" then
+                      item.label = item.label.label or ""
+                    end
+                  end
+                end
+              end
+              return _cb(err, result, ...)
+            end
+          end
+          return _orig(self, method, params, callback, bufnr_)
+        end
+      end
+
       local status = require("al.status")
       -- Standard LSP: no al/progressNotification or al/activeProjectLoaded events,
       -- so surface project identity and mark ready immediately.
