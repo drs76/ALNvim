@@ -44,9 +44,18 @@ hi(0, "Pmenu",        { bg = "#0d0d0d", fg = "#efefef" })
 hi(0, "PmenuSel",     { bg = "#1a3a1a", fg = "#efefef" })
 hi(0, "PmenuSbar",    { bg = "#222222" })
 hi(0, "PmenuThumb",   { bg = "#04b925" })
--- nvim-cmp documentation/info float
-hi(0, "CmpDocumentation",       { bg = "#252525", fg = "#efefef" })
-hi(0, "CmpDocumentationBorder", { bg = "#252525", fg = "#444444" })
+-- nvim-cmp documentation/info float — readable LIGHT panel (white bg, black text,
+-- blue keywords). A completion config may remap the doc window's syntax groups to
+-- the CmpDoc* groups below via winhighlight so AL signatures read clearly.
+hi(0, "CmpDocumentation",       { bg = "#ffffff", fg = "#1f1f1f" })
+hi(0, "CmpDocumentationBorder", { bg = "#ffffff", fg = "#8a8a8a" })
+hi(0, "CmpDocKeyword", { bg = "#ffffff", fg = "#0000ff", bold = true })  -- blue keywords
+hi(0, "CmpDocType",    { bg = "#ffffff", fg = "#267f99" })               -- teal types
+hi(0, "CmpDocString",  { bg = "#ffffff", fg = "#a31515" })
+hi(0, "CmpDocComment", { bg = "#ffffff", fg = "#008000", italic = true })
+hi(0, "CmpDocNumber",  { bg = "#ffffff", fg = "#098658" })
+hi(0, "CmpDocIdent",   { bg = "#ffffff", fg = "#001080" })
+hi(0, "CmpDocText",    { bg = "#ffffff", fg = "#1f1f1f" })
 
 -- ── Syntax ────────────────────────────────────────────────────────────────────
 hi(0, "Comment",      { fg = "#04b925", italic = true })
