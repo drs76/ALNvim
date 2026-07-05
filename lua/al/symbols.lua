@@ -96,6 +96,62 @@ local function get_lsp_client(root)
   return nil
 end
 
+-- Simple progress float for global downloads: header + one status line.
+-- Returns finish(ok, msg) which swaps the spinner for ✓/✗ and auto-closes on ok.
+local function global_progress_float(header)
+  local lines = {
+    "  " .. header .. "  ",
+    "",
+    "  …  Downloading symbols…",
+  }
+  local width = 0
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 4) end
+  width = math.max(width, 52)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  local ui  = vim.api.nvim_list_uis()[1]
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative  = "editor",
+    width     = width,
+    height    = #lines,
+    row       = math.floor((ui.height - #lines) / 2),
+    col       = math.floor((ui.width  - width)  / 2),
+    style     = "minimal",
+    border    = "rounded",
+    title     = " AL: Downloading Symbols ",
+    title_pos = "center",
+    noautocmd = true,
+  })
+  vim.wo[win].wrap = false
+  local ns = vim.api.nvim_create_namespace("al_symbols_global")
+  vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+
+  return function(ok, msg)
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    local icon = ok and "✓" or "✗"
+    local hl   = ok and "DiagnosticOk" or "DiagnosticError"
+    -- Message may be multi-line (MCP result text); show first line in the row,
+    -- append the rest below and grow the window.
+    local parts = vim.split(msg, "\n", { plain = true, trimempty = true })
+    local rows  = { "  " .. icon .. "  " .. (parts[1] or "") }
+    for i = 2, #parts do rows[#rows + 1] = "     " .. parts[i] end
+    vim.api.nvim_buf_set_lines(buf, 2, 3, false, rows)
+    vim.api.nvim_buf_add_highlight(buf, ns, hl, 2, 0, -1)
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_height(win, math.min(2 + #rows, 20))
+    end
+    if ok then
+      vim.defer_fn(function()
+        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+      end, 3000)
+    else
+      vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+      vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+    end
+  end
+end
+
 function M.download_global(root)
   root = root or lsp.get_root()
   if not root then
@@ -103,10 +159,39 @@ function M.download_global(root)
     return
   end
 
+  -- Preferred: dotnet AL tool MCP al_downloadsymbols with globalSourcesOnly —
+  -- extension-free, no running LSP client needed, no auth, no country prompt
+  -- (resolves AppSource/Microsoft feeds from app.json).
+  local altool = require("al.altool")
+  if altool.has("launchmcpserver") then
+    local finish = global_progress_float("Global (AppSource / Microsoft) — al tool")
+    altool.mcp_call(root, "al_downloadsymbols", {
+      projectPath       = root,
+      globalSourcesOnly = true,
+      force             = true,
+    }, function(ok, text)
+      -- Tool result is a JSON envelope: { succeeded, message, data = { downloadedCount, … } }
+      local msg = text
+      local okj, resp = pcall(vim.fn.json_decode, text)
+      if okj and type(resp) == "table" and resp.message then
+        if resp.succeeded == false then ok = false end
+        msg = resp.message
+        if type(resp.data) == "table" and type(resp.data.downloadedCount) == "number" then
+          msg = string.format("%s (%d downloaded)", resp.message, resp.data.downloadedCount)
+        end
+      end
+      finish(ok, ok and (msg ~= "" and msg or "All symbols downloaded successfully")
+                 or ("Failed: " .. msg))
+    end)
+    return
+  end
+
+  -- Fallback: EditorServices LSP request (needs a running al_language_server).
   local client = get_lsp_client(root)
   if not client then
     vim.notify(
-      "AL: No active LSP client — open an .al file in this project first",
+      "AL: No active LSP client — open an .al file in this project first\n"
+      .. "(or install the dotnet AL tool: :ALInstallDotnetTool)",
       vim.log.levels.ERROR)
     return
   end

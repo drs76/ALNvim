@@ -31,6 +31,22 @@ end
 local conn  = require("al.connection")
 local lsp   = require("al.lsp")
 
+-- Resolve the EditorServices.Host binary path, or nil (with a notify) when the
+-- MS AL extension is not installed. The extension is optional for LSP/compile
+-- (agentic backend / al compile), but the DAP adapter has no substitute.
+local function editor_services_host()
+  local ext = require("al").config.ext_path or require("al.ext").path
+  if not ext then
+    vim.notify(
+      "AL: MS AL extension not found — debug adapter (EditorServices.Host) unavailable.\n"
+      .. "Run :ALInstallExtension to install it.",
+      vim.log.levels.ERROR)
+    return nil
+  end
+  local p = require("al.platform")
+  return ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+end
+
 -- Save UserPassword credentials to the AL LSP credential store before launching.
 -- VSCode calls al/saveUsernamePassword on the LSP server before starting the debug
 -- adapter; the adapter reads credentials from the store (Windows Credential Manager)
@@ -466,9 +482,9 @@ function M.setup_dap(root)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
 
-    local ext  = require("al").config.ext_path or require("al.ext").path
+    local host = editor_services_host()
+    if not host then return end
     local p    = require("al.platform")
-    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
 
     dap.adapters.al = {
       type    = "executable",
@@ -585,7 +601,9 @@ end
 function M.publish_only(root)
   local ok, dap = pcall(require, "dap")
   if not ok then
-    require("al.publish").publish(root)
+    -- Direct HTTP fallback (BC < 25). Never publish.publish() here — that
+    -- dispatcher may route back to this function.
+    require("al.publish").publish_http(root)
     return
   end
 
@@ -602,9 +620,9 @@ function M.publish_only(root)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
 
-    local ext  = require("al").config.ext_path or require("al.ext").path
+    local host = editor_services_host()
+    if not host then return end
     local p    = require("al.platform")
-    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
     local user, pass = conn.user_password(cfg)
 
     dap.adapters.al = {
@@ -712,9 +730,9 @@ function M.launch(root)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
 
-    local ext  = require("al").config.ext_path or require("al.ext").path
+    local host = editor_services_host()
+    if not host then return end
     local p    = require("al.platform")
-    local host = ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
     local user, pass = conn.user_password(cfg)
 
     local function register_adapter()

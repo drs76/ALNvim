@@ -395,49 +395,10 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- This is the trigger for the server to start indexing packages and source files.
     -- Structure mirrors what the VSCode AL extension sends: workspacePath at top level,
     -- settings nested under alResourceConfigurationSettings, setActiveWorkspace = true.
-    -- Build expectedProjectReferenceDefinitions from explicit app.json dependencies PLUS
-    -- the implicit Microsoft base packages (System, System Application, Business Foundation,
-    -- Base Application, Application).  These packages are not listed as explicit dependencies
-    -- in many projects (they're implied by the platform/application version fields) but the
-    -- AL server needs them in expectedProjectReferenceDefinitions to load their symbols and
-    -- resolve table references in report dataitems, page source tables, etc.
-    -- The appIds are stable Microsoft-assigned GUIDs that do not change across BC versions.
-    local lsp_mod = require("al.lsp")
-    local app_json = lsp_mod.read_app_json(root)
-    local proj_refs = {}
-
-    -- Implicit base packages: always required for full type resolution.
-    local base_pkg_ids = {
-      { id = "63ca2fa4-4f03-4f2b-a480-172fef340d3f", name = "System",              publisher = "Microsoft", ver_field = "platform"     },
-      { id = "e3d1b010-7f32-4370-9d80-0cb7e304b6f6", name = "System Application",  publisher = "Microsoft", ver_field = "application"  },
-      { id = "407dec77-aba4-4b99-a6d7-fd3fd7fc9a91", name = "Business Foundation", publisher = "Microsoft", ver_field = "application"  },
-      { id = "437dbf0e-84ff-417a-965d-ed2bb9650972", name = "Base Application",    publisher = "Microsoft", ver_field = "application"  },
-      { id = "c1335042-3002-4257-bf8a-75c898ccb1b3", name = "Application",         publisher = "Microsoft", ver_field = "application"  },
-    }
-    local explicit_ids = {}
-    for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
-      if dep.id then explicit_ids[dep.id:lower()] = true end
-    end
-    for _, bp in ipairs(base_pkg_ids) do
-      if not explicit_ids[bp.id:lower()] then
-        table.insert(proj_refs, {
-          appId     = bp.id,
-          name      = bp.name,
-          publisher = bp.publisher,
-          version   = (app_json and app_json[bp.ver_field]) or "0.0.0.0",
-        })
-      end
-    end
-    for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
-      if dep.id then
-        table.insert(proj_refs, {
-          appId     = dep.id,
-          name      = dep.name or "",
-          publisher = dep.publisher or "",
-          version   = dep.version or "0.0.0.0",
-        })
-      end
-    end
+    -- expectedProjectReferenceDefinitions must include the implicit Microsoft base
+    -- packages — lsp.build_project_refs() is the single shared builder (also used by
+    -- cops.apply for every re-send of al/setActiveWorkspace).
+    local proj_refs = require("al.lsp").build_project_refs(root)
 
     -- VSCode extension sends: { currentWorkspaceFolderPath: <WorkspaceFolder>, settings: { ... } }
     -- Sending settings at the top level causes silent deserialization failure in the server.
@@ -457,7 +418,9 @@ vim.api.nvim_create_autocmd("LspAttach", {
     if not client._al_workspace_set then
       client._al_workspace_set = true
 
-      local root_uri = "file://" .. root
+      -- vim.uri_from_fname handles spaces and Windows drive letters
+      -- ("file://" .. root produces invalid URIs for both).
+      local root_uri = vim.uri_from_fname(root)
       client:request("al/setActiveWorkspace", {
         currentWorkspaceFolderPath = {
           uri   = root_uri,
@@ -557,17 +520,19 @@ vim.api.nvim_create_autocmd("LspDetach", {
   group = vim.api.nvim_create_augroup("ALNvimLspDetach", { clear = true }),
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
-    if client and client.name == "al_agentic_lsp" then
-      require("al.status").set_lsp_off()
-      return
+    if not client then return end
+    if client.name ~= "al_agentic_lsp" and client.name ~= "al_language_server" then return end
+    -- LspDetach fires once per buffer, not on client shutdown. Skip teardown
+    -- while any other buffer is still attached (e.g. :bdelete of one AL file);
+    -- when the client stops, the last buffer's detach passes this guard.
+    for buf in pairs(client.attached_buffers or {}) do
+      if buf ~= args.buf and vim.api.nvim_buf_is_loaded(buf) then return end
     end
-    if client and client.name == "al_language_server" then
-      require("al.status").set_lsp_off()
-      if client._al_keepalive then
-        client._al_keepalive:stop()
-        client._al_keepalive:close()
-        client._al_keepalive = nil
-      end
+    require("al.status").set_lsp_off()
+    if client._al_keepalive then
+      client._al_keepalive:stop()
+      client._al_keepalive:close()
+      client._al_keepalive = nil
     end
   end,
 })
@@ -583,9 +548,9 @@ end, {
 })
 
 vim.api.nvim_create_user_command("ALPublish", function(opts)
-  -- Uses the adapter for publishing (all BC versions). Falls back to direct
-  -- HTTP publish if nvim-dap is not installed (works on BC < 25 only).
-  require("al.debug").publish_only(opts.args ~= "" and opts.args or nil)
+  -- Dispatcher: `al publishapp` (dotnet tool, extension-free, all BC versions)
+  -- → DAP adapter (nvim-dap + extension) → direct HTTP (BC < 25).
+  require("al.publish").publish(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
   complete = "dir",
@@ -593,7 +558,7 @@ end, {
 })
 
 vim.api.nvim_create_user_command("ALPublishOnly", function(opts)
-  require("al.debug").publish_only(opts.args ~= "" and opts.args or nil)
+  require("al.publish").publish(opts.args ~= "" and opts.args or nil, true)
 end, {
   nargs = "?",
   complete = "dir",
@@ -765,6 +730,10 @@ vim.api.nvim_create_user_command("ALInfo", function()
     "Extension : " .. (ext_path or "(not installed)"),
     "LSP mode  : " .. (agentic and "agentic (al launchlspserver) [experimental]" or "editorservices"),
     "LSP binary: " .. (agentic and require("al.agentic_lsp").binary() or (lsp_bin or "(none — install extension)")),
+    "Compiler  : " .. (function()
+      local prefix = require("al.compile").compiler_prefix()
+      return prefix and table.concat(prefix, " ") or "(none — run :ALInstallDotnetTool)"
+    end)(),
     "Project   : " .. (root or "(not found)"),
   }
   if agentic and not require("al.agentic_lsp").available() then

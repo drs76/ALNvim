@@ -1,12 +1,16 @@
 local M = {}
 
 local platform = require("al.platform")
-local EXT_PATH = require("al.ext").path or ""
--- Extension alc binary (nil when no VSCode extension is installed).
-local ALC      = EXT_PATH ~= ""
-  and (EXT_PATH .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc"))
-  or  nil
 local lsp      = require("al.lsp")
+
+-- Extension alc binary, or nil when no VSCode extension is installed.
+-- Resolved per call (not at require time) so a mid-session :ALInstallExtension
+-- is picked up without restarting Neovim.
+local function ext_alc()
+  local ext = require("al.ext").path
+  if not ext then return nil end
+  return ext .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc")
+end
 
 -- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
 local DIAG_NS = vim.api.nvim_create_namespace("al_compile")
@@ -17,26 +21,30 @@ local function ensure_executable(path)
 end
 
 -- Resolve the compiler invocation prefix.
---   1. VSCode extension's alc binary, if installed.
---   2. Fallback: `al compile` from the dotnet tool (Microsoft.Dynamics.BusinessCentral.
+--   1. `al compile` from the dotnet tool (Microsoft.Dynamics.BusinessCentral.
 --      Development.Tools) — forwards its args straight to a bundled alc, so the same
---      /project: /packagecachepath: /analyzer: flags work with no extension present.
+--      /project: /packagecachepath: /analyzer: flags work. Preferred: the extension-free
+--      stack is the primary toolchain; the VSCode extension is only needed for
+--      EditorServices (LSP/DAP).
+--   2. Fallback: the VSCode extension's alc binary, when the dotnet tool is absent.
 -- Returns a fresh array (safe to append to), or nil if neither compiler is available.
 local function compiler_prefix()
-  if ALC and vim.fn.filereadable(ALC) == 1 then
-    ensure_executable(ALC)
-    return { ALC }
-  end
   local al_bin = require("al.agentic_lsp").binary()
   if vim.fn.executable(al_bin) == 1 then
     return { al_bin, "compile" }
+  end
+  local alc = ext_alc()
+  if alc and vim.fn.filereadable(alc) == 1 then
+    ensure_executable(alc)
+    return { alc }
   end
   return nil
 end
 
 -- Map VSCode cop tokens to analyzer DLL basenames. Resolved to a full path by
--- analyzer_dll() below, preferring the extension's shared Analyzers dir and
--- falling back to the DLLs bundled inside the dotnet tool store.
+-- analyzer_dll() below, preferring the DLLs bundled inside the dotnet tool
+-- store (version-matched to the `al compile` alc) and falling back to the
+-- extension's shared Analyzers dir.
 local COP_DLL = {
   ["${CodeCop}"]               = "Microsoft.Dynamics.Nav.CodeCop.dll",
   ["${PerTenantExtensionCop}"] = "Microsoft.Dynamics.Nav.PerTenantExtensionCop.dll",
@@ -65,13 +73,16 @@ end
 local function analyzer_dll(token)
   local base = COP_DLL[token]
   if not base then return nil end
-  if EXT_PATH ~= "" then
-    local p = EXT_PATH .. "/bin/Analyzers/" .. base
-    if vim.fn.filereadable(p) == 1 then return p end
-  end
+  -- Dotnet tool store first — matches the compiler priority in compiler_prefix()
+  -- so analyzer and alc versions stay in sync.
   local dir = dotnet_analyzer_dir()
   if dir then
     local p = dir .. "/" .. base
+    if vim.fn.filereadable(p) == 1 then return p end
+  end
+  local ext = require("al.ext").path
+  if ext then
+    local p = ext .. "/bin/Analyzers/" .. base
     if vim.fn.filereadable(p) == 1 then return p end
   end
   return nil
@@ -469,6 +480,9 @@ function M.open_app_json()
   end
   vim.cmd("edit " .. vim.fn.fnameescape(root .. "/app.json"))
 end
+
+-- Expose the resolved compiler invocation (for :ALInfo / diagnostics).
+M.compiler_prefix = compiler_prefix
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()

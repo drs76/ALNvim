@@ -20,6 +20,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `~/.claude/settings.json` for AL MCP server |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
+| `lua/al/altool.lua` | Dotnet AL tool helpers: `M.has(subcmd)` (cached `--help` scan), `M.mcp_call()` one-shot MCP client (newline-delimited JSON-RPC) |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
@@ -120,7 +121,7 @@ client:request("al/setActiveWorkspace", {
 }, callback, bufnr)
 ```
 
-**`expectedProjectReferenceDefinitions`** — always prepend implicit Microsoft base packages (System, System Application, Business Foundation, Base Application, Application) using stable GUIDs, even when `app.json` has no dependencies. Without them, AL server never loads standard symbol tables. Versions from `app.json` `platform`/`application` fields. Explicit deps appended after, duplicates skipped.
+**`expectedProjectReferenceDefinitions`** — always prepend implicit Microsoft base packages (System, System Application, Business Foundation, Base Application, Application) using stable GUIDs, even when `app.json` has no dependencies. Without them, AL server never loads standard symbol tables. Versions from `app.json` `platform`/`application` fields. Explicit deps appended after, duplicates skipped. Single shared builder: `require("al.lsp").build_project_refs(root)` — used by both `plugin/al.lua` (first send) and `cops.apply()` (every re-send); never build this list inline.
 
 **`assemblyProbingPaths` must be a non-null JSON array** — omitting causes `ArgumentNullException("path")` crash. VSCode default `['./.netpackages']` hangs on CIFS/SMB — use `{}`.
 
@@ -220,14 +221,17 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 
 `M.compile(dir, extra_args, on_success)` — `on_success()` called in `vim.schedule` only on clean build. `publish.lua` chains upload via this.
 
-**Compiler resolution (`compiler_prefix()`)** — no VSCode extension required. Prefers the
-extension's `alc` binary; falls back to `al compile` from the dotnet tool (`al` = the same
-binary as the MCP/agentic-LSP server), which forwards `/project:` `/packagecachepath:`
-`/analyzer:` straight to a bundled alc. Returns nil → notify to run `:ALInstallExtension`
-or `:ALInstallDotnetTool`. Analyzer DLLs (`analyzer_dll()`) resolve from the extension's
-shared `bin/Analyzers/` first, else the `net8.0` build bundled in the dotnet tool store
-(`~/.dotnet/tools/.store/.../tools/net8.0/any/*.dll`, globbed + cached). So cops work in
-either mode. Verified e2e: compiles ALTest via `al compile` with `ext.path = nil`.
+**Compiler resolution (`compiler_prefix()`)** — no VSCode extension required. Prefers
+`al compile` from the dotnet tool (`al` = the same binary as the MCP/agentic-LSP server),
+which forwards `/project:` `/packagecachepath:` `/analyzer:` straight to a bundled alc;
+falls back to the extension's `alc` binary only when the dotnet tool is absent. The
+extension is needed for EditorServices (LSP/DAP) only — never preferred for compiling.
+Returns nil → notify to run `:ALInstallExtension` or `:ALInstallDotnetTool`. Analyzer DLLs
+(`analyzer_dll()`) resolve in the same order: the `net8.0` build bundled in the dotnet tool
+store first (`~/.dotnet/tools/.store/.../tools/net8.0/any/*.dll`, globbed + cached —
+version-matched to the bundled alc), else the extension's shared `bin/Analyzers/`. So cops
+work in either mode. `:ALInfo` shows the resolved compiler (`M.compiler_prefix` exported).
+Verified e2e: compiles ALTest via `al compile` with `ext.path = nil`.
 
 **`<CR>` path resolution** — `alc` inherits Neovim's cwd, which may differ from `project_dir` (e.g. cwd = parent of project). `build_cwd = vim.fn.getcwd()` captured at compile time; relative paths in `alc` output resolved against `build_cwd`, not `project_dir`. Same applies to `parse_output` (fixes quickfix/diagnostic filenames).
 
@@ -286,7 +290,7 @@ All commands use `lsp.get_root()` — `compile.lua` has no separate `find_projec
 
 `:ALDownloadSymbolsGlobal` skips the picker and goes straight to global.
 
-**Global download** — sends `al/downloadSymbolsFromGlobalSources` to the running LSP client. The server handles NuGet/AppSource auth internally. Requires `symbolsCountryRegion` (ISO 3166-1 alpha-2 or `w1`). Prompted on first use; saved to `alnvim.json`. Requires an AL LSP client to be active (open an `.al` file first).
+**Global download** — preferred path: dotnet AL tool MCP `al_downloadsymbols` with `globalSourcesOnly=true, force=true` via `altool.mcp_call()` — extension-free, no running LSP needed, no auth, no country prompt; result is a JSON envelope `{ succeeded, message, data = { downloadedCount } }`. Fallback (no dotnet tool): `al/downloadSymbolsFromGlobalSources` to the running EditorServices client — requires `symbolsCountryRegion` (prompted, saved to `alnvim.json`) and an active LSP client.
 
 AppSource-registered ISV packages (Continia, etc.) are resolved automatically via built-in feeds — no custom feed config needed for those. Custom `nugetFeeds` are for additional **public, unauthenticated** NuGet v3 feeds only; authenticated/private feeds are not supported by this LSP method.
 
@@ -464,7 +468,7 @@ Without `/startDebugging`: hangs in LSP mode. Without `/projectRoot`: can't loca
 
 **⚠️ On-prem ALLaunch on Windows — NOT WORKING**: fails with "Could not publish the package". Cloud works on both platforms. Root cause unknown. Use cloud sandboxes or VSCode for on-prem debugging.
 
-**Cloud publish** (`/dev/apps`): returns HTTP 415 for direct `application/octet-stream` POST — cloud API doesn't expose this to external clients. The DAP adapter (EditorServices.Host) handles publish internally.
+**Publish dispatcher** (`publish.M.publish`): 1. `al publishapp` (dotnet tool — extension-free, all BC versions, AAD/Windows/UserPassword auth built in; explicit `--server`/`--environmentname` flags from the picked launch config override launch.json; UserPassword creds passed via `BC_SERVER_USERNAME`/`BC_SERVER_PASSWORD` env) → 2. DAP adapter (`debug.publish_only`, needs nvim-dap + extension) → 3. `publish.M.publish_http` direct POST (BC < 25 only — cloud/BC 25+ returns HTTP 415 for external octet-stream POSTs). `debug.publish_only`'s no-dap fallback calls `publish_http`, never `publish` (dispatch loop).
 
 ## Inspecting the AL extension protocol
 
