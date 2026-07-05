@@ -74,23 +74,15 @@ function M.apply(root, cops, silent)
     return
   end
 
-  local app_json = require("al.lsp").read_app_json(root)
-  local proj_refs = {}
-  for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
-    if dep.id then
-      proj_refs[#proj_refs + 1] = {
-        appId     = dep.id,
-        name      = dep.name      or "",
-        publisher = dep.publisher or "",
-        version   = dep.version   or "0.0.0.0",
-      }
-    end
-  end
+  -- Shared builder: implicit Microsoft base packages + explicit deps.
+  -- Every al/setActiveWorkspace send must include the base packages or the
+  -- server drops the standard symbol tables on re-index.
+  local proj_refs = require("al.lsp").build_project_refs(root)
 
   local al_cfg = require("al").config
   client:request("al/setActiveWorkspace", {
     currentWorkspaceFolderPath = {
-      uri   = "file://" .. root,
+      uri   = vim.uri_from_fname(root),
       name  = vim.fn.fnamemodify(root, ":t"),
       index = 0,
     },
@@ -127,7 +119,11 @@ local function apply_selection(root, selected_tokens)
   M.apply(root, selected_tokens)
 end
 
--- Telescope multi-select picker.
+-- Telescope picker with explicit toggle state. The [x]/[ ] marks ARE the
+-- selection (Telescope's multi-selection cannot be pre-populated with the
+-- currently active cops, and applying it raw meant <CR> without <Tab> wiped
+-- the cop set down to the single highlighted entry). <Tab> toggles the mark,
+-- <CR> applies exactly what the marks show.
 local function telescope_picker(root, active_set)
   local pickers      = require("telescope.pickers")
   local finders      = require("telescope.finders")
@@ -135,38 +131,44 @@ local function telescope_picker(root, active_set)
   local actions      = require("telescope.actions")
   local action_state = require("telescope.actions.state")
 
-  pickers.new({}, {
-    prompt_title = "AL Code Cops  (<Tab> toggle, <CR> apply)",
-    finder = finders.new_table({
+  local state = vim.deepcopy(active_set)
+
+  local function make_finder()
+    return finders.new_table({
       results = COPS,
       entry_maker = function(cop)
-        local mark = active_set[cop.token] and "[x]" or "[ ]"
+        local mark = state[cop.token] and "[x]" or "[ ]"
         return {
           value   = cop.token,
           display = mark .. "  " .. cop.name .. "  —  " .. cop.desc,
           ordinal = cop.name,
-          -- pre-select active cops so they show as selected on open
-          _active = active_set[cop.token] or false,
         }
       end,
-    }),
+    })
+  end
+
+  pickers.new({}, {
+    prompt_title = "AL Code Cops  (<Tab> toggle, <CR> apply)",
+    finder = make_finder(),
     sorter = conf.generic_sorter({}),
     attach_mappings = function(prompt_bufnr, map)
-      -- Apply on <CR>
-      actions.select_default:replace(function()
+      map({ "i", "n" }, "<Tab>", function()
+        local entry = action_state.get_selected_entry()
+        if not entry then return end
+        state[entry.value] = not state[entry.value] or nil
         local picker = action_state.get_current_picker(prompt_bufnr)
-        local selections = picker:get_multi_selection()
-        -- If nothing multi-selected, treat the current entry as toggled
-        if #selections == 0 then
-          local entry = action_state.get_selected_entry()
-          if entry then selections = { entry } end
-        end
-        actions.close(prompt_bufnr)
-        local tokens = vim.tbl_map(function(s) return s.value end, selections)
-        apply_selection(root, tokens)
+        picker:refresh(make_finder(), { reset_prompt = false })
       end)
 
-      map({ "i", "n" }, "<Tab>", actions.toggle_selection + actions.move_selection_next)
+      -- Apply on <CR>: the toggled set, in canonical COPS order.
+      actions.select_default:replace(function()
+        actions.close(prompt_bufnr)
+        local tokens = {}
+        for _, cop in ipairs(COPS) do
+          if state[cop.token] then tokens[#tokens + 1] = cop.token end
+        end
+        apply_selection(root, tokens)
+      end)
       return true
     end,
   }):find()

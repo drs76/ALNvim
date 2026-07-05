@@ -15,16 +15,27 @@ if not _cs:find("^bc_") then
   vim.cmd("colorscheme bc_dark")
 end
 
+-- Per-buffer augroup: ftplugin re-runs on every :e of the same file; without
+-- clear=true each run would stack duplicate buffer-local autocmds (statusline
+-- flips, double organize-imports/format/organise on save).
+local _ft_grp = vim.api.nvim_create_augroup(
+  "ALNvimFt_" .. vim.api.nvim_get_current_buf(), { clear = true })
+
 -- AL statusline: show project name/version, LSP loading state, compile/publish result.
 -- Save and restore around focus changes so other buffers get their default statusline back.
 local _AL_STL = " %f %m  │  %{v:lua.require('al.status').get()}  %=  %l:%c  %P "
 local _prev_stl = vim.wo.statusline
+-- Reloading in the same window would capture the AL statusline as "previous";
+-- fall back to empty (= global 'statusline') instead.
+if _prev_stl == _AL_STL then _prev_stl = "" end
 vim.wo.statusline = _AL_STL
 vim.api.nvim_create_autocmd("BufLeave", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function() vim.wo.statusline = _prev_stl end,
 })
 vim.api.nvim_create_autocmd("BufEnter", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function() vim.wo.statusline = _AL_STL end,
 })
@@ -38,6 +49,7 @@ vim.api.nvim_create_autocmd("BufEnter", {
 -- loaded. Also reset stale diagnostics for this buffer after modification so any
 -- deferred renders use fresh positions from the next publishDiagnostics.
 vim.api.nvim_create_autocmd("BufWritePre", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function()
     if require("al").config.organize_imports_on_save == false then return end
@@ -103,6 +115,7 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 -- Format on save using the AL language server formatter.
 -- Runs synchronously in BufWritePre so the formatted content is what gets written.
 vim.api.nvim_create_autocmd("BufWritePre", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function()
     local bufnr  = vim.api.nvim_get_current_buf()
@@ -115,6 +128,7 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 })
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.
 vim.api.nvim_create_autocmd("BufWritePost", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function()
     require("al.wizard").organise_file(vim.api.nvim_get_current_buf())
@@ -124,6 +138,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 -- Re-run alc after save to refresh vim.diagnostic (file-tree badges + quickfix).
 -- Skips when LSP is still indexing to avoid queuing compiles during startup.
 vim.api.nvim_create_autocmd("BufWritePost", {
+  group    = _ft_grp,
   buffer   = 0,
   callback = function()
     if not require("al.status").is_ready() then return end

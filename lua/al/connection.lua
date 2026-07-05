@@ -16,8 +16,14 @@ local _cache = {}
 local function strip_jsonc(text)
   local out = {}
   for line in text:gmatch("[^\n]*") do
-    -- Only strip if // is not preceded by : or another /  (i.e. not in a URL)
-    line = line:gsub("([^:/])//[^\n]*$", "%1")
+    if line:match("^%s*//") then
+      -- Whole-line comment (incl. column 1 — the pattern below needs a
+      -- preceding char, so it would miss these).
+      line = ""
+    else
+      -- Only strip if // is not preceded by : or another /  (i.e. not in a URL)
+      line = line:gsub("([^:/])//[^\n]*$", "%1")
+    end
     table.insert(out, line)
   end
   return table.concat(out, "\n")

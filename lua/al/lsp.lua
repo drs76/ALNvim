@@ -65,6 +65,52 @@ function M.workspace_roots(ws_file)
   return roots
 end
 
+-- Implicit Microsoft base packages: always required for full type resolution.
+-- The appIds are stable Microsoft-assigned GUIDs that do not change across BC versions.
+-- Versions come from app.json platform/application fields.
+local BASE_PKG_IDS = {
+  { id = "63ca2fa4-4f03-4f2b-a480-172fef340d3f", name = "System",              publisher = "Microsoft", ver_field = "platform"    },
+  { id = "e3d1b010-7f32-4370-9d80-0cb7e304b6f6", name = "System Application",  publisher = "Microsoft", ver_field = "application" },
+  { id = "407dec77-aba4-4b99-a6d7-fd3fd7fc9a91", name = "Business Foundation", publisher = "Microsoft", ver_field = "application" },
+  { id = "437dbf0e-84ff-417a-965d-ed2bb9650972", name = "Base Application",    publisher = "Microsoft", ver_field = "application" },
+  { id = "c1335042-3002-4257-bf8a-75c898ccb1b3", name = "Application",         publisher = "Microsoft", ver_field = "application" },
+}
+
+-- Build expectedProjectReferenceDefinitions for al/setActiveWorkspace:
+-- implicit Microsoft base packages first, then explicit app.json dependencies,
+-- duplicates skipped. Every sender of al/setActiveWorkspace must use this —
+-- omitting the base packages means the server never loads the standard symbol
+-- tables (table references in report dataitems, page source tables, etc.).
+function M.build_project_refs(root)
+  local app_json = M.read_app_json(root)
+  local refs     = {}
+  local explicit = {}
+  for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
+    if dep.id then explicit[dep.id:lower()] = true end
+  end
+  for _, bp in ipairs(BASE_PKG_IDS) do
+    if not explicit[bp.id:lower()] then
+      refs[#refs + 1] = {
+        appId     = bp.id,
+        name      = bp.name,
+        publisher = bp.publisher,
+        version   = (app_json and app_json[bp.ver_field]) or "0.0.0.0",
+      }
+    end
+  end
+  for _, dep in ipairs((app_json and app_json.dependencies) or {}) do
+    if dep.id then
+      refs[#refs + 1] = {
+        appId     = dep.id,
+        name      = dep.name or "",
+        publisher = dep.publisher or "",
+        version   = dep.version or "0.0.0.0",
+      }
+    end
+  end
+  return refs
+end
+
 -- Read and decode app.json from a project root, or nil on failure
 function M.read_app_json(root)
   root = root or M.get_root()

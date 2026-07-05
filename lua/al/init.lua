@@ -88,7 +88,9 @@ M.defaults = {
   on_attach = nil,
 }
 
-M.config = {}
+-- Start from the defaults so the plugin behaves as documented even when the
+-- user never calls setup() (e.g. config.agent.claude_cmd, auto_mcp).
+M.config = vim.deepcopy(M.defaults)
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})

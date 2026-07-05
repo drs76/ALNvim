@@ -563,19 +563,23 @@ local function scan_table_fields(root, table_name)
     for _, fpath in ipairs(files) do
       local f = io.open(fpath, "r")
       if f then
-        local first = f:read("*l")
-        f:close()
-        if first then
-          first = first:gsub("\r$", "")
-          local kw, rest = first:match("^%s*([%a]+)%s+%d+%s*(.*)")
+        -- Scan the first 10 lines: namespaced files (BC21+, incl. MS symbol
+        -- stubs) start with `namespace X;` so the declaration is never line 1.
+        for _ = 1, 10 do
+          local ln = f:read("*l")
+          if not ln then break end
+          ln = ln:gsub("\r$", "")
+          local kw, rest = ln:match("^%s*([%a]+)%s+%d+%s*(.*)")
           if kw and kw:lower() == "table" then
             local nm = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'") or rest:match("^([^%s{]+)")
             if nm and nm:lower() == table_name:lower() then
               target_file = fpath
-              break
             end
+            break  -- found the declaration line; matching or not, stop scanning
           end
         end
+        f:close()
+        if target_file then break end
       end
     end
     if target_file then break end
@@ -904,15 +908,17 @@ function M.organise_file(bufnr)
   if obj_name and suffix and not has_affix(obj_name, suffix) then
     -- Append suffix inside the existing quotes, or wrap unquoted name.
     local new_name = obj_name .. " " .. suffix
+    -- Escape % in the replacement — gsub treats it as a capture reference.
+    local repl = ('"' .. new_name .. '"'):gsub("%%", "%%%%")
     local new_line
     -- Try replacing quoted form first
-    new_line = decl_line:gsub('"' .. vim.pesc(obj_name) .. '"', '"' .. new_name .. '"', 1)
+    new_line = decl_line:gsub('"' .. vim.pesc(obj_name) .. '"', repl, 1)
     if new_line == decl_line then
-      new_line = decl_line:gsub("'" .. vim.pesc(obj_name) .. "'", '"' .. new_name .. '"', 1)
+      new_line = decl_line:gsub("'" .. vim.pesc(obj_name) .. "'", repl, 1)
     end
     if new_line == decl_line then
       -- Unquoted: wrap in quotes with suffix
-      new_line = decl_line:gsub(vim.pesc(obj_name), '"' .. new_name .. '"', 1)
+      new_line = decl_line:gsub(vim.pesc(obj_name), repl, 1)
     end
     if new_line ~= decl_line then
       vim.api.nvim_buf_set_lines(bufnr, decl_lnum, decl_lnum + 1, false, { new_line })

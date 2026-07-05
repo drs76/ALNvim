@@ -345,7 +345,9 @@ function M.rename_object()
         return
       end
       local old_pat = '"' .. vim.pesc(old_name) .. '"'
-      local new_str = '"' .. new_name .. '"'
+      -- Escape % in the replacement — gsub treats it as a capture reference
+      -- (AL names like "Profit %" are legal).
+      local new_str = ('"' .. new_name .. '"'):gsub("%%", "%%%%")
       local changed = 0
       for _, fpath in ipairs(files) do
         local bufnr2 = vim.fn.bufadd(fpath)
