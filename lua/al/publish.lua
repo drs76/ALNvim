@@ -119,8 +119,11 @@ local AUTH_MAP = {
 -- Build `al publishapp` args from the picked launch configuration. Explicit
 -- flags override launch.json so the user's config picker choice wins even
 -- when launch.json has several configurations (the CLI would take the first).
-local function publishapp_args(root, cfg)
-  local a = { "publishapp", "--project", root }
+local function publishapp_args(root, cfg, app_file)
+  -- Explicit appPath: newer tool builds (18.0.37+) no longer search for the
+  -- .app when --project is given — they demand a build delegate instead
+  -- ("No .app file specified and build delegate is not available").
+  local a = { "publishapp", app_file, "--project", root }
   if cfg.schemaUpdateMode then
     vim.list_extend(a, { "--schemaupdatemode", cfg.schemaUpdateMode })
   end
@@ -174,10 +177,10 @@ local function open_publish_float(title)
 end
 
 -- Publish via `al publishapp`, streaming output into a float.
-local function publish_dotnet(root, cfg, on_success)
+local function publish_dotnet(root, cfg, app_file, on_success)
   local altool = require("al.altool")
   local cmd = { altool.binary() }
-  vim.list_extend(cmd, publishapp_args(root, cfg))
+  vim.list_extend(cmd, publishapp_args(root, cfg, app_file))
 
   -- UserPassword: the CLI resolves credentials from BC_SERVER_USERNAME /
   -- BC_SERVER_PASSWORD env vars — feed it the same credentials ALNvim already
@@ -259,7 +262,7 @@ function M.publish(root, skip_compile, on_success)
           vim.notify("AL: No .app file found. Run :ALCompile first.", vim.log.levels.ERROR)
           return
         end
-        publish_dotnet(root, cfg, on_success)
+        publish_dotnet(root, cfg, app_file, on_success)
       end
       if skip_compile then go() else require("al.compile").compile(root, nil, go) end
     end)
