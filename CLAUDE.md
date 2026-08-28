@@ -61,7 +61,20 @@ External requirements: `curl` and `tar.exe` built into Win10+. `rg` (ripgrep) re
 
 ## AL Toolchain paths
 
-`ext.lua` picks the highest-version `~/.vscode/extensions/ms-dynamics-smb.al-*` directory.
+`ext.lua` picks the highest-version **usable** `~/.vscode/extensions/ms-dynamics-smb.al-*` directory.
+
+**Two layouts exist; never assemble `bin/<platform>/…` paths outside ext.lua.**
+
+| | native (≤ 18.0.2293710) | dotnet (≥ 18.0.2668733) |
+|---|---|---|
+| host | `bin/<platform>/EditorServices.Host[.exe]` | `bin/EditorServices.Host.dll` |
+| alc | `bin/<platform>/alc[.exe]` | `bin/alc.dll` |
+| analyzers | `bin/Analyzers/*.dll` | `bin/*.dll` (flat) |
+| launch | run directly | `dotnet <dll>` (net10.0: needs **both** NETCore.App and AspNetCore.App) |
+
+Go through `ext.host_cmd()` / `ext.alc_cmd()` / `ext.analyzers_dir()`, which return command **arrays** and resolve the difference. `ext.layout` is `"native"`/`"dotnet"`/nil. A dotnet-layout install only counts as usable when a muxer is found (`dotnet_path` → `DOTNET_ROOT` → PATH → VS Code's bundled runtime); otherwise selection falls back to an older native install rather than picking one that cannot spawn.
+
+**Never `require("al")` from ext.lua's module body.** `al/init.lua` used to seed `ext_path = require("al.ext").path` in its defaults, so once ext.lua read config back it produced `al -> al.ext -> al` and "loop or previous error loading module 'al'", killing the whole plugin. That default is gone; `M.dotnet()` reads `package.loaded["al"]` instead, and re-reads `dotnet_path` on every call because ext.lua loads before `setup()` runs.
 
 **Glob pitfall:** use `vim.fn.glob(vim.fn.expand("~") .. "/.vscode/extensions/ms-dynamics-smb.al-*", false, true)` — NOT `vim.fn.glob(vim.fn.expand("~/.vscode/extensions/ms-dynamics-smb.al-*"), ...)`. `expand` with a wildcard does its own glob, causing double-expansion that silently returns nothing.
 

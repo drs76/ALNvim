@@ -3,13 +3,12 @@ local M = {}
 local platform = require("al.platform")
 local lsp      = require("al.lsp")
 
--- Extension alc binary, or nil when no VSCode extension is installed.
+-- Extension alc invocation, or nil when no VSCode extension is installed.
 -- Resolved per call (not at require time) so a mid-session :ALInstallExtension
--- is picked up without restarting Neovim.
+-- is picked up without restarting Neovim. ext.alc_cmd() owns the layout
+-- difference (native bin/<platform>/alc vs `dotnet bin/alc.dll`).
 local function ext_alc()
-  local ext = require("al.ext").path
-  if not ext then return nil end
-  return ext .. "/bin/" .. platform.bin_subdir() .. "/" .. platform.exe("alc")
+  return require("al.ext").alc_cmd()
 end
 
 -- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
@@ -33,12 +32,8 @@ local function compiler_prefix()
   if vim.fn.executable(al_bin) == 1 then
     return { al_bin, "compile" }
   end
-  local alc = ext_alc()
-  if alc and vim.fn.filereadable(alc) == 1 then
-    ensure_executable(alc)
-    return { alc }
-  end
-  return nil
+  -- Already a command array, and already validated/chmod'd by ext.alc_cmd().
+  return ext_alc()
 end
 
 -- Map VSCode cop tokens to analyzer DLL basenames. Resolved to a full path by
@@ -80,9 +75,11 @@ local function analyzer_dll(token)
     local p = dir .. "/" .. base
     if vim.fn.filereadable(p) == 1 then return p end
   end
-  local ext = require("al.ext").path
-  if ext then
-    local p = ext .. "/bin/Analyzers/" .. base
+  -- Extension fallback. Analyzers live in bin/Analyzers/ on the native layout
+  -- and flat in bin/ on the dotnet one; ext.analyzers_dir() resolves both.
+  local ext_dir = require("al.ext").analyzers_dir()
+  if ext_dir then
+    local p = ext_dir .. "/" .. base
     if vim.fn.filereadable(p) == 1 then return p end
   end
   return nil

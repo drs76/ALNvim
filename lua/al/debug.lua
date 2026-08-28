@@ -31,20 +31,25 @@ end
 local conn  = require("al.connection")
 local lsp   = require("al.lsp")
 
--- Resolve the EditorServices.Host binary path, or nil (with a notify) when the
--- MS AL extension is not installed. The extension is optional for LSP/compile
--- (agentic backend / al compile), but the DAP adapter has no substitute.
+-- Returns (command, prefix_args) for the adapter, or nil (with a notify) when
+-- no usable MS AL extension is installed. The extension is optional for
+-- LSP/compile (agentic backend / al compile), but the DAP adapter has no
+-- substitute.
+--
+-- On the native layout that is just the host binary and no prefix. On the
+-- dotnet layout (extension 18.0.2668733+) the host is a framework-dependent
+-- dll, so the command is the dotnet muxer and the dll becomes the first
+-- argument — every adapter flag must follow it.
 local function editor_services_host()
-  local ext = require("al").config.ext_path or require("al.ext").path
-  if not ext then
+  local cmd = require("al.ext").host_cmd()
+  if not cmd then
     vim.notify(
-      "AL: MS AL extension not found — debug adapter (EditorServices.Host) unavailable.\n"
+      "AL: no usable MS AL extension found — debug adapter (EditorServices.Host) unavailable.\n"
       .. "Run :ALInstallExtension to install it.",
       vim.log.levels.ERROR)
     return nil
   end
-  local p = require("al.platform")
-  return ext .. "/bin/" .. p.bin_subdir() .. "/" .. p.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
+  return cmd[1], vim.list_slice(cmd, 2)
 end
 
 -- Save UserPassword credentials to the AL LSP credential store before launching.
@@ -492,14 +497,16 @@ function M.setup_dap(root)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
 
-    local host = editor_services_host()
+    local host, host_args = editor_services_host()
     if not host then return end
     local p    = require("al.platform")
 
     dap.adapters.al = {
       type    = "executable",
       command = host,
-      args    = { "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) },
+      -- host_args carries the .dll on the dotnet layout; adapter flags follow it.
+      args    = vim.list_extend(vim.list_slice(host_args), {
+                  "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) }),
       options = {
         env      = make_adapter_env(),
         detached = not p.is_windows,
@@ -631,7 +638,7 @@ function M.publish_only(root)
     register_al_dap_events(dap)
     clear_oneshot_listeners(dap)
 
-    local host = editor_services_host()
+    local host, host_args = editor_services_host()
     if not host then return end
     local p    = require("al.platform")
     local user, pass = conn.user_password(cfg)
@@ -640,8 +647,9 @@ function M.publish_only(root)
       type    = "executable",
       id      = "al",     -- nvim-dap sends this as adapterID in DAP initialize
       command = host,
-      args    = { "/startDebugging", "/logLevel:Verbose",
-                  "/projectRoot:" .. require("al.platform").native_path(root) },
+      args    = vim.list_extend(vim.list_slice(host_args), {
+                  "/startDebugging", "/logLevel:Verbose",
+                  "/projectRoot:" .. require("al.platform").native_path(root) }),
       options = {
         env      = make_adapter_env(),
         cwd      = root,   -- adapter must run from project root to find the .app
@@ -750,7 +758,7 @@ function M.launch(root)
     register_al_dap_events(dap)
     clear_oneshot_listeners(dap)
 
-    local host = editor_services_host()
+    local host, host_args = editor_services_host()
     if not host then return end
     local p    = require("al.platform")
     local user, pass = conn.user_password(cfg)
@@ -760,8 +768,9 @@ function M.launch(root)
         type    = "executable",
         id      = "al",     -- nvim-dap sends this as adapterID in DAP initialize
         command = host,
-        args    = { "/startDebugging", "/logLevel:Verbose",
-                    "/projectRoot:" .. require("al.platform").native_path(root) },
+        args    = vim.list_extend(vim.list_slice(host_args), {
+                    "/startDebugging", "/logLevel:Verbose",
+                    "/projectRoot:" .. require("al.platform").native_path(root) }),
         options = {
           env      = make_adapter_env(),
           cwd      = root,   -- adapter must run from project root to find the .app

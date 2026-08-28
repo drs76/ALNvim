@@ -57,15 +57,11 @@ local ext_path  = require("al.ext").path
 -- It is OPTIONAL: the experimental agentic backend (al launchlspserver) needs none of
 -- it, so we no longer abort the whole plugin when it is missing — only the
 -- EditorServices-specific setup is skipped. ext.lua has already warned the user.
-local bin_dir, lsp_bin
-if ext_path then
-  bin_dir = ext_path .. "/bin/" .. platform.bin_subdir() .. "/"
-  lsp_bin = bin_dir .. platform.exe("Microsoft.Dynamics.Nav.EditorServices.Host")
-  -- Ensure both binaries are executable (no-op on Windows)
-  for _, name in ipairs({ "Microsoft.Dynamics.Nav.EditorServices.Host", "alc" }) do
-    platform.ensure_executable(bin_dir .. platform.exe(name))
-  end
-end
+-- Command that launches the EditorServices host, or nil when no usable install
+-- exists. ext.host_cmd() owns the layout difference: older extensions ship a
+-- native bin/<platform>/ binary, 18.0.2668733+ ship a framework-dependent
+-- bin/*.dll launched as `dotnet <dll>`. Never assemble that path here.
+local lsp_cmd = require("al.ext").host_cmd()
 
 -- Track PIDs of AL server processes started in this session so VimLeavePre
 -- can kill them and their .NET child processes (which survive plain SIGTERM).
@@ -100,7 +96,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- EditorServices path needs the VSCode extension binary. Without it, point the
     -- user at the two ways forward instead of crashing on a nil cmd.
-    if not lsp_bin then
+    if not lsp_cmd then
       vim.notify(
         "ALNvim: MS AL extension not found — EditorServices LSP unavailable.\n"
         .. "Run :ALInstallExtension, or set experimental_lsp=true to use the "
@@ -126,7 +122,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
     vim.lsp.start({
       name     = "al_language_server",
-      cmd      = { lsp_bin },
+      cmd      = lsp_cmd,
       root_dir = root,
       init_options = {
         workspacePath = root,
@@ -728,8 +724,14 @@ vim.api.nvim_create_user_command("ALInfo", function()
     "ALNvim info",
     "──────────────────────────────────",
     "Extension : " .. (ext_path or "(not installed)"),
+    "  layout  : " .. (require("al.ext").layout
+      and (require("al.ext").layout == "dotnet"
+           and ("dotnet (" .. tostring(require("al.ext").dotnet()) .. ")")
+           or "native bin/" .. platform.bin_subdir())
+      or "(none usable)"),
     "LSP mode  : " .. (agentic and "agentic (al launchlspserver) [experimental]" or "editorservices"),
-    "LSP binary: " .. (agentic and require("al.agentic_lsp").binary() or (lsp_bin or "(none — install extension)")),
+    "LSP binary: " .. (agentic and require("al.agentic_lsp").binary()
+      or (lsp_cmd and table.concat(lsp_cmd, " ") or "(none — install extension)")),
     "Compiler  : " .. (function()
       local prefix = require("al.compile").compiler_prefix()
       return prefix and table.concat(prefix, " ") or "(none — run :ALInstallDotnetTool)"
