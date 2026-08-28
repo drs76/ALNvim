@@ -540,7 +540,7 @@ function M.preview(bufnr, root)
   if #result.hls > 0 then
     local ns = vim.api.nvim_create_namespace("al_preview")
     for _, hl in ipairs(result.hls) do
-      vim.api.nvim_buf_add_highlight(pbuf, ns, hl.group, hl.line, hl.cs, hl.ce)
+      vim.hl.range(pbuf, ns, hl.group, { hl.line, hl.cs }, { hl.line, hl.ce })
     end
   end
 

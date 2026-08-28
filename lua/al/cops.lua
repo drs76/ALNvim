@@ -66,7 +66,7 @@ function M.apply(root, cops, silent)
   local clients = vim.lsp.get_clients({ name = "al_language_server" })
   local client
   for _, c in ipairs(clients) do
-    if c.config.root_dir == root then client = c; break end
+    if c.root_dir == root then client = c; break end
   end
   if not client then
     if not silent then

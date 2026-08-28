@@ -207,7 +207,10 @@ local function az_login_terminal(cb)
   vim.keymap.set("n", "q",     close_and_abort, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close_and_abort, { buffer = buf, nowait = true, silent = true })
 
-  vim.fn.termopen("az login --allow-no-subscriptions --use-device-code", {
+  -- jobstart{ term = true }, not the deprecated vim.fn.termopen (removed in a
+  -- future Neovim); same semantics, same buffer requirements.
+  vim.fn.jobstart("az login --allow-no-subscriptions --use-device-code", {
+    term    = true,
     on_exit = function(_, code)
       vim.schedule(function()
         if code == 0 then

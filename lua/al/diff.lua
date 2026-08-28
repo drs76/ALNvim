@@ -26,17 +26,60 @@ local function git_root(dir)
   return (vim.v.shell_error == 0 and r ~= "") and r or nil
 end
 
+-- Undo git's C-style path quoting: "src/caf\303\251 \"x\".al" → src/café "x".al
+-- porcelain v1 quotes any path containing a quote, backslash or control char
+-- (and, unless core.quotePath=false, any non-ASCII byte).
+local C_ESCAPES = {
+  a = "\a", b = "\b", f = "\f", n = "\n",
+  r = "\r", t = "\t", v = "\v", ["\\"] = "\\", ['"'] = '"',
+}
+
+local function unquote_path(path)
+  if path:sub(1, 1) ~= '"' then return path end
+  local body = path:sub(2, -2)
+  local out  = {}
+  local i    = 1
+  while i <= #body do
+    local c = body:sub(i, i)
+    if c == "\\" then
+      local nxt = body:sub(i + 1, i + 1)
+      local oct = body:match("^(%d%d%d)", i + 1)
+      if oct then
+        out[#out + 1] = string.char(tonumber(oct, 8))
+        i = i + 4
+      elseif C_ESCAPES[nxt] then
+        out[#out + 1] = C_ESCAPES[nxt]
+        i = i + 2
+      else
+        out[#out + 1] = nxt
+        i = i + 2
+      end
+    else
+      out[#out + 1] = c
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
 -- Parse `git status --porcelain` into a list of {status, file, abs} entries.
+-- core.quotePath=false keeps non-ASCII names readable; unquote_path handles the
+-- cases git still escapes. Without this, any such path kept its surrounding
+-- quotes and escapes, so `abs` pointed nowhere and the entry could not be opened.
 local function get_changed_files(git_r)
   local lines = vim.fn.systemlist(
-    "git -C " .. vim.fn.shellescape(git_r) .. " status --porcelain 2>/dev/null")
+    "git -C " .. vim.fn.shellescape(git_r) ..
+    " -c core.quotePath=false status --porcelain 2>/dev/null")
   if vim.v.shell_error ~= 0 then return nil end
   local entries = {}
   for _, line in ipairs(lines) do
     if #line >= 4 then
       local xy   = line:sub(1, 2)
       local path = vim.trim(line:sub(4))
-      path = path:match("^.+ %-> (.+)$") or path   -- handle renames
+      -- Renames are "old -> new"; take the new path. Match non-greedily so a
+      -- name legitimately containing " -> " keeps the last arrow as separator.
+      path = path:match("^.- %-> (.+)$") or path
+      path = unquote_path(path)
       local idx_s = xy:sub(1, 1)
       local wrk_s = xy:sub(2, 2)
       local status = (idx_s ~= " " and idx_s ~= "?") and idx_s or wrk_s
@@ -238,7 +281,7 @@ local function panel_explore(git_r, entries)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
     for i, e in ipairs(entries) do
-      vim.api.nvim_buf_add_highlight(buf, ns, HL[e.status] or "Normal", i - 1, 0, -1)
+      vim.hl.range(buf, ns, HL[e.status] or "Normal", { i - 1, 0 }, { i - 1, -1 })
     end
     vim.bo[buf].modifiable = false
   end
