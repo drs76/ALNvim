@@ -57,6 +57,16 @@ M.defaults = {
   -- cleans up the newly added using lines. Set to false to manage manually via <leader>acn.
   organize_imports_on_save = true,
 
+  -- How long the on-save organizeImports request may block the write before it
+  -- is abandoned. The save always completes; only the using-statement fix-up is
+  -- skipped on timeout.
+  organize_imports_timeout_ms = 1500,
+
+  -- Idle delay before the post-save alc pass that refreshes vim.diagnostic
+  -- (file-tree badges). This is a full-project compile, so saves are coalesced
+  -- rather than run one build per written file.
+  analyze_debounce_ms = 1500,
+
   -- Diagnostic rule IDs to suppress in both alc output and LSP publishDiagnostics.
   -- AA0215 (object name must be suffixed) is suppressed by default because the
   -- file-organiser adds the suffix during save, causing a transient false positive.

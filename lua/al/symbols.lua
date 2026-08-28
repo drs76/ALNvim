@@ -22,8 +22,7 @@ local function read_alnvim_json(root)
 end
 
 local function write_alnvim_json(root, data)
-  vim.fn.mkdir(root .. "/.vscode", "p")
-  vim.fn.writefile({ vim.fn.json_encode(data) }, config_path(root))
+  require("al.json").write(config_path(root), data)
 end
 
 function M.get_country_region(root)
