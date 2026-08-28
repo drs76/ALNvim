@@ -504,4 +504,8 @@ function M.extract_label()
   end)
 end
 
+-- Pure internals exposed for tests/ only. Not API.
+M._test = { find_quoted_string = find_quoted_string, find_proc_bounds = find_proc_bounds,
+            suggest_name = suggest_name }
+
 return M

@@ -276,4 +276,7 @@ function M.analyzers_dir()
   return nil
 end
 
+-- Pure internals exposed for tests/ only. Not API.
+M._test = { version_gt = version_gt, layout_of = layout_of }
+
 return M

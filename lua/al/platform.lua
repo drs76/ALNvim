@@ -122,19 +122,36 @@ function M.copy_dir(src, dst)
   end
 end
 
--- Return all *.al / *.AL files under root, excluding .alpackages.
+-- Return all *.al / *.AL files under root, excluding the symbol package cache.
 -- Uses vim.fn.glob so it works on both local and network (CIFS/SMB) paths on all OSes.
 --
--- The exclusion matches ".alpackages" as a *path segment*. Do not pass a Lua
--- pattern here: string.find(..., plain=true) treats "%." literally, so the old
--- "%.alpackages" needle never matched anything and the filter was a no-op.
+-- Two things about the exclusion:
+--
+--  * It must match a *path segment*, with a plain (non-pattern) search. The old
+--    needle was "%.alpackages" passed with plain=true, which searches for those
+--    literal characters and so never matched at all.
+--  * It cannot assume ".alpackages". That path is configurable via
+--    setup({ packagecachepath = … }), and the default only escapes this glob by
+--    luck: vim.fn.glob("**/*") does not descend into dot-directories, so a
+--    dotted cache dir is already invisible here. A cache dir *without* a
+--    leading dot is not, and would otherwise be scanned as project source by
+--    the PermissionSet generator and the namespace wizard.
 function M.glob_al_files(root)
   local files = vim.fn.glob(root .. "/**/*.al", false, true)
   vim.list_extend(files, vim.fn.glob(root .. "/**/*.AL", false, true))
+
+  local cache = ".alpackages"
+  local al = package.loaded["al"]   -- avoid a require cycle; config is optional
+  if al and al.config and al.config.packagecachepath
+     and al.config.packagecachepath ~= "" then
+    cache = al.config.packagecachepath
+  end
+  local needle = "/" .. cache:gsub("\\", "/"):gsub("^%./", ""):gsub("/+$", "") .. "/"
+
   return vim.tbl_filter(function(f)
     -- glob returns backslashes on Windows; normalise before segment matching.
     local p = f:gsub("\\", "/")
-    return not p:find("/.alpackages/", 1, true)
+    return not (p:find(needle, 1, true) or p:find("/.alpackages/", 1, true))
   end, files)
 end
 

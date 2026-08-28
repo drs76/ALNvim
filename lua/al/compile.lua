@@ -554,6 +554,9 @@ end
 -- Expose the resolved compiler invocation (for :ALInfo / diagnostics).
 M.compiler_prefix = compiler_prefix
 
+-- Pure internals exposed for tests/ only. Not API — do not call from plugin code.
+M._test = { line_stream = line_stream, parse_output = parse_output }
+
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()
   local root = lsp.get_root()

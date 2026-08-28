@@ -386,4 +386,7 @@ function M.explore(root)
   end
 end
 
+-- Pure internals exposed for tests/ only. Not API.
+M._test = { unquote_path = unquote_path }
+
 return M

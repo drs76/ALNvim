@@ -510,6 +510,21 @@ idx = c.find('activeWorkspaceClosure'); print(c[max(0,idx-2000):idx+500])
 vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 ```
 
+## Tests
+
+`tests/run.sh` — dependency-free suite (63 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+
+```bash
+tests/run.sh
+```
+
+Covers the parsing-level logic where regressions are silent: job-output line framing, alc diagnostic parsing, AL quote scanning, procedure bounds, git path unquoting, JSON writing, the package-cache filter, project references, connection URLs, ID ranges. Pure internals are reached via a `M._test` table on the module — that table is for tests only, never call it from plugin code.
+
+**Write tests that fail against the old code.** Each fix here was verified by reverting it and confirming the suite goes red; a test that passes both ways documents nothing. Two traps found doing exactly that:
+
+- A `.alpackages` fixture cannot test the package-cache filter. `vim.fn.glob("**/*")` never descends into dot-directories, so those files are excluded regardless and the test passes with the filter deleted. Use a **non-dotted** `packagecachepath`.
+- Hard-coded cursor columns silently point at the wrong character when a fixture's indentation changes. Derive positions from the fixture string.
+
 ## Project layout
 
 ```
