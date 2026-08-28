@@ -201,10 +201,38 @@ Chat persists when hidden — toggle reopens same session.
 
 | Key | Action |
 |---|---|
-| `<Space>f` | Find files (mini.pick) |
+| `<Space>f` | Find files (fff, falls back to Snacks picker) |
+| `<Space>sg` | Live grep |
+| `<Space>sr` | Recent files |
 | `<Space>h` | Search help |
-| `<Space>e` | Open file browser (Oil) |
+| `<Space>e` | File browser — **mini.files** (Miller columns, floating) |
+| `<Space>E` | File browser — Snacks sidebar |
 | `;` | Dashboard |
+
+---
+
+## mini.files  *(`<Space>e`)*
+
+Miller-column browser: parent on the left, current in the middle, **preview on the
+right**. The preview follows the cursor but is not focused — nothing in it is
+selectable until you move into it.
+
+| Key | Action |
+|---|---|
+| `l` | Go **in** — focus the right column / open file |
+| `h` | Go **out** — back to the left column |
+| `L` | Go in **and close** the explorer (files only) |
+| `H` | Go out plus |
+| `q` / `<Esc>` | Close |
+| `g?` | Show all mappings |
+
+> There is **no `<CR>` mapping** — mini.files navigates with `h` / `l` only.
+> This is the usual surprise coming from tree-style explorers.
+
+**File operations are buffer edits, not commands.** Rename by editing the line,
+`dd` to delete, `p` to move — then press `=` to apply. Nothing touches disk until
+`=`, and deletes go to trash (`permanent_delete = false`), so a mistaken `dd` +
+`=` is recoverable.
 
 ---
 
@@ -213,7 +241,7 @@ Chat persists when hidden — toggle reopens same session.
 | Key | Action |
 |---|---|
 | `<Space>w` | Save file |
-| `<Space>q` | Quit |
+| `<Space>q` | Close **buffer** (`:bdelete`) — not quit |
 | `<Space>o` | Save + source current Lua file |
 | `<Space>y` | Yank to system clipboard |
 | `<Space>d` | Delete to system clipboard |
