@@ -1,13 +1,27 @@
 local M = {}
 
 M.defaults = {
-  -- Path to the MS AL VSCode extension (auto-detected from ~/.vscode/extensions/).
-  -- Override only if you have a non-standard install location.
-  ext_path = require("al.ext").path,
+  -- NOTE: there is deliberately no `ext_path` here. It used to be seeded with
+  -- require("al.ext").path at module load, which (a) froze the value so a
+  -- mid-session :ALInstallExtension was never picked up, and (b) created a
+  -- require cycle once ext.lua started reading this config: al -> al.ext ->
+  -- al -> "loop or previous error loading module 'al'", which took the whole
+  -- plugin down. Ask require("al.ext") directly instead; it is cached and
+  -- re-resolvable via ext.reload().
 
   -- Extra arguments passed to alc on every compile
   -- e.g. { "/warnaserror+", "/analyzer:/path/to/analyzer.dll" }
   alc_extra_args = {},
+
+  -- Path to a `dotnet` muxer used to run the newer MS AL extension layout
+  -- (18.0.2668733+ ships EditorServices.Host and alc as framework-dependent
+  -- .NET assemblies rather than native per-platform binaries, so they are
+  -- launched as `dotnet <dll>`). Needs the .NET 10 runtime — both
+  -- Microsoft.NETCore.App and Microsoft.AspNetCore.App.
+  --
+  -- Leave nil to auto-detect: DOTNET_ROOT, then `dotnet` on PATH, then the
+  -- runtime VS Code's .NET Install Tool downloads for the extension.
+  dotnet_path = nil,
 
   -- Path to a ruleset JSON file passed to alc via /ruleset:<file>.
   -- Set to an absolute path, e.g. "/home/user/Documents/AL/codeanalyzer.json"
@@ -104,6 +118,13 @@ M.config = vim.deepcopy(M.defaults)
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
+
+  -- ext.lua resolves the extension (and its layout) at require time, which is
+  -- before this runs. A configured dotnet_path can make a previously unusable
+  -- dotnet-layout install usable, so re-resolve once the config is known.
+  if M.config.dotnet_path and M.config.dotnet_path ~= "" then
+    pcall(function() require("al.ext").reload() end)
+  end
 
   -- Wire up snippet loading after LuaSnip is initialised.
   local ok, _ = pcall(require, "luasnip")
