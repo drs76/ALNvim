@@ -136,6 +136,32 @@ end
 -- Expose so wizard.lua can reuse the same search-dir logic.
 M.build_search_dirs = build_search_dirs
 
+-- Run rg asynchronously and hand the output lines to cb on the main loop.
+--
+-- These searches cover the project root *plus every extracted symbol package* —
+-- Base Application alone is around ten thousand .al stubs — so the previous
+-- vim.fn.systemlist() call froze the UI for the whole search. rg exits 1 when
+-- nothing matched, which is not an error, so the exit code is ignored.
+local function rg_async(cmd, cb)
+  local out = {}
+  local job = vim.fn.jobstart(cmd, {
+    stdout_buffered = true,
+    on_stdout = function(_, data)
+      for _, l in ipairs(data) do
+        if l ~= "" then out[#out + 1] = l end
+      end
+    end,
+    on_exit = function()
+      vim.schedule(function() cb(out) end)
+    end,
+  })
+  if job <= 0 then
+    vim.schedule(function() cb({}) end)
+  end
+end
+
+M.rg_async = rg_async
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.objects(root)
@@ -173,7 +199,7 @@ function M.objects(root)
   }
   vim.list_extend(cmd, search_dirs)
 
-  local raw     = vim.fn.systemlist(cmd)
+  rg_async(cmd, function(raw)
   local entries = {}
 
   for _, line in ipairs(raw) do
@@ -273,6 +299,7 @@ function M.objects(root)
       return true
     end,
   }):find()
+  end)  -- rg_async
 end
 
 -- Telescope picker: procedures and triggers in the current file.
@@ -296,8 +323,8 @@ function M.procedures()
     return
   end
 
-  local raw     = vim.fn.systemlist({ "rg", "--line-number", "--no-heading",
-                                       "--color=never", "-e", PROC_PAT, file })
+  rg_async({ "rg", "--line-number", "--no-heading",
+             "--color=never", "-e", PROC_PAT, file }, function(raw)
   local entries = {}
 
   for _, line in ipairs(raw) do
@@ -339,6 +366,7 @@ function M.procedures()
       return true
     end,
   }):find()
+  end)  -- rg_async
 end
 
 -- Telescope live-grep across all AL files (project + symbol packages).

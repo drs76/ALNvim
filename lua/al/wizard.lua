@@ -323,8 +323,11 @@ local TEMPLATES = {
 
 -- ── Object list helpers ───────────────────────────────────────────────────────
 
--- Return sorted list of object names of the given AL type across project + symbols.
-local function get_objects_of_type(root, obj_type)
+-- Call cb(names) with a sorted list of object names of the given AL type across
+-- project + symbol packages. Asynchronous: the search covers every extracted
+-- symbol package, so running it with systemlist blocked the editor for seconds
+-- each time an "extends" picker was opened.
+local function get_objects_of_type(root, obj_type, cb)
   local search_dirs = require("al.explorer").build_search_dirs(root)
   -- rg -i for case-insensitive match (AL keywords can be any case)
   local pat = string.format("^\\s*%s\\s+\\d+", obj_type)
@@ -334,39 +337,41 @@ local function get_objects_of_type(root, obj_type)
     "-e", pat,
   }
   vim.list_extend(cmd, search_dirs)
-  local raw   = vim.fn.systemlist(cmd)
-  local seen  = {}
-  local names = {}
-  -- Match: optional whitespace, keyword (any case), whitespace, digits, whitespace, rest
-  local extract = "^%s*[%a]+%s+%d+%s*(.*)"
-  for _, line in ipairs(raw) do
-    local rest = line:match(extract)
-    if rest then
-      local name = rest:match('^"([^"]+)"')
-                or rest:match("^'([^']+)'")
-                or rest:gsub("%s*;?%s*$", ""):gsub("%s+$", "")
-      if name and name ~= "" and not seen[name] then
-        seen[name] = true
-        table.insert(names, name)
+  require("al.explorer").rg_async(cmd, function(raw)
+    local seen  = {}
+    local names = {}
+    -- Match: optional whitespace, keyword (any case), whitespace, digits, whitespace, rest
+    local extract = "^%s*[%a]+%s+%d+%s*(.*)"
+    for _, line in ipairs(raw) do
+      local rest = line:match(extract)
+      if rest then
+        local name = rest:match('^"([^"]+)"')
+                  or rest:match("^'([^']+)'")
+                  or rest:gsub("%s*;?%s*$", ""):gsub("%s+$", "")
+        if name and name ~= "" and not seen[name] then
+          seen[name] = true
+          table.insert(names, name)
+        end
       end
     end
-  end
-  table.sort(names, function(a, b) return a:lower() < b:lower() end)
-  return names
+    table.sort(names, function(a, b) return a:lower() < b:lower() end)
+    cb(names)
+  end)
 end
 
 -- Show a vim.ui.select picker for objects of the given type, then call cb(name) or cb(nil).
 local function pick_object(root, obj_type, prompt, cb)
-  local list = get_objects_of_type(root, obj_type)
-  if #list == 0 then
-    vim.notify("AL Wizard: no " .. obj_type .. " objects found — enter name manually", vim.log.levels.WARN)
-    vim.ui.input({ prompt = prompt }, function(val)
-      cb(val == nil and nil or (val ~= "" and val or nil))
+  get_objects_of_type(root, obj_type, function(list)
+    if #list == 0 then
+      vim.notify("AL Wizard: no " .. obj_type .. " objects found — enter name manually", vim.log.levels.WARN)
+      vim.ui.input({ prompt = prompt }, function(val)
+        cb(val == nil and nil or (val ~= "" and val or nil))
+      end)
+      return
+    end
+    vim.ui.select(list, { prompt = prompt }, function(choice)
+      cb(choice)  -- nil when cancelled
     end)
-    return
-  end
-  vim.ui.select(list, { prompt = prompt }, function(choice)
-    cb(choice)  -- nil when cancelled
   end)
 end
 
@@ -550,44 +555,9 @@ local function scan_project_objects(root)
   return entries
 end
 
--- Find the .al file that declares the named table (project + symbol caches),
--- then extract its field names. Uses io.open to avoid CIFS/VFS issues.
-local function scan_table_fields(root, table_name)
-  local search_dirs = require("al.explorer").build_search_dirs(root)
-
-  -- Step 1: find the file that contains the table declaration
-  local target_file
-  local platform = require("al.platform")
-  for _, dir in ipairs(search_dirs) do
-    local files = platform.glob_al_files(dir)
-    for _, fpath in ipairs(files) do
-      local f = io.open(fpath, "r")
-      if f then
-        -- Scan the first 10 lines: namespaced files (BC21+, incl. MS symbol
-        -- stubs) start with `namespace X;` so the declaration is never line 1.
-        for _ = 1, 10 do
-          local ln = f:read("*l")
-          if not ln then break end
-          ln = ln:gsub("\r$", "")
-          local kw, rest = ln:match("^%s*([%a]+)%s+%d+%s*(.*)")
-          if kw and kw:lower() == "table" then
-            local nm = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'") or rest:match("^([^%s{]+)")
-            if nm and nm:lower() == table_name:lower() then
-              target_file = fpath
-            end
-            break  -- found the declaration line; matching or not, stop scanning
-          end
-        end
-        f:close()
-        if target_file then break end
-      end
-    end
-    if target_file then break end
-  end
-
-  if not target_file then return {} end
-
-  -- Step 2: extract field names from the table file
+-- Extract field names from a single table .al file. Uses io.open to avoid the
+-- Vim VFS layer, which is unreliable on CIFS/SMB mounts.
+local function read_table_fields(target_file)
   local fields = {}
   local f = io.open(target_file, "r")
   if not f then return {} end
@@ -616,6 +586,30 @@ local function scan_table_fields(root, table_name)
   f:close()
 
   return fields
+end
+
+-- Call cb(fields) with the field names of the named table, searching the project
+-- root and every extracted symbol package.
+--
+-- Locating the declaration used to mean globbing every .al file under every
+-- search dir and io.open-ing each one to read its first ten lines — with Base
+-- Application extracted that is tens of thousands of file opens on the main
+-- loop, for one table. rg finds the declaring file in one async pass; only that
+-- file is then read.
+local function scan_table_fields(root, table_name, cb)
+  local search_dirs = require("al.explorer").build_search_dirs(root)
+  -- Escape rg regex metacharacters in the table name ("Profit %", "G/L Entry").
+  local esc = table_name:gsub("[%(%)%.%[%]%*%+%?%^%$%{%}|\\/]", "\\%0")
+  local pat = string.format([[^\s*table\s+\d+\s+["']?%s["']?\s*$]], esc)
+  local cmd = {
+    "rg", "--files-with-matches", "--color=never", "-i",
+    "--glob", "*.al", "--glob", "*.AL",
+    "-e", pat,
+  }
+  vim.list_extend(cmd, search_dirs)
+  require("al.explorer").rg_async(cmd, function(files)
+    cb(#files > 0 and read_table_fields(files[1]) or {})
+  end)
 end
 
 -- ── Type-specific extra prompts ───────────────────────────────────────────────
@@ -649,7 +643,7 @@ extra_prompts.page = function(data, cb)
     data.fields    = {}
 
     -- 2. Pick source table (with "none" at top so Esc still cancels the whole wizard)
-    local table_list   = get_objects_of_type(data.root, "table")
+    get_objects_of_type(data.root, "table", function(table_list)
     local NO_TABLE     = "— No source table —"
     local display_list = { NO_TABLE }
     vim.list_extend(display_list, table_list)
@@ -666,7 +660,7 @@ extra_prompts.page = function(data, cb)
       -- Defer so the source-table picker fully closes before opening a new one
       vim.schedule(function()
         -- 3. Scan fields of the chosen table
-        local field_list = scan_table_fields(data.root, choice)
+        scan_table_fields(data.root, choice, function(field_list)
         if #field_list == 0 then
           cb(data)
           return
@@ -715,8 +709,10 @@ extra_prompts.page = function(data, cb)
             return true
           end,
         }):find()
+        end)  -- scan_table_fields
       end)  -- vim.schedule
     end)  -- display_list select
+    end)  -- get_objects_of_type
   end)  -- PAGE_TYPES select
 end
 
