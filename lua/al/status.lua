@@ -49,8 +49,32 @@ local function branch()
   return _s.branch
 end
 
+-- Composed-string cache. M.get() is called from a %{} statusline expression, so
+-- it runs on every redraw — every cursor move, every keystroke in some modes —
+-- and it walks up to 8 directories looking for .git/HEAD and re-joins the cop
+-- list each time. A short TTL collapses that to a few times a second while
+-- staying visually immediate.
+local _str, _str_t = nil, 0
+local STR_TTL_MS = 250
+
+-- redrawstatus! forces a full statusline redraw. al/progressNotification
+-- arrives many times a second while the server indexes, and firing one redraw
+-- per notification was most of the cost of watching a project load. Coalesce
+-- to at most one redraw per interval; _pending guards against stacking
+-- schedules while one is already in flight.
+local _pending, _last_draw = false, 0
+local DRAW_MS = 100
+
 local function redraw()
-  vim.schedule(function() vim.cmd("redrawstatus!") end)
+  _str = nil  -- state changed: drop the composed-string cache
+  if _pending then return end
+  _pending = true
+  local wait = math.max(0, DRAW_MS - (vim.uv.now() - _last_draw))
+  vim.defer_fn(function()
+    _pending   = false
+    _last_draw = vim.uv.now()
+    vim.cmd("redrawstatus!")
+  end, wait)
 end
 
 function M.set_project(name, ver, root)
@@ -127,6 +151,9 @@ end
 -- Returns a formatted string suitable for embedding in vim.wo.statusline via
 -- %{v:lua.require('al.status').get()}
 function M.get()
+  local now = vim.uv.now()
+  if _str and (now - _str_t) < STR_TTL_MS then return _str end
+
   local parts = {}
 
   if _s.project then
@@ -167,8 +194,9 @@ function M.get()
     parts[#parts + 1] = require("al.cops").short_names(_s.cops)
   end
 
-  if #parts == 0 then return "" end
-  return table.concat(parts, "  ")
+  _str   = #parts > 0 and table.concat(parts, "  ") or ""
+  _str_t = now
+  return _str
 end
 
 return M

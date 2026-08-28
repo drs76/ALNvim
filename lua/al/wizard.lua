@@ -458,7 +458,11 @@ local FILE_TYPE_MAP = {
   profileextension="ProfileExt", controladdin="ControlAddin",
 }
 
-local function build_path(root, info, id, name)
+-- Note: no object ID in the filename. organise_file() derives the same
+-- <Name>.<FileType>.al independently, so the two must stay in step —
+-- adding an ID here would make every existing file get renamed on its
+-- next save.
+local function build_path(root, info, name)
   -- Strip the CRS affix from the name for the filename (object declaration
   -- keeps the full name; organise_file will enforce it on first save).
   local suffix = read_crs_suffix(root)
@@ -784,7 +788,7 @@ local function run_wizard(root, info)
 
   local function finish()
     local content = TEMPLATES[info.key](data)
-    local dir, path = build_path(root, info, data.id, data.name)
+    local dir, path = build_path(root, info, data.name)
     vim.fn.mkdir(dir, "p")
 
     if vim.fn.filereadable(path) == 1 then

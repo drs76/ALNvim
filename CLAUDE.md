@@ -423,7 +423,7 @@ Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com �
 
 `M.generate_permissionset(root)` — skips the type picker, goes directly to ID → name → scan. Mirrors VS Code "AL: Generate Permission Set". Calls `run_wizard` with the permissionset entry directly.
 
-File naming (CRS): `src/<obj_type>/<id>.<SanitisedName>.<FileType>.al`. Interface: `src/interface/<Name>.Interface.al`. Auto-moves on `:w` (`wizard.M.organise_file` via `BufWritePost` in `ftplugin/al.lua`) — uses `vim.fn.rename` + `nvim_buf_set_name`, no reload needed.
+File naming (CRS): `src/<obj_type>/<SanitisedName>.<FileType>.al` — no object ID. `build_path()` and `organise_file()` derive this independently and must stay in step; adding an ID to one would make `organise_file` rename every existing file on its next save. Interface: `src/interface/<Name>.Interface.al`. Auto-moves on `:w` (`wizard.M.organise_file` via `BufWritePost` in `ftplugin/al.lua`) — uses `vim.fn.rename` + `nvim_buf_set_name`, no reload needed.
 
 PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` — not available on Windows). Tables generate two entries (`tabledata RIMD` + `table X`); others get `X`.
 
