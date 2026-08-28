@@ -44,9 +44,10 @@ function M.get_active(root)
 end
 
 -- Persist cop selection for a project.
+-- alnvim.json sits next to launch.json and is normally committed, so it is
+-- written indented rather than as json_encode's single line.
 function M.set_active(root, cops)
   local path = config_path(root)
-  vim.fn.mkdir(root .. "/.vscode", "p")
   -- Preserve any other keys already in alnvim.json
   local data = {}
   local ok, lines = pcall(vim.fn.readfile, path)
@@ -55,7 +56,7 @@ function M.set_active(root, cops)
     if ok2 and type(existing) == "table" then data = existing end
   end
   data.codeAnalyzers = cops
-  vim.fn.writefile({ vim.fn.json_encode(data) }, path)
+  require("al.json").write(path, data)
 end
 
 -- Re-send al/setActiveWorkspace with updated cops so changes take effect
@@ -261,7 +262,6 @@ end
 -- Persist the browser choice for a project.
 function M.set_browser(root, browser)
   local path = config_path(root)
-  vim.fn.mkdir(root .. "/.vscode", "p")
   local data = {}
   local ok, lines = pcall(vim.fn.readfile, path)
   if ok and lines and #lines > 0 then
@@ -269,7 +269,7 @@ function M.set_browser(root, browser)
     if ok2 and type(existing) == "table" then data = existing end
   end
   data.browser = browser
-  vim.fn.writefile({ vim.fn.json_encode(data) }, path)
+  require("al.json").write(path, data)
 end
 
 -- Public entry point: `:ALSelectBrowser`

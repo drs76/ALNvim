@@ -26,10 +26,17 @@ local function read_settings()
   return data
 end
 
--- Persist the settings table to disk.
+-- Persist the settings table to disk as indented JSON.
+-- This file is user-owned and hand-edited; auto_mcp rewrites it on every AL
+-- LspAttach, so writing json_encode's single-line output would flatten the
+-- user's formatting each time an AL project is opened.
 local function write_settings(data)
-  vim.fn.mkdir(vim.fn.fnamemodify(SETTINGS_PATH, ":h"), "p")
-  vim.fn.writefile({ vim.fn.json_encode(data) }, SETTINGS_PATH)
+  local ok, err = require("al.json").write(SETTINGS_PATH, data)
+  if not ok then
+    vim.notify("AL MCP: could not write " .. SETTINGS_PATH .. ": " .. tostring(err),
+      vim.log.levels.ERROR)
+  end
+  return ok
 end
 
 -- Entry key for a project root, e.g. "al:HTest".
@@ -76,13 +83,21 @@ function M.configure(root)
     settings.mcpServers = {}
   end
 
-  local key = entry_key(root)
-  settings.mcpServers[key] = {
+  local key   = entry_key(root)
+  local entry = {
     command = AL_BINARY,
     args    = build_args(root),
   }
 
-  write_settings(settings)
+  -- auto_mcp calls this on every LspAttach. Skip the write (and the notify) when
+  -- the entry is already correct, so simply opening an AL file does not rewrite
+  -- the user's settings file or spam the message area.
+  if vim.deep_equal(settings.mcpServers[key], entry) then
+    return true
+  end
+
+  settings.mcpServers[key] = entry
+  if not write_settings(settings) then return false end
   vim.notify("AL MCP: configured '" .. key .. "' — restart Claude Code or run /mcp to activate.",
     vim.log.levels.INFO)
   return true
