@@ -28,6 +28,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish) |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
+| `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
 | `lua/al/actions.lua` | ALActions picker — 45 actions with descriptions; Telescope or `vim.ui.select` fallback |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
@@ -42,6 +43,8 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 ## Windows compatibility
 
 All OS-specific operations go through `lua/al/platform.lua` — never add platform conditionals elsewhere.
+
+**`glob_al_files` exclusion pitfall:** the `.alpackages` filter uses `string.find(p, "/.alpackages/", 1, true)`. With `plain=true` a Lua pattern is matched **literally** — the old `"%.alpackages"` needle never matched, so the filter was a silent no-op for every caller (PermissionSet scan, `:ALAddNamespace`, `scan_table_fields`). Paths are normalised to forward slashes first because glob returns backslashes on Windows.
 
 | Operation | Linux/macOS | Windows |
 |---|---|---|
@@ -221,6 +224,10 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 
 `M.compile(dir, extra_args, on_success)` — `on_success()` called in `vim.schedule` only on clean build. `publish.lua` chains upload via this.
 
+**Job output must be line-buffered.** `jobstart` without `stdout_buffered` delivers chunks where `data[1]` continues the previous chunk's partial line and `data[#data]` is itself partial. Appending chunks verbatim splits diagnostics across two "lines" so they never match the quickfix pattern. `line_stream(on_lines)` returns `(feed, flush)`; give stdout and stderr **separate** carries and call both `flush()` in `on_exit`. Same pattern as `altool.mcp_call`.
+
+**`analyze_diagnostics` cancellation.** A job cancelled via `jobstop` still fires `on_exit` with partial output. `_analyze_gen` is bumped per call and captured; a stale `on_exit` returns early instead of resetting the diagnostic namespace and clobbering `_analyze_job`. `M.analyze_soon(dir)` debounces (`analyze_debounce_ms`, default 1500) — BufWritePost uses it so `:wa` schedules one build, not one per file.
+
 **Compiler resolution (`compiler_prefix()`)** — no VSCode extension required. Prefers
 `al compile` from the dotnet tool (`al` = the same binary as the MCP/agentic-LSP server),
 which forwards `/project:` `/packagecachepath:` `/analyzer:` straight to a bundled alc;
@@ -376,7 +383,9 @@ Browser values stored in `alnvim.json` as `"browser"`. macOS: no-path value → 
 
 ## AL MCP Server (`lua/al/mcp.lua`)
 
-Writes `~/.claude/settings.json` to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `json_encode` → `writefile` (preserves all other keys). `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
+Writes `~/.claude/settings.json` to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
+
+**Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `~/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
 
 ## AL Extension Installer (`lua/al/install.lua`)
 
@@ -465,6 +474,8 @@ Without `/startDebugging`: hangs in LSP mode. Without `/projectRoot`: can't loca
 **`launchBrowser`**: Linux/macOS → force `false` (adapter xdg-open causes SIGABRT, open from Lua instead). Windows on-prem → must be `true` (adapter requires it; `false` → "internal error"). Windows cloud → `false` (URL comes via `al/openUri` event).
 
 **`M.close_debug()`** (`<leader>adX` / `:ALDapClose`): terminates DAP session, closes adapter output float (`_out_win`), calls `dapui.close()` silently (no-op if dap-ui absent), restores `_pre_debug_buf` (captured at `M.launch()` start). Scans windows first; falls back to `nvim_set_current_buf` if pre-debug buf is not currently displayed.
+
+**One-shot DAP listeners must be armed after a clean compile.** `alnvim_publish_only` and `alnvim_launch_browser` delete themselves when `event_al/refreshExplorerObjects` fires. Registering them *before* `compile()` leaked them on every failed build: the listener never fired, never unregistered, and the next `:ALLaunch` tripped it — the publish-only one calls `dap.disconnect()`, killing the new session mid-attach. `clear_oneshot_listeners(dap)` also runs at the start of `launch`/`publish_only` to cover an adapter that dies before emitting the event.
 
 **⚠️ On-prem ALLaunch on Windows — NOT WORKING**: fails with "Could not publish the package". Cloud works on both platforms. Root cause unknown. Use cloud sandboxes or VSCode for on-prem debugging.
 
