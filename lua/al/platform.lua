@@ -124,11 +124,17 @@ end
 
 -- Return all *.al / *.AL files under root, excluding .alpackages.
 -- Uses vim.fn.glob so it works on both local and network (CIFS/SMB) paths on all OSes.
+--
+-- The exclusion matches ".alpackages" as a *path segment*. Do not pass a Lua
+-- pattern here: string.find(..., plain=true) treats "%." literally, so the old
+-- "%.alpackages" needle never matched anything and the filter was a no-op.
 function M.glob_al_files(root)
   local files = vim.fn.glob(root .. "/**/*.al", false, true)
   vim.list_extend(files, vim.fn.glob(root .. "/**/*.AL", false, true))
   return vim.tbl_filter(function(f)
-    return not f:find("%.alpackages", 1, true)
+    -- glob returns backslashes on Windows; normalise before segment matching.
+    local p = f:gsub("\\", "/")
+    return not p:find("/.alpackages/", 1, true)
   end, files)
 end
 

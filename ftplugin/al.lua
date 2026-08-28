@@ -64,7 +64,11 @@ vim.api.nvim_create_autocmd("BufWritePre", {
       range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
       context      = { only = { "source.organizeImports" }, diagnostics = {} },
     }
-    local result = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", params, 5000)
+    -- Blocks the save. 5s was long enough to feel like a hang whenever the server
+    -- was busy; organizeImports is a convenience, so time out fast and let the
+    -- write proceed (<leader>acn applies it manually).
+    local timeout = require("al").config.organize_imports_timeout_ms or 1500
+    local result = vim.lsp.buf_request_sync(bufnr, "textDocument/codeAction", params, timeout)
     if not result then return end
     local enc = clients[1].offset_encoding or "utf-16"
     local applied = false
@@ -137,13 +141,15 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 
 -- Re-run alc after save to refresh vim.diagnostic (file-tree badges + quickfix).
 -- Skips when LSP is still indexing to avoid queuing compiles during startup.
+-- Debounced (analyze_soon): this is a full-project compile, so :wa across ten
+-- files must schedule one run, not ten.
 vim.api.nvim_create_autocmd("BufWritePost", {
   group    = _ft_grp,
   buffer   = 0,
   callback = function()
     if not require("al.status").is_ready() then return end
     local root = require("al.lsp").get_root()
-    if root then require("al.compile").analyze_diagnostics(root) end
+    if root then require("al.compile").analyze_soon(root) end
   end,
 })
 

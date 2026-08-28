@@ -128,7 +128,44 @@ end
 local _build_win = nil
 
 -- Track the running silent-analyze job so repeated calls cancel the previous one.
+-- _analyze_gen is bumped per call so a cancelled job's late on_exit can identify
+-- itself as stale and stay out of the way of the job that replaced it.
 local _analyze_job = nil
+local _analyze_gen = 0
+
+-- jobstart (without stdout_buffered) delivers output in chunks where data[1]
+-- continues the previous chunk's trailing partial line and data[#data] is itself
+-- partial. Appending chunks verbatim splits a diagnostic across two "lines", so
+-- it renders garbled in the panel and never matches the quickfix pattern.
+--
+-- Returns (feed, flush): feed(data) hands on_lines only complete lines; flush()
+-- emits the final partial line and must be called from on_exit.
+local function line_stream(on_lines)
+  local carry = ""
+  local function feed(data)
+    if not data then return end
+    local out = {}
+    carry = carry .. (data[1] or "")
+    for i = 2, #data do
+      out[#out + 1] = carry
+      carry = data[i]
+    end
+    if #out > 0 then on_lines(out) end
+  end
+  local function flush()
+    if carry ~= "" then
+      local last = carry
+      carry = ""
+      on_lines({ last })
+    end
+  end
+  return feed, flush
+end
+
+-- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
+local function strip_cr(lines)
+  return vim.tbl_map(function(l) return (l:gsub("\r", "")) end, lines)
+end
 
 -- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
 -- The window above (where the file is) is used for <CR> jump-to-error.
@@ -388,24 +425,23 @@ function M.compile(project_dir, extra_args, on_success)
   local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir, build_cwd)
   buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
 
-  -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
-  local function strip_cr(lines)
-    return vim.tbl_map(function(l) return l:gsub("\r", "") end, lines)
-  end
-
   local output = {}
+  local function consume(lines)
+    local clean = strip_cr(lines)
+    vim.list_extend(output, clean)
+    vim.schedule(function() buf_append(buf, clean) end)
+  end
+  -- Separate carries: stdout and stderr are independent streams and interleaving
+  -- their partial lines through one buffer would corrupt both.
+  local feed_out, flush_out = line_stream(consume)
+  local feed_err, flush_err = line_stream(consume)
+
   vim.fn.jobstart(cmd, {
-    on_stdout = function(_, data)
-      local clean = strip_cr(data)
-      vim.list_extend(output, clean)
-      vim.schedule(function() buf_append(buf, clean) end)
-    end,
-    on_stderr = function(_, data)
-      local clean = strip_cr(data)
-      vim.list_extend(output, clean)
-      vim.schedule(function() buf_append(buf, clean) end)
-    end,
+    on_stdout = function(_, data) feed_out(data) end,
+    on_stderr = function(_, data) feed_err(data) end,
     on_exit = function(_, code)
+      flush_out()
+      flush_err()
       finish(buf, parse_output(output, build_cwd), code, on_success, project_dir)
     end,
   })
@@ -418,11 +454,15 @@ function M.analyze_diagnostics(project_dir)
   if not project_dir then return end
 
   local build_cwd = vim.fn.getcwd()
-  -- Cancel any in-progress analyze job before starting a new one.
+  -- Cancel any in-progress analyze job before starting a new one. The cancelled
+  -- job still fires on_exit later with truncated output — _analyze_gen lets that
+  -- callback recognise itself as stale (see on_exit below).
   if _analyze_job then
     pcall(vim.fn.jobstop, _analyze_job)
     _analyze_job = nil
   end
+  _analyze_gen = _analyze_gen + 1
+  local gen = _analyze_gen
 
   local prefix = compiler_prefix()
   if not prefix then return end
@@ -450,14 +490,23 @@ function M.analyze_diagnostics(project_dir)
   end
 
   local output = {}
+  local function consume(lines)
+    vim.list_extend(output, strip_cr(lines))
+  end
+  local feed_out, flush_out = line_stream(consume)
+  local feed_err, flush_err = line_stream(consume)
+
   _analyze_job = vim.fn.jobstart(cmd, {
-    on_stdout = function(_, data)
-      vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
-    end,
-    on_stderr = function(_, data)
-      vim.list_extend(output, vim.tbl_map(function(l) return l:gsub("\r", "") end, data))
-    end,
+    on_stdout = function(_, data) feed_out(data) end,
+    on_stderr = function(_, data) feed_err(data) end,
     on_exit = function(_, code)
+      flush_out()
+      flush_err()
+      -- A job cancelled by a newer analyze call still reaches on_exit. Publishing
+      -- its partial output would reset the diagnostic namespace and write
+      -- truncated results over the newer run; clearing _analyze_job would also
+      -- orphan the newer job so the call after that could not cancel it.
+      if gen ~= _analyze_gen then return end
       _analyze_job = nil
       local qf = parse_output(output, build_cwd)
       local errors = vim.tbl_filter(function(e) return e.type == "E" end, qf)
@@ -469,6 +518,30 @@ function M.analyze_diagnostics(project_dir)
       end)
     end,
   })
+end
+
+-- Debounced analyze. BufWritePost fires per save, and analyze_diagnostics runs a
+-- full-project alc pass; on a burst of saves (:wa, formatter round-trips, rapid
+-- edits) that queued one rebuild per file. Coalesce them into a single run.
+local _analyze_timer = nil
+function M.analyze_soon(project_dir, delay_ms)
+  if _analyze_timer then
+    _analyze_timer:stop()
+    _analyze_timer:close()
+    _analyze_timer = nil
+  end
+  local t = vim.uv.new_timer()
+  _analyze_timer = t
+  t:start(delay_ms or (require("al").config.analyze_debounce_ms or 1500), 0,
+    vim.schedule_wrap(function()
+      -- A newer call may have replaced (and closed) this timer between the uv
+      -- callback firing and this scheduled function running — identity check,
+      -- not a plain nil check, or we would close the timer that replaced us.
+      if _analyze_timer ~= t then return end
+      _analyze_timer = nil
+      if not t:is_closing() then t:close() end
+      M.analyze_diagnostics(project_dir)
+    end))
 end
 
 -- Open app.json for the current project

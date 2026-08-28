@@ -430,6 +430,16 @@ end
 -- a nil guard, so rawset(tbl, nil, {}) crashes with "table index is nil".
 -- Patch both listener metatables to return {} for nil keys so the callback
 -- that sets adapter_responded=true can still run.
+-- Clear the self-removing publish/launch listeners before starting a new run.
+-- They normally delete themselves when they fire, but an adapter that dies
+-- before emitting al/refreshExplorerObjects would leave one armed and it would
+-- then trip on the *next* session (the publish-only one disconnects it).
+local function clear_oneshot_listeners(dap)
+  for _, key in ipairs({ "alnvim_publish_only", "alnvim_launch_browser" }) do
+    dap.listeners.before["event_al/refreshExplorerObjects"][key] = nil
+  end
+end
+
 local _dap_listeners_patched = false
 local function patch_dap_nil_command(dap)
   if _dap_listeners_patched then return end
@@ -619,6 +629,7 @@ function M.publish_only(root)
   conn.pick_launch(root, function(cfg)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
+    clear_oneshot_listeners(dap)
 
     local host = editor_services_host()
     if not host then return end
@@ -670,18 +681,25 @@ function M.publish_only(root)
     -- One-shot listener: fires when the adapter signals publish is complete.
     -- Disconnect so the adapter exits cleanly without starting a debug session
     -- (which would occupy the BC debug slot and block a subsequent ALLaunch).
-    dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
-      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
-      vim.notify("AL: Published successfully", vim.log.levels.INFO)
-      -- On Linux/macOS: launchBrowser=true makes the adapter call xdg-open (our stub).
-      -- Open from Lua instead. On Windows: adapter opens the browser natively — skip.
-      if not p.is_windows then
-        local browser = require("al.cops").get_browser(_current_root)
-        require("al.platform").open_url(conn.webclient_url(cfg), browser)
+    --
+    -- Registered only after a clean compile. Registering before the compile
+    -- leaked the listener whenever the build failed: it never fired, never
+    -- removed itself, and the next :ALLaunch tripped it and disconnected the
+    -- new debug session mid-attach.
+    local function arm_publish_only_listener()
+      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
+        dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
+        vim.notify("AL: Published successfully", vim.log.levels.INFO)
+        -- On Linux/macOS: launchBrowser=true makes the adapter call xdg-open (our stub).
+        -- Open from Lua instead. On Windows: adapter opens the browser natively — skip.
+        if not p.is_windows then
+          local browser = require("al.cops").get_browser(_current_root)
+          require("al.platform").open_url(conn.webclient_url(cfg), browser)
+        end
+        vim.schedule(function()
+          if dap.session() then dap.disconnect({ terminateDebuggee = false }) end
+        end)
       end
-      vim.schedule(function()
-        if dap.session() then dap.disconnect({ terminateDebuggee = false }) end
-      end)
     end
 
     require("al.compile").compile(root, nil, function()
@@ -696,6 +714,7 @@ function M.publish_only(root)
         return
       end
       vim.notify("AL: Publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …", vim.log.levels.INFO)
+      arm_publish_only_listener()
       -- Pass launch_cfg (resolved config) so the LSP stores credentials under the
       -- same key the adapter will look up (environmentType=OnPrem, etc.).
       save_creds_to_lsp(launch_cfg, user, pass, function()
@@ -729,6 +748,7 @@ function M.launch(root)
   conn.pick_launch(root, function(cfg)
     patch_dap_nil_command(dap)
     register_al_dap_events(dap)
+    clear_oneshot_listeners(dap)
 
     local host = editor_services_host()
     if not host then return end
@@ -792,13 +812,18 @@ function M.launch(root)
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
       -- On Windows: adapter opens the browser natively via launchBrowser — skip here.
-      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
-        dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
-        if not p.is_windows then
-          local url = conn.webclient_url(cfg)
-          local browser = require("al.cops").get_browser(_current_root)
-          require("al.platform").open_url(url, browser)
-          vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
+      -- Armed only after a clean compile, for the same reason as the publish-only
+      -- listener: a failed build would otherwise leave it registered to fire on
+      -- the next session.
+      local function arm_launch_browser_listener()
+        dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
+          dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
+          if not p.is_windows then
+            local url = conn.webclient_url(cfg)
+            local browser = require("al.cops").get_browser(_current_root)
+            require("al.platform").open_url(url, browser)
+            vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
+          end
         end
       end
 
@@ -815,6 +840,7 @@ function M.launch(root)
         vim.notify(
           "AL: Compile succeeded — publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …",
           vim.log.levels.INFO)
+        arm_launch_browser_listener()
         -- Save credentials to LSP store before starting the adapter.
         -- Pass launch_cfg (resolved config) so the LSP stores under the same key
         -- the adapter will look up (environmentType=OnPrem instead of Sandbox, etc.).
