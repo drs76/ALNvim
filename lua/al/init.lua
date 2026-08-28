@@ -105,17 +105,23 @@ M.config = vim.deepcopy(M.defaults)
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
 
-  -- Wire up snippet loading after LuaSnip is initialised
-  -- (lazy_load is safe to call multiple times)
+  -- Wire up snippet loading after LuaSnip is initialised.
   local ok, _ = pcall(require, "luasnip")
   if ok then
     require("al.snippets").load()
   else
-    -- Defer until LuaSnip becomes available (e.g. loaded later by vim.pack)
-    vim.api.nvim_create_autocmd("User", {
-      pattern  = "LuasnipInsertNodeEnter",
+    -- LuaSnip may reach the runtimepath after setup() runs, depending on
+    -- vim.pack ordering. Retry at VimEnter, by which point every pack is loaded.
+    --
+    -- The old trigger was "User LuasnipInsertNodeEnter", which only fires from
+    -- inside an already-expanded snippet — it could never fire before the
+    -- snippets it was meant to load existed, so this path never ran and AL
+    -- snippets were simply missing for the whole session.
+    vim.api.nvim_create_autocmd("VimEnter", {
       once     = true,
-      callback = function() require("al.snippets").load() end,
+      callback = function()
+        if pcall(require, "luasnip") then require("al.snippets").load() end
+      end,
     })
   end
 end

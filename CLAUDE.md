@@ -363,6 +363,8 @@ Auto-applied on AL window focus, restored on non-AL focus. Key colours: bg `#1E1
 
 ## AL Explorer (`lua/al/explorer.lua`)
 
+**All symbol-package searches must be async.** These cover the project *plus* every extracted package (Base Application alone is ~10k `.al` stubs), so `vim.fn.systemlist` freezes the editor for the whole search. Use `explorer.rg_async(cmd, cb)` and build the picker in the callback. The one place that cannot be async is `ids.get_used_ids` (reached from `completefunc`, which is synchronous) — it caches per project+type and `ids.invalidate()` is called from the ftplugin `BufWritePost`.
+
 `M.objects`: `rg` across project root + `~/.cache/nvim/alnvim/symbols/` extracted packages. Entry: `[src]`/`[sym]` tag, publisher, type, ID, name, filename. `<C-s>` cycles sort.
 
 **Symbol extraction:** `.app` files are ZIPs with `src/*.al` stubs, extracted to cache dir keyed on sanitised filename. `.ok` stamp skips re-extraction. `unzip` exits code 1 on no-match glob (not failure) — check `vim.fn.isdirectory(dir .. "/src")` not `vim.v.shell_error`.
@@ -413,6 +415,8 @@ File naming (CRS): `src/<obj_type>/<id>.<SanitisedName>.<FileType>.al`. Interfac
 PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` — not available on Windows). Tables generate two entries (`tabledata RIMD` + `table X`); others get `X`.
 
 ## AL Refactoring (`lua/al/refactor.lua`)
+
+**Quote scanning pairs delimiters left to right.** Both `find_quoted_string` (single) and `dquoted_id_at_cursor` (double) walk from the start of the line pairing quotes, treating a doubled quote as an escape. Do not "scan left for the nearest quote" — a cursor on a *closing* quote then pairs it with the next string's opening quote, so `Cust.Get("Foo"); Other("Bar")` yields `); Other(` as the rename target.
 
 **`find_proc_bounds(lines, cursor_lnum)`** — all line numbers 1-based. Returns `{ hdr, var, beg, fin }`. `var` is nil if no var block. Used by both `extract_label` and `extract_to_procedure`.
 

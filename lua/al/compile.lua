@@ -297,7 +297,7 @@ local function buf_highlight(buf)
       hl = "DiagnosticOk"
     end
     if hl then
-      vim.api.nvim_buf_add_highlight(buf, ns, hl, i - 1, 0, -1)
+      vim.hl.range(buf, ns, hl, { i - 1, 0 }, { i - 1, -1 })
     end
   end
 end
@@ -328,7 +328,7 @@ end
 local function clear_lsp_diagnostics(project_dir)
   local clients = vim.lsp.get_clients({ name = "al_language_server" })
   for _, c in ipairs(clients) do
-    if c.config.root_dir == project_dir then
+    if c.root_dir == project_dir then
       local ns = vim.lsp.diagnostic.get_namespace(c.id)
       for bufnr in pairs(c.attached_buffers or {}) do
         vim.diagnostic.reset(ns, bufnr)

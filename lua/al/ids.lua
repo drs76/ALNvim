@@ -32,8 +32,26 @@ local function get_ranges(root)
   return ranges
 end
 
+-- Used-ID cache, keyed on root + object type.
+--
+-- get_used_ids shells out to rg across the whole project, and completefunc is
+-- synchronous — there is nowhere to put an async call. <C-Space> therefore ran
+-- (and blocked on) a full project scan on every single invocation, including
+-- the second call Vim makes for the same completion. Cache the result and drop
+-- it on write; ftplugin/al.lua calls M.invalidate() from BufWritePost, which is
+-- the only way a new object ID can appear.
+local _used_cache = {}
+
+function M.invalidate()
+  _used_cache = {}
+end
+
 -- Return a set of IDs already used by obj_type in the project: { [id]=true }
 local function get_used_ids(root, obj_type)
+  local key = root .. "\0" .. obj_type
+  local hit = _used_cache[key]
+  if hit then return hit end
+
   local lines = vim.fn.systemlist({
     "rg", "--no-heading", "--no-filename", "--color=never", "-i",
     "-e", string.format("^\\s*%s\\s+\\d+", obj_type),
@@ -46,6 +64,7 @@ local function get_used_ids(root, obj_type)
     local id = line:lower():match(pat)
     if id then used[tonumber(id)] = true end
   end
+  _used_cache[key] = used
   return used
 end
 

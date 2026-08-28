@@ -76,8 +76,9 @@ local function read_user_snippets()
 end
 
 local function write_user_snippets(data)
-  vim.fn.mkdir(vim.fn.fnamemodify(USER_SNIPPET_FILE, ":h"), "p")
-  vim.fn.writefile({ vim.fn.json_encode(data) }, USER_SNIPPET_FILE)
+  -- Indented: this file is committed and hand-editable.
+  local ok, err = require("al.json").write(USER_SNIPPET_FILE, data)
+  if not ok then error(err) end
 end
 
 function M.load()
@@ -89,17 +90,41 @@ function M.load()
   require("luasnip.loaders.from_vscode").load({ paths = { PLUGIN_ROOT } })
 end
 
+-- The two snippet files declared in package.json, in load order.
+local SNIPPET_FILES = {
+  PLUGIN_ROOT .. "/snippets/al.json",
+  USER_SNIPPET_FILE,
+}
+
 function M.reload()
-  local ok, luasnip = pcall(require, "luasnip")
+  local ok = pcall(require, "luasnip")
   if not ok then
     vim.notify("ALNvim: LuaSnip not available", vim.log.levels.WARN)
     return
   end
-  -- Remove existing AL snippets before reloading to avoid duplicates
-  luasnip.cleanup()
-  require("luasnip.loaders.from_vscode").load({ paths = { PLUGIN_ROOT } })
-  -- Reload any other paths the user had registered
-  require("luasnip.loaders.from_vscode").lazy_load()
+
+  -- Reload only our own two files.
+  --
+  -- This used to call luasnip.cleanup(), which drops *every* registered snippet
+  -- in the session — friendly-snippets and any other filetype's set included —
+  -- and then reloaded only the AL paths plus lazy_load(). Anything a config had
+  -- eagerly load()ed was gone until restart, from a plain :ALReloadSnippets or
+  -- an :ALCreateSnippet save.
+  --
+  -- loaders.reload_file() pokes LuaSnip's fs watcher for one path, so the
+  -- reload is scoped to that file and no global state is touched.
+  local ok_loaders, loaders = pcall(require, "luasnip.loaders")
+  if ok_loaders and type(loaders.reload_file) == "function" then
+    for _, path in ipairs(SNIPPET_FILES) do
+      if vim.fn.filereadable(path) == 1 then
+        pcall(loaders.reload_file, path)
+      end
+    end
+  else
+    -- Older LuaSnip without reload_file: re-running load() re-reads the same
+    -- paths. Still far better than cleanup()-ing the whole session.
+    require("luasnip.loaders.from_vscode").load({ paths = { PLUGIN_ROOT } })
+  end
   vim.notify("ALNvim: Snippets reloaded", vim.log.levels.INFO)
 end
 

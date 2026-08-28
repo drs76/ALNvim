@@ -284,28 +284,48 @@ function M.extract_to_procedure()
   end)
 end
 
--- Find the double-quoted AL identifier at cursor by scanning left/right for " delimiters.
--- Returns the name string (without quotes), or nil when cursor is not inside one.
+-- Find the double-quoted AL identifier containing the cursor.
+-- Returns the name string (without quotes), or nil when the cursor is not
+-- inside one.
+--
+-- Quotes are paired left to right, mirroring find_quoted_string above. The
+-- previous version scanned *leftwards* for the nearest '"' and treated it as
+-- the opening delimiter, so a cursor sitting on a closing quote paired that
+-- quote with the next string's opening quote:
+--   Rec.Get("Foo"); Other("Bar")
+--            ^ cursor here yielded  '); Other('  as the identifier to rename.
 local function dquoted_id_at_cursor()
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
   local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1]
   if not line then return nil end
-  local col1 = col + 1  -- convert to 1-based
+  local cursor = col + 1  -- 1-based
 
-  local q_open = nil
-  for i = col1, 1, -1 do
-    if line:sub(i, i) == '"' then q_open = i; break end
+  local i = 1
+  while i <= #line do
+    if line:sub(i, i) == '"' then
+      local j = i + 1
+      while j <= #line do
+        if line:sub(j, j) == '"' then
+          if line:sub(j + 1, j + 1) == '"' then
+            j = j + 2   -- "" escapes a quote inside a quoted identifier
+          else
+            break
+          end
+        else
+          j = j + 1
+        end
+      end
+      if j > #line then break end   -- unterminated identifier, stop scanning
+      if cursor >= i and cursor <= j then
+        local name = line:sub(i + 1, j - 1)
+        return name ~= '' and name or nil
+      end
+      i = j + 1
+    else
+      i = i + 1
+    end
   end
-  if not q_open then return nil end
-
-  local q_close = nil
-  for i = q_open + 1, #line do
-    if line:sub(i, i) == '"' then q_close = i; break end
-  end
-  if not q_close or col1 > q_close then return nil end
-
-  local name = line:sub(q_open + 1, q_close - 1)
-  return name ~= '' and name or nil
+  return nil
 end
 
 -- Rename a quoted AL identifier (object name, field name, etc.) project-wide.

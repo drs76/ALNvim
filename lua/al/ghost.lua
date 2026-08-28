@@ -170,9 +170,16 @@ local function trigger()
   if _timer then _timer:stop(); _timer:close(); _timer = nil end
   local bufnr = api.nvim_get_current_buf()
   local c     = cfg()
-  _timer = vim.uv.new_timer()
-  _timer:start(c.debounce_ms, 0, vim.schedule_wrap(function()
-    if _timer then _timer:close(); _timer = nil end
+  local t = vim.uv.new_timer()
+  _timer = t
+  t:start(c.debounce_ms, 0, vim.schedule_wrap(function()
+    -- Identity check, not `if _timer then`. A newer trigger() may have replaced
+    -- (and closed) this timer between the uv callback firing and this scheduled
+    -- function running; the nil check would then close the *replacement*,
+    -- silently killing the new debounce so no completion ever arrived.
+    if _timer ~= t then return end
+    _timer = nil
+    if not t:is_closing() then t:close() end
     request(bufnr)
   end))
 end

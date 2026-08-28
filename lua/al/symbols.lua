@@ -90,7 +90,7 @@ end
 local function get_lsp_client(root)
   local clients = vim.lsp.get_clients({ name = "al_language_server" })
   for _, c in ipairs(clients) do
-    if c.config.root_dir == root then return c end
+    if c.root_dir == root then return c end
   end
   return nil
 end
@@ -124,7 +124,7 @@ local function global_progress_float(header)
   })
   vim.wo[win].wrap = false
   local ns = vim.api.nvim_create_namespace("al_symbols_global")
-  vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+  vim.hl.range(buf, ns, "Comment", { 0, 0 }, { 0, -1 })
 
   return function(ok, msg)
     if not vim.api.nvim_buf_is_valid(buf) then return end
@@ -136,7 +136,7 @@ local function global_progress_float(header)
     local rows  = { "  " .. icon .. "  " .. (parts[1] or "") }
     for i = 2, #parts do rows[#rows + 1] = "     " .. parts[i] end
     vim.api.nvim_buf_set_lines(buf, 2, 3, false, rows)
-    vim.api.nvim_buf_add_highlight(buf, ns, hl, 2, 0, -1)
+    vim.hl.range(buf, ns, hl, { 2, 0 }, { 2, -1 })
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_set_height(win, math.min(2 + #rows, 20))
     end
@@ -225,14 +225,14 @@ function M.download_global(root)
     })
     vim.wo[win].wrap = false
     local ns = vim.api.nvim_create_namespace("al_symbols_global")
-    vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+    vim.hl.range(buf, ns, "Comment", { 0, 0 }, { 0, -1 })
 
     local function finish(ok, msg)
       if not vim.api.nvim_buf_is_valid(buf) then return end
       local icon = ok and "✓" or "✗"
       local hl   = ok and "DiagnosticOk" or "DiagnosticError"
       vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "  " .. icon .. "  " .. msg })
-      vim.api.nvim_buf_add_highlight(buf, ns, hl, 2, 0, -1)
+      vim.hl.range(buf, ns, hl, { 2, 0 }, { 2, -1 })
       if ok then
         vim.defer_fn(function()
           if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
@@ -342,7 +342,7 @@ local function open_symbols_win(deps, base)
 
   -- Highlight the header line dimly
   local ns = vim.api.nvim_create_namespace("al_symbols")
-  vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 0, 0, -1)
+  vim.hl.range(buf, ns, "Comment", { 0, 0 }, { 0, -1 })
 
   return buf, win, ns
 end
@@ -353,8 +353,7 @@ local function set_pkg_status(buf, ns, line_idx, dep, ok)
   local icon = ok and "✓" or "✗"
   local text = "  " .. icon .. "  " .. (dep.publisher or "") .. " / " .. (dep.name or "")
   vim.api.nvim_buf_set_lines(buf, line_idx, line_idx + 1, false, { text })
-  vim.api.nvim_buf_add_highlight(buf, ns, ok and "DiagnosticOk" or "DiagnosticError",
-    line_idx, 0, -1)
+  vim.hl.range(buf, ns, ok and "DiagnosticOk" or "DiagnosticError", { line_idx, 0 }, { line_idx, -1 })
 end
 
 -- Append a summary line and close the window after a short delay.
@@ -370,7 +369,7 @@ local function finish_win(buf, win, ns, failed_count)
   end
   vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "", summary })
   local last = vim.api.nvim_buf_line_count(buf)
-  vim.api.nvim_buf_add_highlight(buf, ns, hl, last - 1, 0, -1)
+  vim.hl.range(buf, ns, hl, { last - 1, 0 }, { last - 1, -1 })
   -- Resize window to fit the new line
   if vim.api.nvim_win_is_valid(win) then
     vim.api.nvim_win_set_height(win, last)

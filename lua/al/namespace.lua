@@ -44,38 +44,60 @@ function M.has_namespace(path)
   return found
 end
 
+-- Return the loaded buffer for `path`, or nil when the file is not open.
+local function loaded_buf(path)
+  local b = vim.fn.bufnr(path)
+  if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then return b end
+  return nil
+end
+
 -- Add `namespace <ns>;` to the top of a single file.
--- Returns true if added, false if skipped (already had one or unreadable).
+-- Returns "added", "skipped" (already namespaced / unreadable), or "modified"
+-- (open with unsaved changes — see add_namespace_to_project).
 function M.add_namespace_to_file(path, ns)
-  if M.has_namespace(path) then return false end
+  if M.has_namespace(path) then return "skipped" end
+
+  -- Refuse to touch a file whose buffer has unsaved changes. This function
+  -- writes with io.open, behind Neovim's back; the caller then reloads the
+  -- buffer. On a modified buffer that reload fails with E37 (swallowed by
+  -- `silent!`), leaving the buffer holding pre-namespace content that the
+  -- user's next :w writes straight back over the namespace line.
+  local buf = loaded_buf(path)
+  if buf and vim.bo[buf].modified then return "modified" end
+
   local f = io.open(path, "r")
-  if not f then return false end
+  if not f then return "skipped" end
   local content = f:read("*a")
   f:close()
   -- Normalise line endings to LF.
   content = content:gsub("\r\n", "\n"):gsub("\r", "\n")
   local new_content = "namespace " .. ns .. ";\n\n" .. content
   local fw = io.open(path, "w")
-  if not fw then return false end
+  if not fw then return "skipped" end
   fw:write(new_content)
   fw:close()
-  return true
+  return "added"
 end
 
 -- Add namespace to all AL source files in the project.
--- Returns { added = {path, ...}, skipped = N }
+-- Returns { added = {path, ...}, skipped = N, modified = {path, ...} }
+-- `modified` lists files left untouched because they had unsaved changes.
 function M.add_namespace_to_project(root, ns)
-  local files   = platform.glob_al_files(root)
-  local added   = {}
-  local skipped = 0
+  local files    = platform.glob_al_files(root)
+  local added    = {}
+  local modified = {}
+  local skipped  = 0
   for _, path in ipairs(files) do
-    if M.add_namespace_to_file(path, ns) then
+    local result = M.add_namespace_to_file(path, ns)
+    if result == "added" then
       table.insert(added, path)
+    elseif result == "modified" then
+      table.insert(modified, path)
     else
       skipped = skipped + 1
     end
   end
-  return { added = added, skipped = skipped }
+  return { added = added, skipped = skipped, modified = modified }
 end
 
 -- Apply source.organizeImports to the current buffer via the LSP picker.
@@ -150,11 +172,13 @@ function M.wizard(root)
         local result = M.add_namespace_to_project(root, ns)
 
         -- Reload any already-open buffers so Neovim sees the changes on disk.
+        -- edit! is safe here: add_namespace_to_file refuses to write a file
+        -- whose buffer is modified, so nothing unsaved can be discarded.
         for _, path in ipairs(result.added) do
-          local existing_buf = vim.fn.bufnr(path)
-          if existing_buf ~= -1 and vim.api.nvim_buf_is_loaded(existing_buf) then
+          local existing_buf = loaded_buf(path)
+          if existing_buf then
             vim.api.nvim_buf_call(existing_buf, function()
-              vim.cmd("silent! edit")
+              vim.cmd("silent! edit!")
             end)
           end
         end
@@ -162,6 +186,15 @@ function M.wizard(root)
         vim.notify(string.format(
           "AL: namespace '%s' added to %d file(s) (%d already had one)",
           ns, #result.added, result.skipped), vim.log.levels.INFO)
+
+        if #result.modified > 0 then
+          vim.notify(string.format(
+            "AL: %d file(s) skipped — unsaved changes. Save them and re-run :ALAddNamespace:\n  %s",
+            #result.modified,
+            table.concat(vim.tbl_map(function(p)
+              return vim.fn.fnamemodify(p, ":~:.")
+            end, result.modified), "\n  ")), vim.log.levels.WARN)
+        end
 
         if #result.added == 0 then return end
 
