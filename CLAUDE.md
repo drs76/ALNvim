@@ -400,7 +400,9 @@ Browser values stored in `alnvim.json` as `"browser"`. macOS: no-path value → 
 
 ## AL MCP Server (`lua/al/mcp.lua`)
 
-Writes `~/.claude/settings.json` to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
+Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
+
+**Per-project, never global.** This wrote `~/.claude/settings.json` until 2026-09-15. With `auto_mcp` on by default, every AL project ever opened left an entry there — eleven had accumulated, including one for a deleted `/tmp` scratch dir. The entry's **last positional argument is the server's workspace root**, so a stale or mis-resolved one is not inert: it is an AL language server indexing that tree in *every* Claude Code session. One (`al:rojaws`) pointed at a 3.6TB NFS share, because a stray `app.json` above the projects made `get_root()` resolve the mount point. `lsp.find_root_upward` now bounds that resolution; writing per-project bounds the damage if it ever resolves wrongly again. `:ALMcpStatus` reports leftover global `al:*` entries but does not remove them — that file holds the user's own config.
 
 **Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `~/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
 
