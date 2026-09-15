@@ -142,8 +142,36 @@ M.build_search_dirs = build_search_dirs
 -- Base Application alone is around ten thousand .al stubs — so the previous
 -- vim.fn.systemlist() call froze the UI for the whole search. rg exits 1 when
 -- nothing matched, which is not an error, so the exit code is ignored.
-local function rg_async(cmd, cb)
-  local out = {}
+--
+-- Going async removed the only signal that the editor was working: the blocking
+-- call froze the UI, which at least looked like something was happening. A slow
+-- search now returns instantly and shows nothing, which is indistinguishable
+-- from a dead keypress. Say so once the wait becomes noticeable; `label` names
+-- what is being searched.
+--
+-- 750ms, not a few hundred: a healthy project with Base Application extracted
+-- lands around 350-450ms, and notifying on every <leader>ae would be noise. This
+-- should fire only when something is actually wrong — a mis-resolved root
+-- scanning a whole share, or a cold network mount.
+local SLOW_MS = 750
+
+local function rg_async(cmd, cb, label)
+  local out  = {}
+  local done = false
+
+  local slow = vim.uv.new_timer()
+  slow:start(SLOW_MS, 0, vim.schedule_wrap(function()
+    if not done then
+      vim.notify("AL: searching " .. (label or "AL sources") .. "…", vim.log.levels.INFO)
+    end
+  end))
+
+  local function finish(lines)
+    done = true
+    if not slow:is_closing() then slow:stop(); slow:close() end
+    vim.schedule(function() cb(lines) end)
+  end
+
   local job = vim.fn.jobstart(cmd, {
     stdout_buffered = true,
     on_stdout = function(_, data)
@@ -151,13 +179,9 @@ local function rg_async(cmd, cb)
         if l ~= "" then out[#out + 1] = l end
       end
     end,
-    on_exit = function()
-      vim.schedule(function() cb(out) end)
-    end,
+    on_exit = function() finish(out) end,
   })
-  if job <= 0 then
-    vim.schedule(function() cb({}) end)
-  end
+  if job <= 0 then finish({}) end
 end
 
 M.rg_async = rg_async
@@ -299,7 +323,7 @@ function M.objects(root)
       return true
     end,
   }):find()
-  end)  -- rg_async
+  end, string.format("%d symbol package(s)", sym_count))
 end
 
 -- Telescope picker: procedures and triggers in the current file.
@@ -366,7 +390,7 @@ function M.procedures()
       return true
     end,
   }):find()
-  end)  -- rg_async
+  end, "this file")
 end
 
 -- Telescope live-grep across all AL files (project + symbol packages).

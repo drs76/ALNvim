@@ -738,6 +738,9 @@ vim.api.nvim_create_user_command("ALInfo", function()
     end)(),
     "Project   : " .. (root or "(not found)"),
   }
+  if not root and lsp.last_root_reason then
+    table.insert(lines, "  why     : " .. lsp.last_root_reason)
+  end
   if agentic and not require("al.agentic_lsp").available() then
     table.insert(lines, "  ⚠ al launchlspserver not available — update the dotnet tool (--prerelease)")
   end
