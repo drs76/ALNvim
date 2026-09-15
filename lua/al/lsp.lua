@@ -1,5 +1,48 @@
 local M = {}
 
+-- How far up to keep looking for app.json when the buffer is not inside a git
+-- repository. Enough for src/<type>/<file>.al plus a few container folders.
+local MAX_UP = 8
+
+-- Walk up from `start` looking for app.json, bounded so a stray file far above
+-- cannot claim the buffer.
+--
+-- vim.fs.root() walks to the filesystem root, which is how a single stray
+-- /mnt/rojaws/app.json made every project on a 3.6TB NFS share resolve to the
+-- mount point: AL Explorer then indexed the entire share (77k objects, 14s)
+-- instead of the 9.5k in the actual project. An AL project is essentially
+-- always inside a repository, so the enclosing .git directory is the natural
+-- boundary — past it, we are no longer in this project by any reading.
+--
+-- Returns (dir, nil) on success, or (nil, reason) describing why it stopped, so
+-- callers can tell "no project" apart from "found one, but outside the repo".
+local function find_root_upward(start)
+  if not start or start == "" then return nil, "buffer has no file name" end
+
+  local boundary = vim.fs.root(start, { ".git" })   -- may be nil
+  -- Start at the file's own directory (or `start` itself when it is one).
+  local st   = vim.uv.fs_stat(start)
+  local from = (st and st.type == "directory") and start or vim.fs.dirname(start)
+
+  local levels = 0
+  for _, dir in ipairs(vim.list_extend({ from }, vim.iter(vim.fs.parents(from)):totable())) do
+    if vim.uv.fs_stat(dir .. "/app.json") then
+      return dir
+    end
+    if boundary and dir == boundary then
+      return nil, ("no app.json between the file and its repository root (" .. boundary .. ")")
+    end
+    levels = levels + 1
+    if not boundary and levels >= MAX_UP then
+      return nil, ("no app.json within " .. MAX_UP .. " directories of the file")
+    end
+  end
+  return nil, "no app.json above the file"
+end
+
+-- Exposed so :ALInfo and tests can explain a failed resolution.
+M.find_root_upward = find_root_upward
+
 -- Return the AL project root for the given buffer (directory containing app.json).
 -- Falls back to scanning downward from cwd when the buffer is outside a project
 -- (e.g. a workspace root buffer). Prompts to pick if multiple projects are found.
@@ -8,8 +51,14 @@ function M.get_root(bufnr)
   local fname = vim.api.nvim_buf_get_name(bufnr)
 
   -- Fast path: buffer is inside an AL project
-  local from_buf = vim.fs.root(fname, { "app.json" })
-  if from_buf then return from_buf end
+  local from_buf, why = find_root_upward(fname)
+  if from_buf then
+    M.last_root_reason = nil
+    return from_buf
+  end
+  -- Kept rather than notified: get_root runs on every save, so a warning here
+  -- would be constant noise. :ALInfo reports it when the user comes looking.
+  M.last_root_reason = why
 
   -- Fallback: scan downward from cwd for app.json, max 3 levels deep.
   -- vim.fs.find has no depth limit and will traverse entire drives on Windows.

@@ -44,7 +44,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 
 All OS-specific operations go through `lua/al/platform.lua` — never add platform conditionals elsewhere.
 
-**`glob_al_files` exclusion pitfall:** the `.alpackages` filter uses `string.find(p, "/.alpackages/", 1, true)`. With `plain=true` a Lua pattern is matched **literally** — the old `"%.alpackages"` needle never matched, so the filter was a silent no-op for every caller (PermissionSet scan, `:ALAddNamespace`, `scan_table_fields`). Paths are normalised to forward slashes first because glob returns backslashes on Windows.
+**`glob_al_files` exclusion pitfall:** the cache filter uses a plain `string.find` for a path *segment*. With `plain=true` a Lua pattern is matched **literally**, so the old `"%.alpackages"` needle never matched anything. That was harmless for the default config — `vim.fn.glob("**/*")` does not descend into dot-directories, so `.alpackages` was excluded anyway — but `packagecachepath` is configurable, and a cache dir without a leading dot *is* returned and must be filtered. The needle is built from the configured value. Paths are normalised to forward slashes first because glob returns backslashes on Windows.
 
 | Operation | Linux/macOS | Windows |
 |---|---|---|
@@ -296,11 +296,13 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## Project root detection (`lsp.get_root()`)
 
-1. Search upward from current buffer for `app.json`
+1. Search upward from current buffer for `app.json` — **bounded** (`find_root_upward`)
 2. Scan downward from `vim.fn.getcwd()` for all `app.json` files
 3. One found → use it; multiple → `vim.fn.inputlist` prompt
 
 All commands use `lsp.get_root()` — `compile.lua` has no separate `find_project_root()`.
+
+**The upward search must stay bounded.** `vim.fs.root()` walks to the filesystem root, so one stray `app.json` above a project claims every file beneath it. A single `/mnt/rojaws/app.json` made every project on an NFS share resolve to the mount point, and AL Explorer then indexed the whole share — 77k objects and 14s, against 9.5k and 0.3s for the real project. `find_root_upward` stops at the enclosing `.git` directory (or `MAX_UP` levels without one) and returns a reason; `get_root` stores it in `M.last_root_reason`, which `:ALInfo` prints. It is deliberately not notified — `get_root` runs on every save.
 
 ## Symbol downloads
 
