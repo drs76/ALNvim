@@ -791,17 +791,39 @@ end, { nargs = "?", complete = "dir", desc = "Remove AL MCP server config for cu
 
 
 vim.api.nvim_create_user_command("ALMcpStatus", function()
-  local entries = require("al.mcp").status()
-  if #entries == 0 then
-    vim.notify("AL MCP: no projects configured", vim.log.levels.INFO)
-    return
+  local root = require("al.lsp").get_root()
+  local project, global = require("al.mcp").status(root)
+
+  local lines = {}
+  if #project > 0 then
+    lines[#lines + 1] = "AL MCP — this project (" .. vim.fn.fnamemodify(root, ":~:.") .. "):"
+    for _, e in ipairs(project) do
+      lines[#lines + 1] = "  " .. e.key .. "  →  " .. table.concat(e.args, " ")
+    end
+  elseif root then
+    lines[#lines + 1] = "AL MCP: nothing configured for " .. vim.fn.fnamemodify(root, ":~:.")
+      .. "  (run :ALMcpSetup)"
+  else
+    lines[#lines + 1] = "AL MCP: no project root found"
   end
-  local lines = { "AL MCP configured projects:" }
-  for _, e in ipairs(entries) do
-    lines[#lines + 1] = "  " .. e.key .. "  →  " .. table.concat(e.args, " ")
+
+  -- Older versions wrote here, and each leftover entry still starts an AL
+  -- language server rooted at that path in every Claude Code session — for
+  -- projects that may no longer exist. Surface them; removing is the user's
+  -- call, since the file holds their own configuration too.
+  if #global > 0 then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = ("%d stale al:* entr%s in the GLOBAL ~/.claude/settings.json:")
+      :format(#global, #global == 1 and "y" or "ies")
+    for _, e in ipairs(global) do
+      lines[#lines + 1] = "  " .. e.key .. "  →  " .. (e.args and e.args[#e.args] or "?")
+    end
+    lines[#lines + 1] = "These load in every Claude Code session regardless of project."
+    lines[#lines + 1] = "ALNvim now writes <project>/.claude/settings.json; remove them by hand."
   end
-  vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
-end, { desc = "Show configured AL MCP server entries" })
+
+  vim.notify(table.concat(lines, "\n"), #global > 0 and vim.log.levels.WARN or vim.log.levels.INFO)
+end, { desc = "Show configured AL MCP server entries (project + stale global)" })
 
 -- ── Auto-start LSP when Neovim opens inside an AL project root ───────────────
 -- Fires once at startup. If app.json is in cwd and auto_start is enabled,

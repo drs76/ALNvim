@@ -1,39 +1,58 @@
 -- AL MCP Server integration for Claude Code.
 --
--- Writes/updates ~/.claude/settings.json so Claude Code can spawn the
--- Microsoft AL Development Tools MCP server (dotnet tool `al`) for the
--- current project via stdio transport.
+-- Writes <project>/.claude/settings.json so Claude Code can spawn the Microsoft
+-- AL Development Tools MCP server (dotnet tool `al`) for that project over stdio.
 --
--- Each project gets its own named entry ("al:<projectName>") so switching
--- between projects just adds a new entry rather than overwriting the last one.
+-- PER-PROJECT, deliberately. This used to write the *global*
+-- ~/.claude/settings.json, and with auto_mcp on by default every AL project ever
+-- opened left an entry behind there. Two things went wrong with that:
+--
+--   * The entries accumulate and outlive the projects. Eleven had built up,
+--     including one for a dead scratch directory under /tmp.
+--   * The server's last positional argument is its *workspace root*, so a bad
+--     root is not inert — it is an AL language server indexing that tree in
+--     every Claude Code session, globally. One entry ("al:rojaws") pointed at a
+--     3.6TB NFS share because a stray app.json above the projects made
+--     get_root() resolve the mount point. lsp.find_root_upward now bounds that
+--     resolution, but the blast radius only shrinks if the entry is scoped to
+--     the project too.
+--
+-- Writing next to the project keeps each server's lifetime tied to the checkout
+-- it describes, and matches the layout already in use by hand
+-- (<project>/.claude/settings.json holding a single "al:<name>" entry).
 --
 -- Usage:
---   require("al.mcp").configure(root)   -- add/update entry for root
---   require("al.mcp").deconfigure(root) -- remove entry for root
---   require("al.mcp").status()          -- return table of all al:* entries
+--   require("al.mcp").configure(root)   -- add/update entry in <root>/.claude
+--   require("al.mcp").deconfigure(root) -- remove it
+--   require("al.mcp").status(root)      -- entries for root + stale global ones
 
 local M = {}
 
-local SETTINGS_PATH = vim.fn.expand("~/.claude/settings.json")
-local AL_BINARY     = vim.fn.expand("~/.dotnet/tools/al")
+local GLOBAL_SETTINGS = vim.fn.expand("~/.claude/settings.json")
+local AL_BINARY       = vim.fn.expand("~/.dotnet/tools/al")
 
--- Read ~/.claude/settings.json, returning a table (empty if missing/invalid).
-local function read_settings()
-  local ok, lines = pcall(vim.fn.readfile, SETTINGS_PATH)
+-- Claude Code reads MCP servers from <project>/.claude/settings.json.
+local function settings_path(root)
+  return root .. "/.claude/settings.json"
+end
+
+-- Read a settings file, returning a table (empty if missing/invalid).
+local function read_settings(path)
+  local ok, lines = pcall(vim.fn.readfile, path)
   if not ok or not lines or #lines == 0 then return {} end
   local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
   if not ok2 or type(data) ~= "table" then return {} end
   return data
 end
 
--- Persist the settings table to disk as indented JSON.
--- This file is user-owned and hand-edited; auto_mcp rewrites it on every AL
--- LspAttach, so writing json_encode's single-line output would flatten the
--- user's formatting each time an AL project is opened.
-local function write_settings(data)
-  local ok, err = require("al.json").write(SETTINGS_PATH, data)
+-- Persist a settings table as indented JSON.
+-- The file is user-owned and hand-edited, and auto_mcp reaches this path on
+-- every AL LspAttach, so json_encode's single-line output would flatten the
+-- user's formatting each time a project is opened.
+local function write_settings(path, data)
+  local ok, err = require("al.json").write(path, data)
   if not ok then
-    vim.notify("AL MCP: could not write " .. SETTINGS_PATH .. ": " .. tostring(err),
+    vim.notify("AL MCP: could not write " .. path .. ": " .. tostring(err),
       vim.log.levels.ERROR)
   end
   return ok
@@ -62,7 +81,7 @@ local function build_args(root)
 end
 
 -- Add or update the MCP server entry for the given project root.
--- Returns true on success, false on error.
+-- Writes <root>/.claude/settings.json. Returns true on success, false on error.
 function M.configure(root)
   if not root then
     vim.notify("AL MCP: no project root provided", vim.log.levels.WARN)
@@ -78,7 +97,8 @@ function M.configure(root)
     return false
   end
 
-  local settings = read_settings()
+  local path     = settings_path(root)
+  local settings = read_settings(path)
   if type(settings.mcpServers) ~= "table" then
     settings.mcpServers = {}
   end
@@ -97,9 +117,9 @@ function M.configure(root)
   end
 
   settings.mcpServers[key] = entry
-  if not write_settings(settings) then return false end
-  vim.notify("AL MCP: configured '" .. key .. "' — restart Claude Code or run /mcp to activate.",
-    vim.log.levels.INFO)
+  if not write_settings(path, settings) then return false end
+  vim.notify("AL MCP: configured '" .. key .. "' in " .. vim.fn.fnamemodify(path, ":~:.")
+    .. " — restart Claude Code or run /mcp to activate.", vim.log.levels.INFO)
   return true
 end
 
@@ -110,35 +130,49 @@ function M.deconfigure(root)
     return
   end
 
-  local settings = read_settings()
-  if type(settings.mcpServers) ~= "table" then
-    vim.notify("AL MCP: no mcpServers entries found", vim.log.levels.WARN)
-    return
-  end
-
-  local key = entry_key(root)
-  if not settings.mcpServers[key] then
-    vim.notify("AL MCP: no entry found for '" .. key .. "'", vim.log.levels.WARN)
+  local path     = settings_path(root)
+  local settings = read_settings(path)
+  local key      = entry_key(root)
+  if type(settings.mcpServers) ~= "table" or not settings.mcpServers[key] then
+    vim.notify("AL MCP: no entry for '" .. key .. "' in " .. vim.fn.fnamemodify(path, ":~:."),
+      vim.log.levels.WARN)
     return
   end
 
   settings.mcpServers[key] = nil
-  write_settings(settings)
+  -- Drop the container when it empties, rather than leaving "mcpServers": {}.
+  if vim.tbl_isempty(settings.mcpServers) then settings.mcpServers = nil end
+  if vim.tbl_isempty(settings) then
+    -- Nothing else in the file: remove it instead of leaving an empty object.
+    pcall(vim.uv.fs_unlink, path)
+  else
+    write_settings(path, settings)
+  end
   vim.notify("AL MCP: removed '" .. key .. "'", vim.log.levels.INFO)
 end
 
-
--- Return a table of all "al:*" MCP entries currently in settings.json.
-function M.status()
-  local settings = read_settings()
-  local servers  = settings.mcpServers or {}
-  local entries  = {}
-  for k, v in pairs(servers) do
-    if k:match("^al:") then
-      entries[#entries + 1] = { key = k, command = v.command, args = v.args }
+-- Report the al:* entries for `root`, plus any left in the GLOBAL settings file.
+--
+-- The global list matters: entries written there by older versions of this
+-- module keep starting an AL language server in every Claude Code session, for
+-- projects that may no longer exist. They are reported so :ALMcpStatus can
+-- point at them; nothing is removed automatically, since the file is shared
+-- with the user's own configuration.
+--
+-- Returns (project_entries, global_entries), each { key, command, args, path }.
+function M.status(root)
+  local function collect(path)
+    local out = {}
+    for k, v in pairs(read_settings(path).mcpServers or {}) do
+      if k:match("^al:") then
+        out[#out + 1] = { key = k, command = v.command, args = v.args, path = path }
+      end
     end
+    table.sort(out, function(a, b) return a.key < b.key end)
+    return out
   end
-  return entries
+  local project = root and collect(settings_path(root)) or {}
+  return project, collect(GLOBAL_SETTINGS)
 end
 
 return M
