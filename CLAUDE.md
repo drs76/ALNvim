@@ -18,7 +18,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/explorer.lua` | Telescope pickers: objects (`M.objects`), procedures (`M.procedures`), grep (`M.search`) |
 | `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
-| `lua/al/mcp.lua` | Writes `~/.claude/settings.json` for AL MCP server |
+| `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
 | `lua/al/altool.lua` | Dotnet AL tool helpers: `M.has(subcmd)` (cached `--help` scan), `M.mcp_call()` one-shot MCP client (newline-delimited JSON-RPC) |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
