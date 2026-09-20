@@ -423,7 +423,13 @@ Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via s
 
 Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com — returns non-ZIP redirect). Required headers: `Accept: application/octet-stream`, `X-Market-Client-Id: VSCode`, `User-Agent: VSCode/...`. Verifies ZIP magic bytes (`PK`). Calls `ext.reload()` + `doautocmd FileType al` after install. Registered before `ext_path` guard — always available.
 
-`M.update()` — queries marketplace for latest, compares with `installed_version()` (scans `~/.vscode*/extensions/ms-dynamics-smb.al-*`), downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`.
+`M.update()` — queries marketplace for latest, compares with `installed_version()`, downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`. Installs beside the existing copy (`installed_path(cur)`'s parent), so an update does not scatter versions across `~/.vscode` and `~/.vscode-insiders`.
+
+**Every "is it installed?" check must search both extension dirs.** `EXT_DIR` is the *install target* — the Insiders dir whenever `~/.vscode-insiders` exists, else stable — and is not where an existing copy necessarily lives. `M.install()` tested `EXT_DIR` only, so a user with Insiders present and the extension under stable `~/.vscode` was told it was not installed and re-downloaded the whole 300–700 MB VSIX on every run. `installed_path(version)` / `installed_all()` scan `ext.ext_dirs()`, the same list `ext.find()` uses.
+
+**`version_gt` lives in `ext.lua` and is shared.** install.lua had its own copy that scanned *every* digit run in the string; ext.lua's read only the `ms-dynamics-smb.al-<ver>` tail and returned `{}` for anything else. Neither worked for both callers — ext.lua compares full directory paths, install.lua compares bare version strings like `"18.1.0"`, and ext.lua's version returned "equal" for those, which would have made `:ALUpdateExtension` report "already up to date" forever. The shared `ext.version_gt` takes the version tail when present and a bare string otherwise, and refuses to guess at a path it cannot parse — scanning a whole path lets digits in the *home directory* decide the comparison.
+
+The dotnet-tool "already installed" probe uses `altool.binary()`, so it tests the binary the MCP client and agentic LSP actually spawn rather than re-deriving the path.
 
 `M.install_dotnet_tool()` — checks if `~/.dotnet/tools/al[.exe]` exists, runs `dotnet tool install` (first time) or `dotnet tool update` (already installed) for package `microsoft.dynamics.businesscentral.development.tools`, streams output live. Registered as `:ALInstallDotnetTool`. Requires `dotnet` on PATH.
 
@@ -538,7 +544,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (100 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (110 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

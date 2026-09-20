@@ -13,9 +13,18 @@
 
 local M = {}
 
-local function version_parts(dir)
-  local ver = dir:match("ms%-dynamics%-smb%.al%-(.-)/?$")
-  if not ver then return {} end
+-- Accepts either an extension directory (".../ms-dynamics-smb.al-18.0.1") or a
+-- bare version string ("18.0.1"). Digits are read from the version tail only:
+-- taking every digit run in a full path would compare the home directory too,
+-- so a user whose home contains a number could sort two versions wrongly.
+local function version_parts(s)
+  local ver = s:match("ms%-dynamics%-smb%.al%-(.-)/?$")
+  if not ver then
+    -- A bare version, not a path. Anything with a separator is a directory we
+    -- failed to recognise, and guessing at its digits would be worse than nil.
+    if s:find("[/\\]") then return {} end
+    ver = s
+  end
   local parts = {}
   for n in ver:gmatch("%d+") do
     table.insert(parts, tonumber(n))
@@ -23,6 +32,8 @@ local function version_parts(dir)
   return parts
 end
 
+-- True when a is a newer version than b. Shared with install.lua — both the
+-- extension picker and the updater must agree on what "newer" means.
 local function version_gt(a, b)
   local va = version_parts(a)
   local vb = version_parts(b)
@@ -130,6 +141,23 @@ local function layout_of(dir)
   return nil
 end
 
+-- Every directory an AL extension may be installed in, newest-preferred order
+-- irrelevant (callers scan all of them). install.lua must search the same set:
+-- looking in only one is how :ALInstallExtension came to re-download 300–700 MB
+-- of VSIX for a version already present in the other.
+--
+-- Expand only "~" then concatenate — see the glob pitfall note in CLAUDE.md.
+function M.ext_dirs()
+  local home = vim.fn.expand("~")
+  local out = {}
+  for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
+    table.insert(out, home .. "/" .. subdir .. "/extensions")
+  end
+  return out
+end
+
+M.version_gt = version_gt
+
 local function find()
   -- Use vim.fn.expand per directory (no wildcard) so the path is OS-normalised
   -- on Windows (backslash home + forward-slash suffix causes glob to fail).
@@ -137,9 +165,7 @@ local function find()
   local skipped = {}
   local searched = {}
 
-  for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
-    -- Expand only "~" then concatenate (see CLAUDE.md glob pitfall note).
-    local base = vim.fn.expand("~") .. "/" .. subdir .. "/extensions"
+  for _, base in ipairs(M.ext_dirs()) do
     table.insert(searched, base)
     local matched = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
     for _, d in ipairs(matched) do
