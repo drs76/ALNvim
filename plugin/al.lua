@@ -654,6 +654,10 @@ end, {
   desc     = "AL Explorer: browse all AL objects across project and symbol packages",
 })
 
+vim.api.nvim_create_user_command("ALExplorerReopen", function()
+  require("al.explorer").reopen()
+end, { desc = "AL Explorer: reopen the last object list (from cache, no re-scan)" })
+
 vim.api.nvim_create_user_command("ALExplorerProcs", function()
   require("al.explorer").procedures()
 end, { desc = "AL Explorer: browse procedures/triggers in the current file" })
