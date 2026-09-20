@@ -482,6 +482,12 @@ local function write_and_open(path, content)
     vim.notify("AL Wizard: could not write file: " .. tostring(err), vim.log.levels.ERROR)
     return
   end
+  -- vim.fn.writefile fires no autocommands and :edit is a read, so neither
+  -- triggers the BufWritePost hook that drops the used-ID cache. Without this,
+  -- creating two objects of the same type in one session hands out the same ID
+  -- twice: next_id() populates the cache, the file lands on disk unseen, and
+  -- the second call is served from the stale set.
+  require("al.ids").invalidate()
   vim.cmd("edit " .. vim.fn.fnameescape(path))
   vim.notify("AL Wizard: created " .. vim.fn.fnamemodify(path, ":~:."), vim.log.levels.INFO)
 end
@@ -1002,5 +1008,8 @@ function M.generate_permissionset(root)
   end
   run_wizard(root, info)
 end
+
+-- Pure internals exposed for tests/ only. Not API.
+M._test = { write_and_open = write_and_open }
 
 return M

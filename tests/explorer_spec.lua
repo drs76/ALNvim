@@ -74,3 +74,18 @@ describe("explorer return watcher", function()
     end
   end)
 end)
+
+describe("explorer cache invalidation", function()
+  it("exposes invalidate(), and it clears the cached list", function()
+    -- Regression: _last was never invalidated, so return-on-close always
+    -- reopened a stale object list — a newly added object was missing, and a
+    -- moved declaration sent <CR> to the wrong line.
+    eq("function", type(E.invalidate))
+    -- Seed a cache first; asserting nil on an already-nil _last passes even
+    -- when invalidate() does nothing.
+    E._test.set_last({ root = "/tmp/x", entries = { 1 }, sym_count = 0, sort_idx = 1 })
+    ok(E._test.last() ~= nil, "precondition: cache seeded")
+    E.invalidate()
+    eq(nil, E._test.last())
+  end)
+end)

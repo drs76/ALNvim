@@ -220,6 +220,10 @@ M.layout = M.path and layout_of(M.path) or nil
 
 -- Re-scan for the newest installed extension (called after :ALInstallExtension).
 function M.reload()
+  -- Re-probe for dotnet too. A failed probe caches false for the session, so
+  -- without this, installing the runtime and re-running :ALInstallExtension
+  -- still leaves every dotnet-layout extension rejected until a restart.
+  _dotnet  = nil
   M.path   = find()
   M.layout = M.path and layout_of(M.path) or nil
   return M.path
@@ -277,6 +281,8 @@ function M.analyzers_dir()
 end
 
 -- Pure internals exposed for tests/ only. Not API.
-M._test = { version_gt = version_gt, layout_of = layout_of }
+M._test = { version_gt = version_gt, layout_of = layout_of,
+            dotnet_cache = function() return _dotnet end,
+            set_dotnet_cache = function(v) _dotnet = v end }
 
 return M

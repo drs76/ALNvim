@@ -36,12 +36,24 @@ local function settings_path(root)
   return root .. "/.claude/settings.json"
 end
 
--- Read a settings file, returning a table (empty if missing/invalid).
+-- Read a settings file. Returns (data, err):
+--   {},   nil  — file absent or empty; safe to create
+--   data, nil  — parsed successfully
+--   nil,  err  — file exists but could not be parsed
+--
+-- The third case must never be flattened into the first. It used to be: both
+-- returned {}, so a settings.json with a single trailing comma — an ordinary
+-- hand-edit slip — was treated as empty and then overwritten with a table
+-- holding only mcpServers, silently destroying the user's permissions, hooks
+-- and env. auto_mcp calls configure() on every AL LspAttach, so opening one
+-- .al file was enough to lose the file.
 local function read_settings(path)
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok or not lines or #lines == 0 then return {} end
   local ok2, data = pcall(vim.fn.json_decode, table.concat(lines, "\n"))
-  if not ok2 or type(data) ~= "table" then return {} end
+  if not ok2 or type(data) ~= "table" then
+    return nil, "not valid JSON"
+  end
   return data
 end
 
@@ -97,8 +109,16 @@ function M.configure(root)
     return false
   end
 
-  local path     = settings_path(root)
-  local settings = read_settings(path)
+  local path           = settings_path(root)
+  local settings, err  = read_settings(path)
+  if not settings then
+    -- Refuse rather than clobber: this is the user's file and we cannot merge
+    -- into something we could not read.
+    vim.notify("AL MCP: " .. vim.fn.fnamemodify(path, ":~:.") .. " is " .. err
+      .. " — not modifying it. Fix the file, then run :ALMcpSetup.",
+      vim.log.levels.ERROR)
+    return false
+  end
   if type(settings.mcpServers) ~= "table" then
     settings.mcpServers = {}
   end
@@ -130,9 +150,14 @@ function M.deconfigure(root)
     return
   end
 
-  local path     = settings_path(root)
-  local settings = read_settings(path)
-  local key      = entry_key(root)
+  local path          = settings_path(root)
+  local settings, err = read_settings(path)
+  if not settings then
+    vim.notify("AL MCP: " .. vim.fn.fnamemodify(path, ":~:.") .. " is " .. err
+      .. " — not modifying it.", vim.log.levels.ERROR)
+    return
+  end
+  local key = entry_key(root)
   if type(settings.mcpServers) ~= "table" or not settings.mcpServers[key] then
     vim.notify("AL MCP: no entry for '" .. key .. "' in " .. vim.fn.fnamemodify(path, ":~:."),
       vim.log.levels.WARN)
@@ -163,7 +188,8 @@ end
 function M.status(root)
   local function collect(path)
     local out = {}
-    for k, v in pairs(read_settings(path).mcpServers or {}) do
+    -- Read-only: an unparseable file just reports nothing rather than erroring.
+    for k, v in pairs((read_settings(path) or {}).mcpServers or {}) do
       if k:match("^al:") then
         out[#out + 1] = { key = k, command = v.command, args = v.args, path = path }
       end

@@ -430,11 +430,6 @@ local function register_al_dap_events(dap)
   end
 end
 
--- The AL adapter responds to configurationDone with {"command":null,...}.
--- nvim-dap's listener dispatch does listeners.before[decoded.command] without
--- a nil guard, so rawset(tbl, nil, {}) crashes with "table index is nil".
--- Patch both listener metatables to return {} for nil keys so the callback
--- that sets adapter_responded=true can still run.
 -- Clear the self-removing publish/launch listeners before starting a new run.
 -- They normally delete themselves when they fire, but an adapter that dies
 -- before emitting al/refreshExplorerObjects would leave one armed and it would
@@ -445,6 +440,11 @@ local function clear_oneshot_listeners(dap)
   end
 end
 
+-- The AL adapter responds to configurationDone with {"command":null,...}.
+-- nvim-dap's listener dispatch does listeners.before[decoded.command] without
+-- a nil guard, so rawset(tbl, nil, {}) crashes with "table index is nil".
+-- Patch both listener metatables to return {} for nil keys so the callback
+-- that sets adapter_responded=true can still run.
 local _dap_listeners_patched = false
 local function patch_dap_nil_command(dap)
   if _dap_listeners_patched then return end

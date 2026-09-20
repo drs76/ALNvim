@@ -88,6 +88,29 @@ describe("mcp.configure", function()
     ok(s.mcpServers, "mcpServers should have been added alongside")
   end)
 
+  it("refuses to touch a settings file it cannot parse", function()
+    -- Regression: read_settings returned {} for both 'absent' and 'unparseable',
+    -- so one trailing comma in a hand-edited file meant configure() rewrote it
+    -- with only mcpServers, destroying permissions/hooks/env. auto_mcp reaches
+    -- this on every LspAttach, so opening one .al file was enough.
+    local root = project()
+    vim.fn.mkdir(root .. "/.claude", "p")
+    local p = root .. "/.claude/settings.json"
+    local broken = [[{ "permissions": { "allow": ["Bash(ls:*)"] }, }]]
+    vim.fn.writefile({ broken }, p)
+
+    local msgs = {}
+    local orig = vim.notify
+    vim.notify = function(m) msgs[#msgs + 1] = tostring(m) end
+    local result = mcp.configure(root)
+    vim.notify = orig
+
+    eq(false, result, "configure must report failure")
+    eq({ broken }, vim.fn.readfile(p), "the file must be left byte-identical")
+    ok(#msgs > 0 and msgs[1]:find("not valid JSON", 1, true),
+       "expected an explanatory notify, got: " .. vim.inspect(msgs))
+  end)
+
   it("writes indented JSON, not one line", function()
     local root = project()
     mcp.configure(root)

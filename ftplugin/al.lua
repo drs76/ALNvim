@@ -150,6 +150,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
     -- A save is the only way a new object ID can enter the project, so this is
     -- where the ids.lua used-ID cache is dropped.
     require("al.ids").invalidate()
+    require("al.explorer").invalidate()
     if not require("al.status").is_ready() then return end
     local root = require("al.lsp").get_root()
     if root then require("al.compile").analyze_soon(root) end

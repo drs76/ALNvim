@@ -14,11 +14,6 @@ end
 -- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
 local DIAG_NS = vim.api.nvim_create_namespace("al_compile")
 
--- Ensure alc is executable (no-op on Windows; sets exec bit on Linux/macOS)
-local function ensure_executable(path)
-  platform.ensure_executable(path)
-end
-
 -- Resolve the compiler invocation prefix.
 --   1. `al compile` from the dotnet tool (Microsoft.Dynamics.BusinessCentral.
 --      Development.Tools) — forwards its args straight to a bundled alc, so the same
