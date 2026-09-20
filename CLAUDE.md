@@ -449,6 +449,27 @@ forward walk starts at `bidx + 1`: restarting at the opening line's first token
 re-consumes the `end` in `end else begin` and closes the block on its own
 opening line.
 
+## AL Go! — new project (`lua/al/project.lua`)
+
+`:ALNewProject` scaffolds `app.json` + `.vscode/launch.json` + a starter
+pageextension. `"platform": "1.0.0.0"` is **not** a placeholder — MS's own
+templates under `<ext>/templates/*/app.json` ship exactly that; only
+`application` tracks the chosen runtime.
+
+**The starter object is written to its CRS path, not the project root.**
+`HELLO_WORLD_PATH` is `src/pageextension/CustomerListExt.PageExt.al` and must
+agree with `wizard.build_path`. VSCode's template puts `HelloWorld.al` at the
+root, but ALNvim runs `wizard.organise_file` on `BufWritePost` for every AL file
+under the root — so a root-level starter object was renamed out from under the
+user on the very first `:w`. Writing it in the right place also means
+`ids.invalidate()` has to be called explicitly (same reason as `wizard`:
+`vim.fn.writefile` fires no autocommands).
+
+**`gen_uuid` seeds once per session and draws from `vim.uv.random`.** It used to
+reseed from `os.time() + os.clock()` on every call, which makes the value a
+function of when the call happened rather than of any entropy. This is the
+app.json `id`; BC rejects two extensions claiming the same one.
+
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
 12 types: Table (DataClassification), TableExtension (extends picker), Page (PageType + SourceTable), PageExtension (extends), Codeunit, Report (SourceTable), Query (SourceTable), XmlPort, Enum (Extensible), EnumExtension (extends), Interface (no ID), PermissionSet (auto-generates permissions).
@@ -544,7 +565,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (110 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (122 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
