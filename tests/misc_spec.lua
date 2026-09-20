@@ -254,3 +254,44 @@ describe("ids.free_ids", function()
     eq(nil, I.obj_type_from_line("    procedure Foo()"))
   end)
 end)
+
+describe("ids cache invalidation", function()
+  local ids = require("al.ids")
+
+  it("next_id sees a file written since the last call, once invalidated", function()
+    -- Regression: the wizard writes with vim.fn.writefile (no autocmds) and
+    -- opens with :edit (a read), so nothing triggered the BufWritePost hook
+    -- that drops the cache — two objects of the same type got the same ID.
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root .. "/src", "p")
+    vim.fn.writefile({ vim.fn.json_encode({
+      name = "T", publisher = "P", version = "1.0.0.0",
+      platform = "26.0.0.0", application = "26.0.0.0",
+      idRanges = { { from = 50000, to = 50099 } },
+    }) }, root .. "/app.json")
+
+    eq(50000, ids.next_id(root, "codeunit"))
+    -- Go through the wizard's own writer rather than calling invalidate() here:
+    -- the bug was that write_and_open never dropped the cache, so a test that
+    -- invalidates by hand passes even with the fix removed.
+    require("al.wizard")._test.write_and_open(
+      root .. "/src/A.Codeunit.al", 'codeunit 50000 "A"\n{\n}')
+    eq(50001, ids.next_id(root, "codeunit"))
+  end)
+end)
+
+describe("ext.reload", function()
+  local ext = require("al.ext")
+
+  it("clears the cached dotnet probe", function()
+    -- Regression: a failed probe cached false for the session and reload() did
+    -- not reset it, so installing the runtime and re-running
+    -- :ALInstallExtension left every dotnet-layout extension rejected until a
+    -- restart. Seed the "probed and absent" state and check reload drops it.
+    ext._test.set_dotnet_cache(false)
+    eq(false, ext._test.dotnet_cache(), "precondition: cache seeded")
+    ext.reload()
+    ok(ext._test.dotnet_cache() ~= false,
+       "reload() must re-probe, not keep the cached false")
+  end)
+end)

@@ -61,7 +61,13 @@ local ext_path  = require("al.ext").path
 -- exists. ext.host_cmd() owns the layout difference: older extensions ship a
 -- native bin/<platform>/ binary, 18.0.2668733+ ship a framework-dependent
 -- bin/*.dll launched as `dotnet <dll>`. Never assemble that path here.
-local lsp_cmd = require("al.ext").host_cmd()
+-- Resolved per FileType, not once at load: :ALInstallExtension calls
+-- ext.reload() and then re-fires this autocmd specifically to bring the server
+-- up. A value captured here would still be the pre-install nil, so installing
+-- the extension could never take effect without restarting Neovim.
+local function lsp_command()
+  return require("al.ext").host_cmd()
+end
 
 -- Track PIDs of AL server processes started in this session so VimLeavePre
 -- can kill them and their .NET child processes (which survive plain SIGTERM).
@@ -96,6 +102,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- EditorServices path needs the VSCode extension binary. Without it, point the
     -- user at the two ways forward instead of crashing on a nil cmd.
+    local lsp_cmd = lsp_command()
     if not lsp_cmd then
       vim.notify(
         "ALNvim: MS AL extension not found — EditorServices LSP unavailable.\n"
@@ -735,7 +742,10 @@ vim.api.nvim_create_user_command("ALInfo", function()
       or "(none usable)"),
     "LSP mode  : " .. (agentic and "agentic (al launchlspserver) [experimental]" or "editorservices"),
     "LSP binary: " .. (agentic and require("al.agentic_lsp").binary()
-      or (lsp_cmd and table.concat(lsp_cmd, " ") or "(none — install extension)")),
+      or (function()
+            local c = lsp_command()
+            return c and table.concat(c, " ") or "(none — install extension)"
+          end)()),
     "Compiler  : " .. (function()
       local prefix = require("al.compile").compiler_prefix()
       return prefix and table.concat(prefix, " ") or "(none — run :ALInstallDotnetTool)"

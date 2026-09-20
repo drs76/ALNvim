@@ -392,6 +392,8 @@ Publisher from filename format `Publisher_Name_Major.Minor.Build.Rev.app`.
 
 `<C-Space>`/`<Nul>` in insert mode on object-type keyword line → `<C-x><C-u>`. Global `_G.ALCompleteObjectId` bridges to `require("al.ids").complete` (avoids `v:lua` compatibility issues). Shows up to 5 free IDs per range with usage info. `:ALNextId` notifies next 3 free IDs in normal mode.
 
+**The used-ID cache must be dropped whenever ALNvim itself writes an `.al` file.** `ids.invalidate()` runs from the ftplugin `BufWritePost`, but `wizard.write_and_open` uses `vim.fn.writefile` (fires no autocommands) and `:edit` (a read) — so it calls `invalidate()` directly. Without that, `next_id` serves a stale set and two objects of the same type created in one session get the **same ID**.
+
 Types with IDs: `table`, `tableextension`, `page`, `pageextension`, `pagecustomization`, `codeunit`, `report`, `reportextension`, `query`, `xmlport`, `enum`, `enumextension`, `permissionset`, `permissionsetextension`, `profile`, `controladdin`.
 
 ## Code Cops (`lua/al/cops.lua`)
@@ -405,6 +407,8 @@ Browser values stored in `alnvim.json` as `"browser"`. macOS: no-path value → 
 Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
 
 **Per-project, never global.** This wrote `~/.claude/settings.json` until 2026-09-15. With `auto_mcp` on by default, every AL project ever opened left an entry there — eleven had accumulated, including one for a deleted `/tmp` scratch dir. The entry's **last positional argument is the server's workspace root**, so a stale or mis-resolved one is not inert: it is an AL language server indexing that tree in *every* Claude Code session. One (`al:rojaws`) pointed at a 3.6TB NFS share, because a stray `app.json` above the projects made `get_root()` resolve the mount point. `lsp.find_root_upward` now bounds that resolution; writing per-project bounds the damage if it ever resolves wrongly again. `:ALMcpStatus` reports leftover global `al:*` entries but does not remove them — that file holds the user's own config.
+
+**Never overwrite a settings file you could not parse.** `mcp.read_settings` returns `(data, err)`: `{}` for absent/empty, `nil` plus a reason when the file exists but is invalid JSON. Collapsing those two into `{}` meant one trailing comma in a hand-edited `.claude/settings.json` was read as empty and then rewritten with only `mcpServers` — destroying the user's permissions and hooks. `auto_mcp` reaches this on every `LspAttach`, so opening one `.al` file was enough.
 
 **Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `~/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
 

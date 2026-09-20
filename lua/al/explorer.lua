@@ -464,7 +464,13 @@ function M.procedures()
         local sel = action_state.get_selected_entry()
         actions.close(prompt_bufnr)
         if sel then
-          vim.api.nvim_win_set_cursor(0, { sel.lnum, 0 })
+          -- Open the file the list was built from. The rg pass is async now, so
+          -- the user may have changed buffers while it ran; jumping to a line
+          -- number in whatever happens to be current lands in the wrong file.
+          if vim.api.nvim_buf_get_name(0) ~= sel.filename then
+            vim.cmd("edit " .. vim.fn.fnameescape(sel.filename))
+          end
+          pcall(vim.api.nvim_win_set_cursor, 0, { sel.lnum, 0 })
           vim.cmd("normal! zz")
         end
       end)
@@ -502,8 +508,16 @@ function M.search(root)
   })
 end
 
+-- Drop the cached object list. Called from the ftplugin BufWritePost hook: a
+-- save can add, remove or move an object declaration, and reopening from a
+-- stale list shows the wrong set and sends <CR> to the wrong line.
+function M.invalidate()
+  _last = nil
+end
+
 -- Pure internals exposed for tests/ only. Not API.
 M._test = { arm_return = arm_return, disarm_return = disarm_return,
-            last = function() return _last end }
+            last = function() return _last end,
+            set_last = function(v) _last = v end }
 
 return M
