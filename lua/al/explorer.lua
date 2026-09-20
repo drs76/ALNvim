@@ -186,9 +186,58 @@ end
 
 M.rg_async = rg_async
 
+-- ── Reopening ────────────────────────────────────────────────────────────────
+--
+-- The picker closes when you select something — that is how Telescope works,
+-- and it cannot host an open file behind it. To make the explorer behave like a
+-- list you step in and out of, the built entry list is cached so the picker can
+-- be rebuilt instantly (no second rg), and the file opened from it is watched so
+-- closing it brings the list back.
+local _last      = nil   -- { root, entries, sym_count, sort_idx }
+local _return_au = nil   -- autocmd watching the file opened from the picker
+
+-- Forward declaration: M.objects calls this, and it is defined after M.objects.
+-- Declaring it local up here keeps it out of _G — without this the definition
+-- below would silently create a global.
+local show_objects_picker
+
+-- Stop watching for a return. Called before arming a new watcher and on every
+-- reopen, so only the most recently opened file can trigger one.
+local function disarm_return()
+  if _return_au then
+    pcall(vim.api.nvim_del_autocmd, _return_au)
+    _return_au = nil
+  end
+end
+
+-- Reopen the explorer when `bufnr` is closed.
+--
+-- BufDelete covers :bdelete (what <leader>q is bound to here); BufWipeout
+-- covers buffers with bufhidden=wipe. Quitting Neovim also deletes buffers, so
+-- v:exiting is checked — without it, :qa would try to build a Telescope window
+-- on the way out.
+local function arm_return(bufnr)
+  disarm_return()
+  if not require("al").config.explorer_return then return end
+  _return_au = vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+    buffer = bufnr,
+    once   = true,
+    callback = function()
+      _return_au = nil
+      if vim.v.exiting ~= vim.NIL then return end
+      vim.schedule(function() M.reopen() end)
+    end,
+  })
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
-function M.objects(root)
+-- Open the AL objects picker.
+--
+-- `cached` (optional) is a previously built { entries, sym_count, sort_idx }
+-- from _last. When given, rg is skipped entirely and the picker is rebuilt from
+-- that list — which is what makes reopening instant.
+function M.objects(root, cached)
   if not check_rg() then return end
   root = root or lsp.get_root()
   if not root then
@@ -207,6 +256,11 @@ function M.objects(root)
   local conf         = require("telescope.config").values
   local actions      = require("telescope.actions")
   local action_state = require("telescope.actions.state")
+
+  if cached then
+    show_objects_picker(root, cached.entries, cached.sym_count, cached.sort_idx or 1)
+    return
+  end
 
   -- Build search dirs: project root + extracted symbol caches
   local search_dirs, sym_map, sym_count = build_search_dirs(root)
@@ -269,9 +323,22 @@ function M.objects(root)
     return
   end
 
-  -- Default sort: by object type then name
-  local sort_idx = 1
-  table.sort(entries, sort_fns.type)
+  _last = { root = root, entries = entries, sym_count = sym_count, sort_idx = 1 }
+  show_objects_picker(root, entries, sym_count, 1)
+  end, string.format("%d symbol package(s)", sym_count))
+end
+
+-- Build and open the objects picker. Top level, with its own requires, so it can
+-- be called both from the rg callback and from M.reopen() without depending on
+-- locals held inside M.objects.
+show_objects_picker = function(root, entries, sym_count, sort_idx)
+  local pickers      = require("telescope.pickers")
+  local finders      = require("telescope.finders")
+  local conf         = require("telescope.config").values
+  local actions      = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+
+  table.sort(entries, sort_fns[SORT_MODES[sort_idx]] or sort_fns.type)
 
   local function make_finder()
     return finders.new_table({ results = entries, entry_maker = make_entry })
@@ -294,6 +361,8 @@ function M.objects(root)
           end
           vim.api.nvim_win_set_cursor(0, { sel.lnum, 0 })
           vim.cmd("normal! zz")
+          -- Watch this buffer so closing it brings the list back.
+          arm_return(vim.api.nvim_get_current_buf())
         end
       end)
 
@@ -302,6 +371,8 @@ function M.objects(root)
         sort_idx = (sort_idx % #SORT_MODES) + 1
         local mode = SORT_MODES[sort_idx]
         table.sort(entries, sort_fns[mode])
+        -- Remember it, so a reopen comes back sorted the way you left it.
+        if _last then _last.sort_idx = sort_idx end
         local picker = action_state.get_current_picker(prompt_bufnr)
         picker:refresh(make_finder(), { reset_prompt = false })
         vim.notify("AL Explorer: sort by " .. mode, vim.log.levels.INFO)
@@ -323,7 +394,17 @@ function M.objects(root)
       return true
     end,
   }):find()
-  end, string.format("%d symbol package(s)", sym_count))
+end
+
+-- Reopen the last objects picker from cache — no second rg pass.
+-- Exposed as :ALExplorerReopen, and used by the return-on-close watcher.
+function M.reopen()
+  disarm_return()
+  if not _last then
+    vim.notify("AL Explorer: nothing to reopen — run :ALExplorer first", vim.log.levels.WARN)
+    return
+  end
+  M.objects(_last.root, _last)
 end
 
 -- Telescope picker: procedures and triggers in the current file.
@@ -420,5 +501,9 @@ function M.search(root)
     layout_config   = { mirror = true, preview_height = 0.5 },
   })
 end
+
+-- Pure internals exposed for tests/ only. Not API.
+M._test = { arm_return = arm_return, disarm_return = disarm_return,
+            last = function() return _last end }
 
 return M

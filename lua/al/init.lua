@@ -36,6 +36,13 @@ M.defaults = {
   -- Relative path inside the project root where symbol packages are cached
   packagecachepath = ".alpackages",
 
+  -- Reopen the AL Explorer when the file you opened from it is closed, so the
+  -- object list behaves like something you step in and out of rather than a
+  -- one-shot jump. The list is rebuilt from cache, so reopening costs no rg
+  -- pass. Set false to keep the old open-once behaviour; :ALExplorerReopen
+  -- brings it back by hand either way.
+  explorer_return = true,
+
   -- Side the compile results panel opens on: "left" or "right"
   compile_side = "left",
 
