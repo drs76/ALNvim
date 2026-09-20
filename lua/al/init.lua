@@ -33,6 +33,15 @@ M.defaults = {
   -- e.g. object_name_suffix = "PTE"
   object_name_suffix = nil,
 
+  -- Colorscheme applied when the first AL buffer loads. ALNvim ships bc_dark
+  -- and bc_yellow, tuned to match the VS Code AL palette.
+  --
+  -- Set to false to leave your colorscheme alone. The override only fires when
+  -- the current scheme is not already a bc_* one, but that still means opening
+  -- an .al file switches you off any other theme — which is wrong if you chose
+  -- that theme deliberately.
+  colorscheme = "bc_dark",
+
   -- Relative path inside the project root where symbol packages are cached
   packagecachepath = ".alpackages",
 

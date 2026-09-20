@@ -68,7 +68,17 @@ local function to_slug(input)
   return nil
 end
 
--- Open a slug or full URL in the default browser.
+-- Resolve the project's configured browser, so :ALHelp honours
+-- :ALSelectBrowser the same way publish and debug do. Falls back to the system
+-- default when there is no project or no setting.
+local function browser()
+  local ok, lsp = pcall(require, "al.lsp")
+  local root = ok and lsp.get_root() or nil
+  local ok2, cops = pcall(require, "al.cops")
+  return ok2 and cops.get_browser(root) or ""
+end
+
+-- Open a slug or full URL in the configured browser.
 function M.open(input)
   local url
   if input and input:match("^https?://") then
@@ -77,7 +87,7 @@ function M.open(input)
     local slug = to_slug(input) or TOPICS[1][2]
     url = LEARN_PREFIX .. slug
   end
-  require("al.platform").open_url(url)
+  require("al.platform").open_url(url, browser())
 end
 
 function M.topics()
@@ -90,7 +100,7 @@ function M.topics()
     for _, t in ipairs(TOPICS) do
       if t[1] == choice then
         local url = t[2]:match("^https?://") and t[2] or (LEARN_PREFIX .. t[2])
-        require("al.platform").open_url(url)
+        require("al.platform").open_url(url, browser())
         return
       end
     end
@@ -99,10 +109,7 @@ end
 
 -- Open the AL Guidelines site directly.
 function M.guidelines()
-  require("al.platform").open_url("https://alguidelines.dev/")
+  require("al.platform").open_url("https://alguidelines.dev/", browser())
 end
-
--- Kept for backwards compat (plugin/al.lua calls M.toggle).
-M.toggle = M.open
 
 return M

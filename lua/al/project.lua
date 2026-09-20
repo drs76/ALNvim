@@ -14,12 +14,30 @@ local RUNTIMES = {
   { label = "10.0  BC 2023 release wave 1 (LTSC)",   runtime = "10.0", application = "21.0.0.0" },
 }
 
+-- Seed once per session, not per call. Reseeding from the clock on every call
+-- makes the sequence a function of the time the call happened: two processes
+-- started in the same second with comparable CPU time draw the same numbers.
+-- This is the app.json `id`, and BC rejects two extensions claiming one ID.
+math.randomseed(os.time())
+
+-- One random nibble. Prefers libuv's CSPRNG; math.random is the fallback for a
+-- build where uv.random is missing or fails (it needs entropy from the OS).
+local function nibble()
+  local ok, bytes = pcall(vim.uv.random, 1)
+  if ok and type(bytes) == "string" and #bytes == 1 then
+    return bytes:byte() % 16
+  end
+  return math.random(0, 15)
+end
+
 local function gen_uuid()
-  math.randomseed(os.time() + math.floor(os.clock() * 1000000) % 1000000)
-  return ("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"):gsub("[xy]", function(c)
-    local v = c == "x" and math.random(0, 15) or math.random(8, 11)
+  -- Parenthesised: gsub returns (string, count), and an unparenthesised call
+  -- in the last argument position would pass the count on to string.format.
+  return (("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"):gsub("[xy]", function(c)
+    -- y is the RFC 4122 variant nibble: one of 8, 9, a, b.
+    local v = c == "x" and nibble() or (8 + nibble() % 4)
     return ("%x"):format(v)
-  end)
+  end))
 end
 
 -- Returns the first non-existing path: base, base2, base3, …
@@ -33,7 +51,19 @@ local function next_available(base)
 end
 
 local function js_str(s)
-  return s:gsub("\\", "\\\\"):gsub('"', '\\"')
+  return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
+end
+
+-- Where the starter object lands. Must agree with wizard.build_path's
+-- src/<obj_type>/<Name>.<FileType>.al, or organise_file moves it on first save.
+local HELLO_WORLD_PATH = "src/pageextension/CustomerListExt.PageExt.al"
+
+-- writefile() takes lines; the templates are format strings ending in \n, which
+-- vim.split turns into a trailing empty element and an extra blank line on disk.
+local function write_lines(path, content)
+  local lines = vim.split(content, "\n", { plain = true })
+  if lines[#lines] == "" then table.remove(lines) end
+  return vim.fn.writefile(lines, path)
 end
 
 local function build_app_json(name, publisher, rv, id_from)
@@ -154,6 +184,15 @@ function M.new_project()
     vim.ui.input({ prompt = "Project name: ", default = default_name }, function(name)
       if not name or name == "" then return end
 
+      -- name is concatenated into a path and is also the app.json "name".
+      -- A separator or .. would put the project somewhere other than under the
+      -- parent the user just chose.
+      if name:find("[/\\]") or name:find("%.%.") then
+        vim.notify("AL Go!: project name cannot contain path separators or '..'",
+          vim.log.levels.ERROR)
+        return
+      end
+
       local proj_dir = parent .. "/" .. name
       if vim.fn.isdirectory(proj_dir) ~= 0 then
         vim.notify("AL Go!: directory already exists: " .. proj_dir, vim.log.levels.ERROR)
@@ -182,19 +221,29 @@ function M.new_project()
                 return
               end
 
+              -- The starter object goes straight to its CRS home. Writing it at
+              -- the project root — which is what VSCode's template does — means
+              -- wizard.organise_file renames it out from under the user on the
+              -- very first :w, since it runs on BufWritePost for every AL file
+              -- under the root. HELLO_WORLD_PATH must match wizard.build_path.
+              local hw_path = proj_dir .. "/" .. HELLO_WORLD_PATH
               vim.fn.mkdir(proj_dir .. "/.alpackages", "p")
               vim.fn.mkdir(proj_dir .. "/.vscode",     "p")
-              vim.fn.mkdir(proj_dir .. "/src",          "p")
+              vim.fn.mkdir(vim.fn.fnamemodify(hw_path, ":h"), "p")
 
               local app_content = build_app_json(name, publisher, rv, id_from)
               local hw_content  = build_hello_world(name, publisher, rv, id_from)
 
-              vim.fn.writefile(vim.split(app_content,  "\n", { plain = true }), proj_dir .. "/app.json")
-              vim.fn.writefile(vim.split(hw_content,   "\n", { plain = true }), proj_dir .. "/HelloWorld.al")
-              vim.fn.writefile(vim.split(LAUNCH_JSON,  "\n", { plain = true }), proj_dir .. "/.vscode/launch.json")
+              write_lines(proj_dir .. "/app.json",             app_content)
+              write_lines(hw_path,                             hw_content)
+              write_lines(proj_dir .. "/.vscode/launch.json",  LAUNCH_JSON)
+
+              -- The ID cache is keyed per project+type and these writes fire no
+              -- autocommands, so :ALNextId would not see the object just created.
+              pcall(function() require("al.ids").invalidate() end)
 
               vim.schedule(function()
-                vim.cmd("edit " .. vim.fn.fnameescape(proj_dir .. "/HelloWorld.al"))
+                vim.cmd("edit " .. vim.fn.fnameescape(hw_path))
                 vim.notify(
                   string.format("AL Go!: project created → %s  (runtime %s)", proj_dir, rv.runtime),
                   vim.log.levels.INFO
@@ -207,5 +256,15 @@ function M.new_project()
     end)
   end)
 end
+
+-- Internals reached by tests/project_spec.lua only — never call from plugin code.
+M._test = {
+  gen_uuid          = gen_uuid,
+  build_app_json    = build_app_json,
+  build_hello_world = build_hello_world,
+  write_lines       = write_lines,
+  HELLO_WORLD_PATH  = HELLO_WORLD_PATH,
+  RUNTIMES          = RUNTIMES,
+}
 
 return M

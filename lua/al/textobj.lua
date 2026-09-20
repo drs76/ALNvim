@@ -60,34 +60,60 @@ end
 local function block_bounds()
   local cur = vim.fn.line(".")
 
-  -- Walk backward: find the begin/case that owns the cursor.
-  -- pending tracks unmatched end tokens we have passed.
-  local pending = 0
-  local bline
-  for i = cur, 1, -1 do
-    local l = vim.fn.getline(i):lower()
-    if l:match("^%s*end[;%s]*$") then
-      pending = pending + 1
-    elseif l:match("%f[%a]begin%f[%A]") then
-      if pending == 0 then bline = i; break
-      else pending = pending - 1 end
-    elseif l:match("%f[%a]case%f[%A]") then
-      -- case…of opens a block closed by end; (no matching begin)
-      if pending == 0 then bline = i; break
-      else pending = pending - 1 end
+  -- Scan a line's block tokens in the order they appear, not by kind.
+  --
+  -- Counting every `begin` on a line before every `end` gets `end else begin`
+  -- wrong — the single most common multi-token line in AL. Taken out of order
+  -- the two cancel, so depth never reaches zero at the `else` and the text
+  -- object swallows the else-branch as well. Returns a list of +1/-1 deltas in
+  -- source order.
+  local function tokens(line)
+    local out = {}
+    for pos, word in line:lower():gmatch("()(%a+)") do
+      -- %f frontier equivalence: reject a match glued to another word char.
+      local before = line:sub(pos - 1, pos - 1)
+      local after  = line:sub(pos + #word, pos + #word)
+      if not before:match("[%w_]") and not after:match("[%w_]") then
+        if word == "begin" or word == "case" then
+          out[#out + 1] = 1
+        elseif word == "end" then
+          out[#out + 1] = -1
+        end
+      end
     end
+    return out
+  end
+
+  -- Walk backward: find the begin/case that owns the cursor.
+  -- pending tracks unmatched end tokens we have passed; a line is scanned
+  -- right-to-left because we are moving backwards through the source.
+  local pending = 0
+  local bline, bidx
+  for i = cur, 1, -1 do
+    local t = tokens(vim.fn.getline(i))
+    for k = #t, 1, -1 do
+      if t[k] == -1 then
+        pending = pending + 1
+      else
+        if pending == 0 then bline, bidx = i, k; break end
+        pending = pending - 1
+      end
+    end
+    if bline then break end
   end
   if not bline then return nil end
 
-  -- Walk forward from bline+1 counting depth; starts at 1.
+  -- Walk forward counting in source order, starting *after* the token that
+  -- opened the block. Restarting at the beginning of the opening line would
+  -- re-consume the `end` in `end else begin`, closing the block on its own
+  -- opening line.
   local depth = 1
   local eline
-  for i = bline + 1, vim.fn.line("$") do
-    local l = vim.fn.getline(i):lower()
-    for _ in l:gmatch("%f[%a]begin%f[%A]") do depth = depth + 1 end
-    for _ in l:gmatch("%f[%a]case%f[%A]")  do depth = depth + 1 end
-    for _ in l:gmatch("%f[%a]end%f[%A]") do
-      depth = depth - 1
+  for i = bline, vim.fn.line("$") do
+    local t = tokens(vim.fn.getline(i))
+    local from = (i == bline) and (bidx + 1) or 1
+    for k = from, #t do
+      depth = depth + t[k]
       if depth == 0 then eline = i; break end
     end
     if eline then break end

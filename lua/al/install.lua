@@ -81,38 +81,46 @@ local function is_zip(path)
   return magic == "PK"
 end
 
--- Compare two version strings (e.g. "16.3.2065053" vs "16.4.2100000").
--- Returns true if a > b.
-local function version_gt(a, b)
-  local function parts(s)
-    local t = {}
-    for n in s:gmatch("%d+") do t[#t + 1] = tonumber(n) end
-    return t
-  end
-  local va, vb = parts(a), parts(b)
-  for i = 1, math.max(#va, #vb) do
-    local na, nb = va[i] or 0, vb[i] or 0
-    if na ~= nb then return na > nb end
-  end
-  return false
-end
+-- Shared with ext.lua so the updater and the extension picker cannot disagree
+-- about which of two installs is newer.
+local version_gt = require("al.ext").version_gt
 
--- Return the newest installed extension version string, or nil.
-local function installed_version()
-  local home    = vim.fn.expand("~")
-  local newest  = nil
-  for _, subdir in ipairs({ ".vscode", ".vscode-insiders" }) do
-    local base    = home .. "/" .. subdir .. "/extensions"
-    local matched = vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)
-    for _, d in ipairs(matched) do
-      local ver = d:match("ms%-dynamics%-smb%.al%-(.-)/?$")
+-- Every installed extension as { dir, version }, across all extension dirs.
+-- bases: override the search dirs (tests only); defaults to every real one.
+local function installed_all(bases)
+  local out = {}
+  for _, base in ipairs(bases or require("al.ext").ext_dirs()) do
+    for _, d in ipairs(vim.fn.glob(base .. "/ms-dynamics-smb.al-*", false, true)) do
+      local ver  = d:match("ms%-dynamics%-smb%.al%-(.-)/?$")
       local stat = vim.uv.fs_stat(d)
       if ver and stat and stat.type == "directory" then
-        if not newest or version_gt(ver, newest) then newest = ver end
+        out[#out + 1] = { dir = d, version = ver }
       end
     end
   end
+  return out
+end
+
+-- Return the newest installed extension version string, or nil.
+local function installed_version(bases)
+  local newest
+  for _, e in ipairs(installed_all(bases)) do
+    if not newest or version_gt(e.version, newest) then newest = e.version end
+  end
   return newest
+end
+
+-- Directory holding an install of exactly this version, in any extension dir.
+--
+-- The check used to test EXT_DIR only. EXT_DIR is the Insiders dir whenever
+-- ~/.vscode-insiders exists, so a user with Insiders installed and the
+-- extension under stable ~/.vscode got "not installed" and re-downloaded the
+-- whole 300–700 MB VSIX — every time.
+local function installed_path(version, bases)
+  for _, e in ipairs(installed_all(bases)) do
+    if e.version == version then return e.dir end
+  end
+  return nil
 end
 
 -- Download the VSIX for a given version.
@@ -181,8 +189,12 @@ end
 -- Extract VSIX (zip) and install to EXT_DIR/ms-dynamics-smb.al-{version}/.
 -- Extracts everything (no glob filter) for maximum compatibility, then moves
 -- the extension/ subdirectory to the final location.
-local function extract_vsix(tmpfile, version, log, cb)
-  local target = EXT_DIR .. "/" .. PUBLISHER .. "." .. EXT_ID .. "-" .. version
+-- dest_base: the extensions directory to install into. The updater passes the
+-- one already holding the current version, so an update does not scatter
+-- versions across ~/.vscode and ~/.vscode-insiders.
+local function extract_vsix(tmpfile, version, log, cb, dest_base)
+  local base   = dest_base or EXT_DIR
+  local target = base .. "/" .. PUBLISHER .. "." .. EXT_ID .. "-" .. version
   local tmpdir = vim.fn.stdpath("cache") .. "/alnvim_al_extract_" .. version
   vim.fn.delete(tmpdir, "rf")   -- clean any previous failed attempt
   vim.fn.mkdir(tmpdir, "p")
@@ -222,7 +234,7 @@ local function extract_vsix(tmpfile, version, log, cb)
           return
         end
 
-        vim.fn.mkdir(EXT_DIR, "p")
+        vim.fn.mkdir(base, "p")
 
         -- Prefer os.rename (atomic); falls back to cp -r for cross-device moves.
         local renamed = os.rename(src, target)
@@ -291,8 +303,18 @@ local function make_window(title)
 
   local function done(success, msg)
     vim.schedule(function()
+      local text = success and (msg or "Done.")
+        or ("FAILED — " .. (msg or "see messages above."))
+      -- The buffer is bufhidden=wipe, so closing the window during a download
+      -- destroys it. log() already guards; vim.keymap.set does not, and would
+      -- throw "Invalid buffer id" when the job finally finished. Report to
+      -- :messages instead so the outcome is not lost.
+      if not vim.api.nvim_buf_is_valid(buf) then
+        vim.notify("AL: " .. text, success and vim.log.levels.INFO or vim.log.levels.ERROR)
+        return
+      end
       log("")
-      log(success and (msg or "Done.") or ("FAILED — " .. (msg or "see messages above.")))
+      log(text)
       for _, key in ipairs({ "q", "<Esc>" }) do
         vim.keymap.set("n", key, "<cmd>bdelete!<CR>", { buffer = buf, silent = true })
       end
@@ -318,10 +340,10 @@ function M.install()
     end
     log("Latest version: " .. version)
 
-    local target = EXT_DIR .. "/" .. PUBLISHER .. "." .. EXT_ID .. "-" .. version
-    if vim.fn.isdirectory(target) == 1 then
+    local existing = installed_path(version)
+    if existing then
       log("Already installed:")
-      log("  " .. target)
+      log("  " .. existing)
       done(true)
       return
     end
@@ -391,6 +413,10 @@ function M.update()
     end
 
     log("New version available — downloading…")
+    -- Land the new version in the same extensions dir as the current one.
+    local cur_dir  = installed_path(cur)
+    local dest     = cur_dir and vim.fn.fnamemodify(cur_dir, ":h") or EXT_DIR
+
     download_vsix(version, log, function(tmpfile)
       if not tmpfile then
         done(false)
@@ -418,7 +444,7 @@ function M.update()
           end)
         end
         done(ok, ok and "Updated to v" .. version .. ".  Restart Neovim to use the new server." or nil)
-      end)
+      end, dest)
     end)
   end)
 end
@@ -440,10 +466,9 @@ function M.install_dotnet_tool()
     return
   end
 
-  local al_bin = vim.fn.expand("~/.dotnet/tools/al")
-  if platform.is_windows then
-    al_bin = vim.fn.expand("~/.dotnet/tools/al.exe")
-  end
+  -- Same resolver the MCP client and agentic LSP use, so "already installed"
+  -- here means the binary those will actually spawn.
+  local al_bin = require("al.altool").binary()
   local already_installed = vim.fn.filereadable(al_bin) == 1
 
   vim.ui.select({ "Stable", "Preview (--prerelease)" }, { prompt = "AL dotnet tool channel:" }, function(choice)
@@ -527,5 +552,12 @@ function M.install_dotnet_tool()
   )
   end)
 end
+
+-- Internals reached by tests/install_spec.lua only — never call from plugin code.
+M._test = {
+  installed_all     = installed_all,
+  installed_version = installed_version,
+  installed_path    = installed_path,
+}
 
 return M

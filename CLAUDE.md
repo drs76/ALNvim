@@ -372,7 +372,14 @@ Explicit deps appended after, duplicates skipped.
 
 ## BC Dark colorscheme
 
-Auto-applied on AL window focus, restored on non-AL focus. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, keywords `#00747F` (teal), types `#4EC9B0` (aqua), functions `#DCDCAA`, variables `#9CDCFE`, strings `#CE9178`, numbers `#9FD89F`, constants `#62CFD7`, status bar `#00747F`/`#FFFFFF`.
+Auto-applied on AL window focus, restored on non-AL focus.
+
+**Opt out with `setup({ colorscheme = false })`**, or name another with
+`colorscheme = "bc_yellow"`. The ftplugin used to apply `bc_dark` unconditionally,
+so a user's own colorscheme was silently replaced the first time any `.al` file
+was opened — with no setting to prevent it. The override now only fires when the
+current `colors_name` is not already a `bc_*` one, so re-entering an AL buffer
+does not fight a deliberate switch. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, keywords `#00747F` (teal), types `#4EC9B0` (aqua), functions `#DCDCAA`, variables `#9CDCFE`, strings `#CE9178`, numbers `#9FD89F`, constants `#62CFD7`, status bar `#00747F`/`#FFFFFF`.
 
 **`bc_yellow`**: near-black green bg `#010704`, fg `#efefef`, comments `#04b925`, keywords/types `#f6fa16`. Set as global default via `colorscheme bc_yellow` in `init.lua` — no per-window switching.
 
@@ -416,7 +423,13 @@ Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via s
 
 Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com — returns non-ZIP redirect). Required headers: `Accept: application/octet-stream`, `X-Market-Client-Id: VSCode`, `User-Agent: VSCode/...`. Verifies ZIP magic bytes (`PK`). Calls `ext.reload()` + `doautocmd FileType al` after install. Registered before `ext_path` guard — always available.
 
-`M.update()` — queries marketplace for latest, compares with `installed_version()` (scans `~/.vscode*/extensions/ms-dynamics-smb.al-*`), downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`.
+`M.update()` — queries marketplace for latest, compares with `installed_version()`, downloads only if newer. Reports "already up to date" otherwise. Registered as `:ALUpdateExtension`. Installs beside the existing copy (`installed_path(cur)`'s parent), so an update does not scatter versions across `~/.vscode` and `~/.vscode-insiders`.
+
+**Every "is it installed?" check must search both extension dirs.** `EXT_DIR` is the *install target* — the Insiders dir whenever `~/.vscode-insiders` exists, else stable — and is not where an existing copy necessarily lives. `M.install()` tested `EXT_DIR` only, so a user with Insiders present and the extension under stable `~/.vscode` was told it was not installed and re-downloaded the whole 300–700 MB VSIX on every run. `installed_path(version)` / `installed_all()` scan `ext.ext_dirs()`, the same list `ext.find()` uses.
+
+**`version_gt` lives in `ext.lua` and is shared.** install.lua had its own copy that scanned *every* digit run in the string; ext.lua's read only the `ms-dynamics-smb.al-<ver>` tail and returned `{}` for anything else. Neither worked for both callers — ext.lua compares full directory paths, install.lua compares bare version strings like `"18.1.0"`, and ext.lua's version returned "equal" for those, which would have made `:ALUpdateExtension` report "already up to date" forever. The shared `ext.version_gt` takes the version tail when present and a bare string otherwise, and refuses to guess at a path it cannot parse — scanning a whole path lets digits in the *home directory* decide the comparison.
+
+The dotnet-tool "already installed" probe uses `altool.binary()`, so it tests the binary the MCP client and agentic LSP actually spawn rather than re-deriving the path.
 
 `M.install_dotnet_tool()` — checks if `~/.dotnet/tools/al[.exe]` exists, runs `dotnet tool install` (first time) or `dotnet tool update` (already installed) for package `microsoft.dynamics.businesscentral.development.tools`, streams output live. Registered as `:ALInstallDotnetTool`. Requires `dotnet` on PATH.
 
@@ -426,6 +439,36 @@ Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com �
 |---|---|
 | `af`/`if` | around/inside procedure or trigger |
 | `aF`/`iF` | around/inside nearest begin/end or case/end block |
+
+**`block_bounds` must scan a line's tokens in source order.** Counting every
+`begin` on a line before every `end` makes `end else begin` net out to zero —
+the most common multi-token line in AL — so depth never reaches zero at the
+`else` and `aF` swallows the else-branch along with the if-branch. The backward
+walk records the *index* of the opening token as well as its line, and the
+forward walk starts at `bidx + 1`: restarting at the opening line's first token
+re-consumes the `end` in `end else begin` and closes the block on its own
+opening line.
+
+## AL Go! — new project (`lua/al/project.lua`)
+
+`:ALNewProject` scaffolds `app.json` + `.vscode/launch.json` + a starter
+pageextension. `"platform": "1.0.0.0"` is **not** a placeholder — MS's own
+templates under `<ext>/templates/*/app.json` ship exactly that; only
+`application` tracks the chosen runtime.
+
+**The starter object is written to its CRS path, not the project root.**
+`HELLO_WORLD_PATH` is `src/pageextension/CustomerListExt.PageExt.al` and must
+agree with `wizard.build_path`. VSCode's template puts `HelloWorld.al` at the
+root, but ALNvim runs `wizard.organise_file` on `BufWritePost` for every AL file
+under the root — so a root-level starter object was renamed out from under the
+user on the very first `:w`. Writing it in the right place also means
+`ids.invalidate()` has to be called explicitly (same reason as `wizard`:
+`vim.fn.writefile` fires no autocommands).
+
+**`gen_uuid` seeds once per session and draws from `vim.uv.random`.** It used to
+reseed from `os.time() + os.clock()` on every call, which makes the value a
+function of when the call happened rather than of any entropy. This is the
+app.json `id`; BC rejects two extensions claiming the same one.
 
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
@@ -522,7 +565,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (63 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (122 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -534,6 +577,9 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 
 - A `.alpackages` fixture cannot test the package-cache filter. `vim.fn.glob("**/*")` never descends into dot-directories, so those files are excluded regardless and the test passes with the filter deleted. Use a **non-dotted** `packagecachepath`.
 - Hard-coded cursor columns silently point at the wrong character when a fixture's indentation changes. Derive positions from the fixture string.
+- A mutation that is a pure reordering (swapping two mutually exclusive `if`
+  branches) *should* stay green. Use one as a control: if it goes red, the test
+  is asserting on something incidental.
 
 ## Project layout
 
