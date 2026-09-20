@@ -271,13 +271,17 @@ function M._inject_rendering(bufnr, default_id, entries)
   for i, line in ipairs(lines) do
     if line:match("^%s*rendering%s*$") or line:match("^%s*rendering%s*{") then
       rend_start = i
-      local depth = 0
+      local depth, opened = 0, false
       local j = line:match("{") and i or (i + 1)
       for k = j, n do
         local l = lines[k]
-        for _ in l:gmatch("{") do depth = depth + 1 end
+        for _ in l:gmatch("{") do depth = depth + 1; opened = true end
         for _ in l:gmatch("}") do depth = depth - 1 end
-        if depth == 0 then rend_close = k; break end
+        -- `opened` matters: `rendering` may be followed by a blank or comment
+        -- line before its `{`. Testing depth alone accepts that line as the
+        -- section's closing brace, and the layouts get inserted above the
+        -- section instead of inside it.
+        if opened and depth == 0 then rend_close = k; break end
       end
       break
     end
@@ -426,12 +430,18 @@ end
 local function existing_layout_types(bufnr)
   local types = {}
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local in_rendering = false
+  -- Stay inside the rendering section. Reading to end-of-buffer would pick up
+  -- any later `Type = X;` — a requestpage or a dataitem property — and silently
+  -- suppress the layout whose type it happened to spell.
+  local depth, opened, in_rendering = 0, false, false
   for _, line in ipairs(lines) do
-    if line:match("^%s*rendering") then in_rendering = true end
+    if not in_rendering and line:match("^%s*rendering") then in_rendering = true end
     if in_rendering then
+      for _ in line:gmatch("{") do depth = depth + 1; opened = true end
+      for _ in line:gmatch("}") do depth = depth - 1 end
       local t = line:match("Type%s*=%s*(%w+)%s*;")
       if t then types[t:lower()] = true end
+      if opened and depth == 0 then break end
     end
   end
   return types
@@ -685,5 +695,8 @@ function M.open_layout()
     end)
   end
 end
+
+-- Internals reached by tests/layout_spec.lua only — never call from plugin code.
+M._test = { existing_layout_types = existing_layout_types }
 
 return M

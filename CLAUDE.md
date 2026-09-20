@@ -372,7 +372,14 @@ Explicit deps appended after, duplicates skipped.
 
 ## BC Dark colorscheme
 
-Auto-applied on AL window focus, restored on non-AL focus. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, keywords `#00747F` (teal), types `#4EC9B0` (aqua), functions `#DCDCAA`, variables `#9CDCFE`, strings `#CE9178`, numbers `#9FD89F`, constants `#62CFD7`, status bar `#00747F`/`#FFFFFF`.
+Auto-applied on AL window focus, restored on non-AL focus.
+
+**Opt out with `setup({ colorscheme = false })`**, or name another with
+`colorscheme = "bc_yellow"`. The ftplugin used to apply `bc_dark` unconditionally,
+so a user's own colorscheme was silently replaced the first time any `.al` file
+was opened — with no setting to prevent it. The override now only fires when the
+current `colors_name` is not already a `bc_*` one, so re-entering an AL buffer
+does not fight a deliberate switch. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, keywords `#00747F` (teal), types `#4EC9B0` (aqua), functions `#DCDCAA`, variables `#9CDCFE`, strings `#CE9178`, numbers `#9FD89F`, constants `#62CFD7`, status bar `#00747F`/`#FFFFFF`.
 
 **`bc_yellow`**: near-black green bg `#010704`, fg `#efefef`, comments `#04b925`, keywords/types `#f6fa16`. Set as global default via `colorscheme bc_yellow` in `init.lua` — no per-window switching.
 
@@ -426,6 +433,15 @@ Downloads MS AL VSIX from `vsassets.io` CDN (not marketplace.visualstudio.com �
 |---|---|
 | `af`/`if` | around/inside procedure or trigger |
 | `aF`/`iF` | around/inside nearest begin/end or case/end block |
+
+**`block_bounds` must scan a line's tokens in source order.** Counting every
+`begin` on a line before every `end` makes `end else begin` net out to zero —
+the most common multi-token line in AL — so depth never reaches zero at the
+`else` and `aF` swallows the else-branch along with the if-branch. The backward
+walk records the *index* of the opening token as well as its line, and the
+forward walk starts at `bidx + 1`: restarting at the opening line's first token
+re-consumes the `end` in `end else begin` and closes the block on its own
+opening line.
 
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
@@ -522,7 +538,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (63 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (100 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -534,6 +550,9 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 
 - A `.alpackages` fixture cannot test the package-cache filter. `vim.fn.glob("**/*")` never descends into dot-directories, so those files are excluded regardless and the test passes with the filter deleted. Use a **non-dotted** `packagecachepath`.
 - Hard-coded cursor columns silently point at the wrong character when a fixture's indentation changes. Derive positions from the fixture string.
+- A mutation that is a pure reordering (swapping two mutually exclusive `if`
+  branches) *should* stay green. Use one as a control: if it goes red, the test
+  is asserting on something incidental.
 
 ## Project layout
 

@@ -8,11 +8,16 @@ do
   if ok and is_bg then return end
 end
 
--- Apply bc_dark as default when an AL buffer is first loaded,
--- but only if the user hasn't already chosen a bc_* colorscheme.
-local _cs = vim.g.colors_name or ""
-if not _cs:find("^bc_") then
-  vim.cmd("colorscheme bc_dark")
+-- Apply ALNvim's colorscheme when an AL buffer is first loaded, unless the user
+-- already has a bc_* one. Set colorscheme = false in setup() to opt out
+-- entirely — otherwise opening an .al file switches you off whatever theme you
+-- chose globally.
+local _want = require("al").config.colorscheme
+if _want then
+  local _cs = vim.g.colors_name or ""
+  if not _cs:find("^bc_") then
+    pcall(vim.cmd, "colorscheme " .. _want)
+  end
 end
 
 -- Per-buffer augroup: ftplugin re-runs on every :e of the same file; without
