@@ -43,6 +43,22 @@ end
 -- Exposed so :ALInfo and tests can explain a failed resolution.
 M.find_root_upward = find_root_upward
 
+-- Both AL language-server backends: the dotnet tool's (al launchlspserver) and
+-- the VS Code extension's EditorServices.
+M.CLIENT_NAMES = { "al_agentic_lsp", "al_language_server" }
+
+-- The AL language-server client attached to `bufnr`, whichever backend it is.
+-- Features that only need standard LSP (formatting, diagnostics) go through
+-- this; keying them to "al_language_server" made them silently stop working
+-- the moment experimental_lsp switched the backend.
+function M.client(bufnr)
+  for _, name in ipairs(M.CLIENT_NAMES) do
+    local c = vim.lsp.get_clients({ name = name, bufnr = bufnr })[1]
+    if c then return c end
+  end
+  return nil
+end
+
 -- Return the AL project root for the given buffer (directory containing app.json).
 -- Falls back to scanning downward from cwd when the buffer is outside a project
 -- (e.g. a workspace root buffer). Prompts to pick if multiple projects are found.

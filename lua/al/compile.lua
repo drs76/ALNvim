@@ -280,14 +280,15 @@ end
 -- After a clean build, reset the AL LSP's diagnostic namespace for all
 -- attached buffers so stale server-side false positives don't linger.
 local function clear_lsp_diagnostics(project_dir)
-  local clients = vim.lsp.get_clients({ name = "al_language_server" })
-  for _, c in ipairs(clients) do
-    if c.root_dir == project_dir then
-      local ns = vim.lsp.diagnostic.get_namespace(c.id)
-      for bufnr in pairs(c.attached_buffers or {}) do
-        vim.diagnostic.reset(ns, bufnr)
+  for _, name in ipairs(lsp.CLIENT_NAMES) do
+    for _, c in ipairs(vim.lsp.get_clients({ name = name })) do
+      if c.root_dir == project_dir then
+        local ns = vim.lsp.diagnostic.get_namespace(c.id)
+        for bufnr in pairs(c.attached_buffers or {}) do
+          vim.diagnostic.reset(ns, bufnr)
+        end
+        return
       end
-      return
     end
   end
 end

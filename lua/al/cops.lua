@@ -70,7 +70,19 @@ function M.apply(root, cops, silent)
   end
   if not client then
     if not silent then
-      vim.notify("AL cops: no active LSP client for " .. root, vim.log.levels.WARN)
+      -- The dotnet tool's server has no al/setActiveWorkspace to re-send, but
+      -- the saved cops still take effect: compile and the on-save analysis
+      -- pass them to `al compile` as /analyzer: flags.
+      local agentic = false
+      for _, c in ipairs(vim.lsp.get_clients({ name = "al_agentic_lsp" })) do
+        if c.root_dir == root then agentic = true break end
+      end
+      if agentic then
+        vim.notify("AL cops: saved — applied by :ALCompile and the on-save analysis",
+          vim.log.levels.INFO)
+      else
+        vim.notify("AL cops: no active LSP client for " .. root, vim.log.levels.WARN)
+      end
     end
     return
   end

@@ -62,8 +62,11 @@ vim.api.nvim_create_autocmd("BufWritePre", {
     -- project-wide re-analysis and send diagnostics with inconsistent positions.
     if not require("al.status").is_ready() then return end
     local bufnr  = vim.api.nvim_get_current_buf()
-    local clients = vim.lsp.get_clients({ name = "al_language_server", bufnr = bufnr })
-    if #clients == 0 then return end
+    -- Either backend, as long as it offers code actions (the dotnet tool's
+    -- launchlspserver does not yet, so this is a no-op there).
+    local client = require("al.lsp").client(bufnr)
+    if not client or not client.server_capabilities.codeActionProvider then return end
+    local clients = { client }
     local params = {
       textDocument = vim.lsp.util.make_text_document_params(bufnr),
       range        = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
@@ -121,18 +124,19 @@ vim.api.nvim_create_autocmd("BufWritePre", {
     end
   end,
 })
--- Format on save using the AL language server formatter.
+-- Format on save using whichever AL language server is attached.
 -- Runs synchronously in BufWritePre so the formatted content is what gets written.
+-- This used to look only for the EditorServices client, so switching to the
+-- dotnet tool's server (experimental_lsp) silently stopped formatting — though
+-- that server formats too.
 vim.api.nvim_create_autocmd("BufWritePre", {
   group    = _ft_grp,
   buffer   = 0,
   callback = function()
     local bufnr  = vim.api.nvim_get_current_buf()
-    local clients = vim.lsp.get_clients({ name = "al_language_server", bufnr = bufnr })
-    if #clients == 0 then return end
-    local cap = clients[1].server_capabilities.documentFormattingProvider
-    if not cap then return end
-    vim.lsp.buf.format({ bufnr = bufnr, async = false, timeout_ms = 3000, id = clients[1].id })
+    local client = require("al.lsp").client(bufnr)
+    if not client or not client.server_capabilities.documentFormattingProvider then return end
+    vim.lsp.buf.format({ bufnr = bufnr, async = false, timeout_ms = 3000, id = client.id })
   end,
 })
 -- Auto-organise: on save, move file into src/<objecttype>/ if not already there.

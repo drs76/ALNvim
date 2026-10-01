@@ -124,10 +124,12 @@ function M.start(bufnr, root)
         require("al.mcp").configure(root)
       end
 
-      -- Force native go-to-definition. vim.schedule defers past the user's own
-      -- generic LspAttach handler so this buffer-local map wins.
+      -- gd: the server's definition, falling back to the extracted symbol
+      -- sources for base-app objects it cannot locate (al.basedef).
+      -- vim.schedule defers past the user's own generic LspAttach handler so
+      -- this buffer-local map wins.
       vim.schedule(function()
-        vim.keymap.set("n", "gd", vim.lsp.buf.definition,
+        vim.keymap.set("n", "gd", function() require("al.basedef").definition() end,
           { buffer = buf, desc = "AL: Go to definition" })
       end)
 

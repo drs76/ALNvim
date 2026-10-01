@@ -136,6 +136,19 @@ end
 -- Expose so wizard.lua can reuse the same search-dir logic.
 M.build_search_dirs = build_search_dirs
 
+-- How many of root's symbol packages build_search_dirs would still have to
+-- extract (no stamp, or the .app is newer than it). Cheap: two stats per app.
+function M.pending_extracts(root)
+  local n = 0
+  for _, app in ipairs(vim.fn.glob(root .. "/.alpackages/*.app", false, true)) do
+    local key   = vim.fn.fnamemodify(app, ":t:r"):gsub("%s+", "_")
+    local stamp = (vim.uv.fs_stat(CACHE .. "/" .. key .. "/.ok") or {}).mtime
+    local mt    = (vim.uv.fs_stat(app) or {}).mtime
+    if not (stamp and mt and stamp.sec >= mt.sec) then n = n + 1 end
+  end
+  return n
+end
+
 -- Run rg asynchronously and hand the output lines to cb on the main loop.
 --
 -- These searches cover the project root *plus every extracted symbol package* —
