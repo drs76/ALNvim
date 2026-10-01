@@ -547,12 +547,11 @@ vim.api.nvim_create_user_command("ALCompile", function(opts)
 end, {
   nargs = "?",
   complete = "dir",
-  desc  = "Compile the AL project with alc",
+  desc  = "Compile the AL project (al compile — AL dotnet tool)",
 })
 
 vim.api.nvim_create_user_command("ALPublish", function(opts)
-  -- Dispatcher: `al publishapp` (dotnet tool, extension-free, all BC versions)
-  -- → DAP adapter (nvim-dap + extension) → direct HTTP (BC < 25).
+  -- `al publishapp` (AL dotnet tool) only — no extension fallback.
   require("al.publish").publish(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
@@ -746,12 +745,35 @@ vim.api.nvim_create_user_command("ALInfo", function()
             local c = lsp_command()
             return c and table.concat(c, " ") or "(none — install extension)"
           end)()),
-    "Compiler  : " .. (function()
-      local prefix = require("al.compile").compiler_prefix()
-      return prefix and table.concat(prefix, " ") or "(none — run :ALInstallDotnetTool)"
-    end)(),
     "Project   : " .. (root or "(not found)"),
   }
+
+  -- Every AL operation except formatting (EditorServices) and interactive
+  -- debugging (DAP) runs through the dotnet tool, with no extension fallback —
+  -- so this block is the first thing to check when compile/publish misbehave.
+  local altool = require("al.altool")
+  vim.list_extend(lines, { "──────────────────────────────────", "AL dotnet tool:" })
+  if altool.available() then
+    local ver = vim.trim(vim.fn.system({ altool.binary(), "--version" }))
+    local function route(cmd, label)
+      return altool.has(cmd) and label or ("✗ missing — update: :ALInstallDotnetTool")
+    end
+    vim.list_extend(lines, {
+      "  binary  : " .. altool.binary(),
+      "  version : " .. (ver ~= "" and ver or "?"),
+      "  compile : al compile",
+      "  publish : " .. route("publishapp", "al publishapp"),
+      "  symbols : " .. (altool.has("downloadsymbols") and "al downloadsymbols (CLI)"
+                         or route("launchmcpserver", "al_downloadsymbols (MCP)")),
+      "  MCP     : " .. route("launchmcpserver", "al launchmcpserver"),
+    })
+  else
+    vim.list_extend(lines, vim.split(altool.missing_msg("Compile, publish and symbols"), "\n"))
+  end
+  vim.list_extend(lines, {
+    "Extension used only for: formatting (EditorServices), debugging (DAP)",
+    "──────────────────────────────────",
+  })
   if not root and lsp.last_root_reason then
     table.insert(lines, "  why     : " .. lsp.last_root_reason)
   end

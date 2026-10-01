@@ -29,7 +29,14 @@
 local M = {}
 
 local GLOBAL_SETTINGS = vim.fn.expand("~/.claude/settings.json")
-local AL_BINARY       = vim.fn.expand("~/.dotnet/tools/al")
+
+-- Go through altool so there is one resolver for this path. This module had its
+-- own copy that omitted the .exe suffix, so on Windows `executable()` was always
+-- 0 and :ALMcpSetup reported "al binary not found" no matter what was installed
+-- — MCP could never be configured there at all.
+local function al_binary()
+  return require("al.altool").binary()
+end
 
 -- Claude Code reads MCP servers from <project>/.claude/settings.json.
 local function settings_path(root)
@@ -100,9 +107,9 @@ function M.configure(root)
     return false
   end
 
-  if vim.fn.executable(AL_BINARY) == 0 then
+  if vim.fn.executable(al_binary()) == 0 then
     vim.notify(
-      "AL MCP: al binary not found at " .. AL_BINARY .. "\n"
+      "AL MCP: al binary not found at " .. al_binary() .. "\n"
       .. "Install with: dotnet tool install "
       .. "Microsoft.Dynamics.BusinessCentral.Development.Tools --prerelease --global",
       vim.log.levels.ERROR)
@@ -125,7 +132,7 @@ function M.configure(root)
 
   local key   = entry_key(root)
   local entry = {
-    command = AL_BINARY,
+    command = al_binary(),
     args    = build_args(root),
   }
 

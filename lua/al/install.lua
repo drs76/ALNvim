@@ -524,6 +524,13 @@ function M.install_dotnet_tool()
               log("Already on the latest version.")
               done(true, "Already up to date.")
             else
+              -- Drop the cached --help probe so compile/publish/symbols see the
+              -- new version's commands without a restart, and re-resolve: the
+              -- binary may have landed somewhere other than the path probed
+              -- before install (see altool.candidates).
+              local altool = require("al.altool")
+              altool.reset()
+              al_bin = altool.binary()
               platform.ensure_executable(al_bin)
               log("Binary: " .. al_bin)
               done(true, "Done.  Run :ALMcpSetup to register for the current project.")

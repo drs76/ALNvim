@@ -61,6 +61,16 @@ describe("project.build_app_json", function()
     ok(app.id:match("^%x+%-"), "id is not a UUID: " .. tostring(app.id))
   end)
 
+  it("does not emit showMyCode alongside resourceExposurePolicy", function()
+    -- The compiler rejects the pair: AL1075 "Both 'ShowMyCode' and
+    -- 'ResourceExposurePolicy' properties are added" is an error, so every
+    -- project :ALNewProject created failed its first build. MS's own templates
+    -- carry resourceExposurePolicy only.
+    local app = vim.fn.json_decode(P.build_app_json("A", "P", runtime("18.0"), 50000))
+    eq(nil, app.showMyCode)
+    ok(type(app.resourceExposurePolicy) == "table", "resourceExposurePolicy missing")
+  end)
+
   it("escapes quotes and backslashes in the name and publisher", function()
     local app = vim.fn.json_decode(
       P.build_app_json([[A "quoted" \ name]], [[Pub\"lisher]], runtime("18.0"), 50000))

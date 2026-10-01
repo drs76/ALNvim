@@ -95,7 +95,6 @@ local function build_app_json(name, publisher, rv, id_from)
     "allowDownloadingSource": true,
     "includeSourceInSymbolFile": true
   },
-  "showMyCode": true,
   "runtime": "%s",
   "features": [
     "NoImplicitWith"
