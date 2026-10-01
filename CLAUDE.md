@@ -281,11 +281,8 @@ only, so switching backends silently stopped formatting. Organise-imports and
 `compile.clear_lsp_diagnostics` go through the same list; `cops.apply` (an EditorServices
 `al/setActiveWorkspace` re-send) tells an agentic user the cops apply at compile instead.
 
-**Still EditorServices-only:** `debug.save_creds_to_lsp` stores on-prem UserPassword
-credentials through `al/saveUsernamePassword` on the EditorServices client, which the DAP
-adapter then reads. With only the agentic client running it is skipped, so **on-prem
-UserPassword F5 debugging is likely to fail authentication**. Cloud (AAD) debugging does not
-use it. Not verified against a server.
+**On-prem UserPassword debugging does not depend on either language server** — the
+credentials go into the debug adapter's environment (see "BC dev API / DAP").
 
 **The FileType root is bounded** (`lsp.find_root_upward`, not `vim.fs.root`). For this
 backend the root is the workspace the server indexes.
@@ -607,7 +604,39 @@ Without `/startDebugging`: hangs in LSP mode. Without `/projectRoot`: can't loca
 
 **One-shot DAP listeners must be armed after a clean compile.** `alnvim_launch_browser` deletes itself when `event_al/refreshExplorerObjects` fires. Registering it *before* `compile()` leaked it on every failed build: the listener never fired, never unregistered, and the next `:ALLaunch` tripped it. `clear_oneshot_listeners(dap)` also runs at the start of `launch` to cover an adapter that dies before emitting the event. (There used to be a second one for `debug.publish_only`; that publish path is gone.)
 
-**⚠️ On-prem ALLaunch on Windows — NOT WORKING**: fails with "Could not publish the package". Cloud works on both platforms. Root cause unknown. Use cloud sandboxes or VSCode for on-prem debugging.
+**On-prem UserPassword debugging: credentials go in the adapter's environment.**
+`:ALLaunch` against on-prem never worked — "Could not publish the package to the server"
+after "An internal error has occurred", on Linux *and* Windows (it had been logged as a
+Windows-only problem with unknown cause). The adapter only received credentials through
+`save_creds_to_lsp` → `al/saveUsernamePassword` on the EditorServices language server.
+The adapter's `Microsoft.Dynamics.Nav.Deployment.dll` reads **`BC_SERVER_USERNAME` /
+`BC_SERVER_PASSWORD`** — the same variables `al publishapp` uses — so
+`debug.adapter_creds(cfg, user, pass)` puts them in the adapter env for `UserPassword` /
+`NavUserPassword` (launch and attach). `platform.adapter_env(stub, extra)` appends them; on
+Windows, where the adapter otherwise inherits (env `nil`), it builds the full inherited
+environment plus the extras, because a non-nil env *replaces* the child's environment.
+Only the current dotnet-layout extension (18.0.2732683) carries those strings; older
+extensions still depend on `save_creds_to_lsp`, which still runs.
+Verified 2026-10-02 against `bc2` (BC 27.0 on-prem, `bcl` on VM101): adapter logs
+"Using credentials from environment variables", publishes, opens a SignalR debug session,
+and a breakpoint in `OnOpenPage` stops at the right line once the browser tab with the
+debugging context loads. BC's adapter reports a breakpoint hit as `reason = "Step"`, and
+its first `stackTrace` reply can take ~5s.
+
+**Browser:** the adapter follows the publish with `al/openUri` carrying the web client URL
+**with the debugging context and the real web port**. ALNvim also opened
+`conn.webclient_url(cfg)` on `refreshExplorerObjects` — a second tab, on the wrong port
+(`:80`, not the env's web port) and with no debug context. That listener is now a 5s
+fallback that fires only if `al/openUri` never arrived. Both honour launch.json
+`launchBrowser` (`_want_browser`); ALNvim always sends `launchBrowser=false` to the adapter
+on Linux/macOS, so the user's choice has to be carried separately.
+
+**Those flags are declared at the top of debug.lua, above every function that uses them.**
+They were first added beside `make_adapter_env`, *below* `register_al_dap_events`; a
+`local` declared after a function is not in scope inside it, so there they were globals —
+`_want_browser` read `nil`, the debugging-context URL never opened, and only the
+wrong-port fallback did. A browser session without the debugging context never hits a
+breakpoint, which is how the first live breakpoint test failed.
 
 **Publish** (`publish.M.publish`): `al publishapp` only — all BC versions, AAD/Windows/UserPassword auth built in; explicit connection flags from the picked launch config (`altool.connection_flags`) override launch.json; UserPassword creds via `altool.cred_env`. Output streams through `altool.run`. The DAP-adapter (`debug.publish_only`) and direct-HTTP (`publish_http`, BC < 25) fallbacks were removed — they turned a missing tool into a crash on Windows. `:ALLaunch` still publishes through the adapter, because it debugs.
 
@@ -625,7 +654,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (156 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (165 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -645,6 +674,11 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 - **Record every call, not the last one.** A test asserting "the server started for
   `top`" by keeping the last root seen passed with the bug restored: the bad path also
   resolved to `top`, so the final value matched. Collect all calls and compare the list.
+- **Fakes must share state the way the real module does.** `debug.lua` registers its DAP
+  event listeners once per session; a fresh fake `nvim-dap` per test left every test after
+  the first with no listeners at all. One fake per file, like the one real module.
+- **Run fake timers after the events, not inline.** Executing `vim.defer_fn` immediately
+  fired the 5s browser fallback before the `al/openUri` that arrives 0.5s later.
 - A mutation that is a pure reordering (swapping two mutually exclusive `if`
   branches) *should* stay green. Use one as a control: if it goes red, the test
   is asserting on something incidental.

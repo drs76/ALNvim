@@ -179,8 +179,21 @@ end
 --   with the .NET runtime). A minimal env with the stub dir at the front of PATH is
 --   passed instead.
 -- Windows: no SIGABRT risk — return nil so the adapter inherits the parent env normally.
-function M.adapter_env(stub_dir)
-  if M.is_windows then return nil end
+-- extra: { KEY = value } added to the adapter's environment — the on-prem
+-- UserPassword credentials (BC_SERVER_USERNAME / BC_SERVER_PASSWORD).
+function M.adapter_env(stub_dir, extra)
+  if M.is_windows then
+    -- nil = inherit Neovim's environment, which Windows needs intact. With
+    -- extras, inherit explicitly: a non-nil env replaces the child's whole
+    -- environment, it does not add to it.
+    if not extra or vim.tbl_isempty(extra) then return nil end
+    local env = {}
+    for k, v in pairs(vim.fn.environ()) do
+      if extra[k] == nil then env[#env + 1] = k .. "=" .. v end
+    end
+    for k, v in pairs(extra) do env[#env + 1] = k .. "=" .. v end
+    return env
+  end
   local sys_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   local env = {
     "PATH="  .. stub_dir .. ":" .. sys_path,
@@ -193,6 +206,7 @@ function M.adapter_env(stub_dir)
     local v = os.getenv(k)
     if v and v ~= "" then table.insert(env, k .. "=" .. v) end
   end
+  for k, v in pairs(extra or {}) do table.insert(env, k .. "=" .. v) end
   return env
 end
 
