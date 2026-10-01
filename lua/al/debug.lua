@@ -20,6 +20,20 @@ local _current_root = nil
 -- Buffer that was active when ALLaunch was invoked — restored by M.close_debug().
 local _pre_debug_buf = nil
 
+-- Whether the user wants a browser for this session (launch.json launchBrowser,
+-- default true), and whether the adapter has already handed us the web client
+-- URL with its debugging context. ALNvim always sends launchBrowser=false to
+-- the adapter on Linux/macOS (its own xdg-open crashes it), so these carry the
+-- user's intent instead.
+--
+-- Declared up here, above every function that uses them. register_al_dap_events
+-- comes earlier in the file than the code that sets these; a `local` declared
+-- after a function is not in scope inside it, so the names there silently
+-- became globals — the al/openUri URL (with the debugging context) was never
+-- opened, and the wrong-port fallback always was.
+local _want_browser = true
+local _uri_opened   = false
+
 -- The DAP adapter (16.x+) deserialises breakOnError / breakOnRecordWrite as
 -- strict booleans even though the VSCode schema accepts string enum values.
 -- "All" → true, anything else ("None", false, nil) → false.
@@ -238,8 +252,8 @@ end
 -- /dev/apps. We compile (al compile), then hand a launch config to dap.run().
 
 -- Create a no-op xdg-open stub in the ALNvim cache dir (Linux/macOS only).
--- On Windows the adapter is given nil env (inherit parent), and launchBrowser is
--- patched to false, so the adapter never tries to invoke xdg-open.
+-- On Windows the adapter inherits Neovim's environment (plus any on-prem
+-- credentials, see adapter_creds), and never invokes xdg-open.
 -- Returns the stub directory path (empty string on Windows — unused by adapter_env).
 local _xdg_stub_dir = nil
 local function ensure_xdg_stub()
@@ -404,8 +418,11 @@ local function register_al_dap_events(dap)
 
   dap.listeners.before["event_al/openUri"]["alnvim"] = function(_, body)
     if not (body and body.uri) then return end
-    local browser = require("al.cops").get_browser(_current_root)
-    require("al.platform").open_url(body.uri, browser)
+    _uri_opened = true
+    if _want_browser then
+      local browser = require("al.cops").get_browser(_current_root)
+      require("al.platform").open_url(body.uri, browser)
+    end
     vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
   end
 
@@ -460,6 +477,28 @@ local function patch_dap_nil_command(dap)
   end
 end
 
+-- On-prem UserPassword credentials for the adapter's environment.
+--
+-- This is what makes on-prem debugging work at all. The adapter used to get
+-- credentials only through save_creds_to_lsp → al/saveUsernamePassword on the
+-- EditorServices language server — and on-prem :ALLaunch failed with "Could
+-- not publish the package to the server" (after "An internal error has
+-- occurred") on Linux and Windows alike. The adapter's deployment code reads
+-- BC_SERVER_USERNAME / BC_SERVER_PASSWORD, the same variables `al publishapp`
+-- uses ("Using credentials from environment variables" in its output). Verified
+-- against a BC 27 on-prem server: publish, then a live debug session.
+-- Extensions older than the dotnet layout do not read them; those still rely
+-- on save_creds_to_lsp, which runs as before.
+local function uses_userpass(cfg)
+  local auth = cfg and cfg.authentication or ""
+  return auth == "UserPassword" or auth == "NavUserPassword"
+end
+
+local function adapter_creds(cfg, user, pass)
+  if not uses_userpass(cfg) or not user or user == "" then return nil end
+  return { BC_SERVER_USERNAME = user, BC_SERVER_PASSWORD = pass or "" }
+end
+
 -- Build a minimal string-array environment for the DAP adapter process.
 -- uv.spawn expects env as {"KEY=value", ...} (integer-keyed array).
 -- Passing nil inherits Neovim's full env, which causes the adapter to SIGABRT
@@ -467,9 +506,10 @@ end
 -- silently treated as an empty array by luv — adapter gets no env and works,
 -- but then xdg-open cannot be found. A minimal string-array env gives the
 -- adapter just enough context while keeping our stub dir at the front of PATH.
-local function make_adapter_env()
-  return require("al.platform").adapter_env(ensure_xdg_stub())
+local function make_adapter_env(creds)
+  return require("al.platform").adapter_env(ensure_xdg_stub(), creds)
 end
+
 
 -- ── Live attach via nvim-dap ──────────────────────────────────────────────────
 --
@@ -498,6 +538,8 @@ function M.setup_dap(root)
     local host, host_args = editor_services_host()
     if not host then return end
     local p    = require("al.platform")
+    -- Resolved only for UserPassword: user_password may prompt.
+    local creds = uses_userpass(cfg) and adapter_creds(cfg, conn.user_password(cfg)) or nil
 
     dap.adapters.al = {
       type    = "executable",
@@ -506,7 +548,7 @@ function M.setup_dap(root)
       args    = vim.list_extend(vim.list_slice(host_args), {
                   "/startDebugging", "/projectRoot:" .. require("al.platform").native_path(root) }),
       options = {
-        env      = make_adapter_env(),
+        env      = make_adapter_env(creds),
         detached = not p.is_windows,
         initialize_timeout_sec = 30,
       },
@@ -640,6 +682,8 @@ function M.launch(root)
     if not host then return end
     local p    = require("al.platform")
     local user, pass = conn.user_password(cfg)
+    _want_browser = cfg.launchBrowser ~= false
+    _uri_opened   = false
 
     local function register_adapter()
       dap.adapters.al = {
@@ -650,7 +694,7 @@ function M.launch(root)
                     "/startDebugging", "/logLevel:Verbose",
                     "/projectRoot:" .. require("al.platform").native_path(root) }),
         options = {
-          env      = make_adapter_env(),
+          env      = make_adapter_env(adapter_creds(cfg, user, pass)),
           cwd      = root,   -- adapter must run from project root to find the .app
           detached = not p.is_windows,
           initialize_timeout_sec = 30,
@@ -692,9 +736,11 @@ function M.launch(root)
       apply_vscode_defaults(launch_cfg, root,
         to_break_bool(cfg.breakOnError, true),
         to_break_bool(cfg.breakOnRecordWrite, false))
-      -- Do NOT inject userName/password — VSCode never sends credentials in the DAP
-      -- launch request. The adapter reads them from Windows Credential Manager after
-      -- save_creds_to_lsp stores them via al/saveUsernamePassword.
+      -- Do NOT inject userName/password into the launch request — VSCode never
+      -- sends credentials there. They reach the adapter through its environment
+      -- (adapter_creds → BC_SERVER_USERNAME/PASSWORD); save_creds_to_lsp below
+      -- additionally stores them in the EditorServices language server for
+      -- extensions too old to read the environment.
       dap.configurations.al = { launch_cfg }
 
       -- On Linux/macOS: adapter calls xdg-open (our no-op stub). Open from Lua instead.
@@ -705,12 +751,19 @@ function M.launch(root)
       local function arm_launch_browser_listener()
         dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = function()
           dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
-          if not p.is_windows then
+          if p.is_windows or not _want_browser then return end
+          -- A fallback only. The adapter normally follows the publish with
+          -- al/openUri carrying the real web client URL *with* the debugging
+          -- context (and the right web port). Opening webclient_url here as
+          -- well put two tabs up on every launch, one of them on the wrong
+          -- port with no debug context attached.
+          vim.defer_fn(function()
+            if _uri_opened then return end
             local url = conn.webclient_url(cfg)
             local browser = require("al.cops").get_browser(_current_root)
             require("al.platform").open_url(url, browser)
             vim.notify("AL: BC web client — " .. url, vim.log.levels.INFO)
-          end
+          end, 5000)
         end
       end
 
@@ -761,6 +814,9 @@ function M.launch(root)
 end
 
 M.show_output = show_output_win
+
+-- Internals reached by tests only — never call from plugin code.
+M._test = { adapter_creds = adapter_creds, make_adapter_env = make_adapter_env }
 
 function M.close_debug()
   local ok, dap = pcall(require, "dap")
