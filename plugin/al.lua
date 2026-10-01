@@ -89,7 +89,11 @@ vim.api.nvim_create_autocmd("FileType", {
   pattern  = "al",
   group    = vim.api.nvim_create_augroup("ALNvimLsp", { clear = true }),
   callback = function(args)
-    local root = vim.fs.root(args.buf, "app.json")
+    -- Bounded search, not vim.fs.root(): that walks to the filesystem root, so a
+    -- stray app.json above the project (one at an NFS mount point, once) claims
+    -- every file below it. The root becomes the language server's workspace —
+    -- for al launchlspserver, the tree it indexes.
+    local root = require("al.lsp").find_root_upward(vim.api.nvim_buf_get_name(args.buf))
     if not root then return end
 
     -- EXPERIMENTAL: standard `al launchlspserver` backend. Runs as a distinct
@@ -780,7 +784,8 @@ vim.api.nvim_create_user_command("ALInfo", function()
   else
     vim.list_extend(lines, vim.split(altool.missing_msg("Compile, publish and symbols"), "\n"))
   end
-  table.insert(lines, "Extension used only for: formatting (EditorServices), debugging (DAP)")
+  table.insert(lines, agentic and "Extension used only for: debugging (DAP)"
+    or "Extension used only for: language server (EditorServices), debugging (DAP)")
   -- Show launch.json connection details for diagnosing URL issues
   local cfg = root and conn.read_launch(root)
   if cfg then

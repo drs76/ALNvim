@@ -23,6 +23,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping, `M.mcp_call()` one-shot MCP client |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
+| `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
@@ -68,8 +69,9 @@ tool 30+, MCP `al_downloadsymbols` on older tools), the MCP server
 (`launchmcpserver`) and the agentic LSP (`launchlspserver`) all spawn
 `altool.binary()`. The VS Code extension is used only for:
 
-- **EditorServices LSP** — formatting (and base-symbol navigation, see the
-  agentic LSP section); the tool's LSP cannot format yet.
+- **EditorServices LSP** — only when `experimental_lsp = false`. The tool's own server
+  (`launchlspserver`, the user's backend since 2026-10-01) formats and loads base symbols
+  too; it lacks code actions. See the agentic LSP section.
 - **DAP adapter** — `:ALLaunch` / F5. Neither the MCP server nor the CLI has
   breakpoint/step/continue; 30.x's `launchsnapshotmcpproxy` captures snapshots only.
 
@@ -227,38 +229,66 @@ if not client._al_completion_patched then
 end
 ```
 
-### Experimental agentic LSP (`al launchlspserver`)
+### Agentic LSP (`al launchlspserver`) — the user's backend since 2026-10-01
 
-Opt-in `require("al").setup({ experimental_lsp = true })`. Swaps the VSCode-extension
-`EditorServices.Host` for the **standard** LSP shipped by the AL dotnet tool
-(`al launchlspserver <root> --packagecachepath <root>/.alpackages`), BC 2026 wave 1+.
+`require("al").setup({ experimental_lsp = true })` (set in the user's `native.lua`). Swaps
+the VS Code extension's `EditorServices.Host` for the **standard** LSP shipped by the AL
+dotnet tool: `al launchlspserver <root> --packagecachepath <root>/.alpackages`.
 
-- Runs as a distinct client **`al_agentic_lsp`** — every EditorServices workaround in
-  `plugin/al.lua` is guarded on the `al_language_server` name, so none apply. Native
-  `textDocument/definition`, find-references (cross-project), rename, completion, hover.
-- `lua/al/agentic_lsp.lua` — `M.start(bufnr, root)`, `M.available()` (checks binary +
-  `launchlspserver` in `--help`), `M.binary()`, `M.pids` (VimLeavePre kills the tree).
-- `on_attach`: sets project statusline + `set_lsp_ready()` (no server progress/loaded
-  events), auto-configures MCP once, forces native `gd` (scheduled to win over user maps).
-- Same `al` binary as the MCP server — different subcommand; run both together.
-- **Extension-independent**: needs only `~/.dotnet/tools/al` + `.alpackages`. The VSCode
-  extension (`ext_path`) is optional — `plugin/al.lua` no longer aborts when it is missing;
-  the `ext_path` guard now only skips the EditorServices-specific setup (`lsp_bin`,
-  `ensure_executable`). Non-agentic FileType path notifies + returns when `lsp_bin` is nil.
-- Verified e2e: attaches with `definition/hover/references/rename/completion` = true,
-  resolves `documentSymbol` against `.alpackages`, and attaches even with `ext.path = nil`.
-- **Known gaps**: no `al-preview://` base-object browsing; symbol download still uses the
-  EditorServices global-sources method. `:ALInfo` shows the active backend. (Compile is
-  extension-independent — see the fallback note under Compiling.)
-- **⚠ Base-symbol navigation broken (beta backend)**: `al launchlspserver` only parses the
-  project's own `.al` files — it does NOT load the `.alpackages` base symbol packages, even
-  though it accepts `--packagecachepath` (verbose log: only `Parsing Codeunit/Report <project>`,
-  no Base Application/System package load). So `gd`/references/rename/hover return **nil** for
-  base-app objects (`"Sales Header"`, base methods — i.e. most real AL). EditorServices loads
-  base symbols because ALNvim injects implicit base packages via `al/setActiveWorkspace`; the
-  standard server has no equivalent when `app.json` `dependencies` is empty. Net: agentic is
-  fine for completion + project-local nav, but not base-symbol nav. Keep desktop on
-  EditorServices; on a no-extension box, expect crippled navigation until MS fixes this.
+- Runs as a distinct client **`al_agentic_lsp`**. Every EditorServices protocol workaround
+  in `plugin/al.lua` is guarded on the `al_language_server` name, so none apply.
+- `lua/al/agentic_lsp.lua` — `M.start(bufnr, root)`, `M.available()`, `M.binary()`
+  (delegates to `altool.binary()`), `M.pids` (VimLeavePre kills the tree). `on_attach` sets
+  the statusline + `set_lsp_ready()` (no progress/loaded events), configures MCP once, and
+  maps `gd` to `al.basedef.definition` (scheduled so it wins over user maps).
+- **Extension-independent**: needs only the tool and `.alpackages`.
+
+**Capabilities, re-probed 2026-10-01 on tools 18.0.37 and 30.0.42 (identical):**
+
+| works | missing |
+|---|---|
+| formatting (`documentFormattingProvider`; newText uses `\r\n`, which `vim.lsp.util` normalises) | `codeActionProvider` — `<leader>ac*`, organise-imports-on-save are no-ops |
+| base symbols from `.alpackages`: hover shows a base table's fields, completion on `Cust.` lists them, references | `textDocument/definition` for anything in a symbol package **and for local variables/parameters** |
+| definition of the project's own procedures | `al-preview://` documents |
+
+This supersedes the earlier finding that it "does not load base symbols" — it does now.
+
+**`gd` = `al.basedef.definition()`.** The server's answer when it has one; otherwise hover
+names the target and the fallback resolves it:
+
+- hover `(local) Mgt: Codeunit "Sales-Post"` (no qualifier) → the variable's **declaration**
+  in the buffer (nearest above first, then anywhere — globals sit at the end of AL objects).
+  `G := 1` must not match as a declaration of `G`.
+- hover `Table Microsoft.Sales.Document."Sales Header"` → the object's declaration in the
+  `.al` stubs `explorer.build_search_dirs` extracts from `.alpackages`, via rg. Opened
+  read-only; `m'` first so `<C-o>` returns.
+- `Var.Member` → hover the *qualifier* for its type, open that object, jump to the
+  field/procedure/value. A member not declared there (built-in `Count`, or added by an
+  extension) notifies instead of jumping to the object's first line.
+- Object names match **fully quoted or bare** (`("X"|X)` then a boundary). With both quotes
+  optional, `"Sales Header"` also matched `"Sales Header Archive"`, and rg's unordered
+  output decided which one opened.
+- Names: take the last *quoted* segment — `Microsoft.Purchases.Document."Purch. Header"`
+  has a dot inside the quotes.
+- **NuGet symbol packages ship without `.al` source** (extraction stamps `0`); for those it
+  notifies and hover is the answer. Server-downloaded packages usually include source.
+- First search per package extracts its sources synchronously (~8s for Base Application);
+  `explorer.pending_extracts(root)` gates a "first time only" notice before it.
+
+**Features must not key on `al_language_server`.** `lsp.client(bufnr)` returns whichever AL
+client is attached (`lsp.CLIENT_NAMES`). Format-on-save looked up the EditorServices name
+only, so switching backends silently stopped formatting. Organise-imports and
+`compile.clear_lsp_diagnostics` go through the same list; `cops.apply` (an EditorServices
+`al/setActiveWorkspace` re-send) tells an agentic user the cops apply at compile instead.
+
+**Still EditorServices-only:** `debug.save_creds_to_lsp` stores on-prem UserPassword
+credentials through `al/saveUsernamePassword` on the EditorServices client, which the DAP
+adapter then reads. With only the agentic client running it is skipped, so **on-prem
+UserPassword F5 debugging is likely to fail authentication**. Cloud (AAD) debugging does not
+use it. Not verified against a server.
+
+**The FileType root is bounded** (`lsp.find_root_upward`, not `vim.fs.root`). For this
+backend the root is the workspace the server indexes.
 
 ## Compiling
 
@@ -595,7 +625,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (137 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (156 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -612,6 +642,9 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
   extension, and a "does not fall back to the extension" test then passes with the
   fallback restored — there was nothing to fall back to. `altool_spec`'s
   `with_fake_extension` makes the extension present regardless of the machine.
+- **Record every call, not the last one.** A test asserting "the server started for
+  `top`" by keeping the last root seen passed with the bug restored: the bad path also
+  resolved to `top`, so the final value matched. Collect all calls and compare the list.
 - A mutation that is a pure reordering (swapping two mutually exclusive `if`
   branches) *should* stay green. Use one as a control: if it goes red, the test
   is asserting on something incidental.
