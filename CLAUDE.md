@@ -12,15 +12,15 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/lsp.lua` | Project root detection, `app.json` reading |
 | `lua/al/connection.lua` | BC connection utils: parse launch.json, build URLs, `curl_auth` (sync), `get_auth` (async) |
 | `lua/al/compile.lua` | Async `alc` compiler — output panel + quickfix |
-| `lua/al/symbols.lua` | Download `.app` symbol packages from BC dev endpoint |
-| `lua/al/publish.lua` | Compile then POST `.app` to BC |
+| `lua/al/symbols.lua` | Download `.app` symbol packages (server or global) via the AL dotnet tool |
+| `lua/al/publish.lua` | Compile then publish `.app` with `al publishapp` |
 | `lua/al/debug.lua` | Snapshot debugging + nvim-dap adapter config |
 | `lua/al/explorer.lua` | Telescope pickers: objects (`M.objects`), procedures (`M.procedures`), grep (`M.search`) |
 | `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard |
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
-| `lua/al/altool.lua` | Dotnet AL tool helpers: `M.has(subcmd)` (cached `--help` scan), `M.mcp_call()` one-shot MCP client (newline-delimited JSON-RPC) |
+| `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping, `M.mcp_call()` one-shot MCP client |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
@@ -58,6 +58,39 @@ All OS-specific operations go through `lua/al/platform.lua` — never add platfo
 | DAP adapter env | minimal string-array (SIGABRT prevention) | `nil` (inherit) |
 
 External requirements: `curl` and `tar.exe` built into Win10+. `rg` (ripgrep) required on all platforms. `az` optional for Entra auth.
+
+## The AL dotnet tool is the toolchain
+
+**Every AL operation runs through the AL dotnet tool (`al`) except formatting
+and interactive debugging.** User directive, restated 2026-10-01. Compile
+(`al compile`), publish (`al publishapp`), symbols (`al downloadsymbols` CLI on
+tool 30+, MCP `al_downloadsymbols` on older tools), the MCP server
+(`launchmcpserver`) and the agentic LSP (`launchlspserver`) all spawn
+`altool.binary()`. The VS Code extension is used only for:
+
+- **EditorServices LSP** — formatting (and base-symbol navigation, see the
+  agentic LSP section); the tool's LSP cannot format yet.
+- **DAP adapter** — `:ALLaunch` / F5. Neither the MCP server nor the CLI has
+  breakpoint/step/continue; 30.x's `launchsnapshotmcpproxy` captures snapshots only.
+
+**There is no fallback to the extension, and there must not be one.** Compile
+used to fall back to the extension's `alc` and publish to the DAP adapter, then
+a direct HTTP POST. On a Windows laptop where the tool was not found, that
+turned "tool missing" into a build with the wrong compiler and a publish that
+crashed (the DAP adapter cannot publish on-prem on Windows). A missing tool now
+fails with `altool.missing_msg()`, which names every path it searched.
+
+**`altool.binary()` is the only resolver — never build `~/.dotnet/tools/al`
+elsewhere.** It tries `~/.dotnet/tools/al[.exe]`, then (Windows)
+`%USERPROFILE%\.dotnet\tools\al.exe`, then `exepath("al")`. `~` alone is not
+enough: Neovim expands it from `$HOME`, which a corporate Windows machine often
+points at a network drive, while `dotnet tool install -g` always writes under
+`USERPROFILE`. Three modules used to carry their own copy of the path; mcp.lua's
+had no `.exe`, so `:ALMcpSetup` could never succeed on Windows. Analyzer DLLs are
+found in the tool's `.store`, located as a sibling of the *resolved* binary for
+the same reason.
+
+`:ALInfo` lists the binary, its version, and which command each operation uses.
 
 ## AL Toolchain paths
 
@@ -241,17 +274,14 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 
 **`analyze_diagnostics` cancellation.** A job cancelled via `jobstop` still fires `on_exit` with partial output. `_analyze_gen` is bumped per call and captured; a stale `on_exit` returns early instead of resetting the diagnostic namespace and clobbering `_analyze_job`. `M.analyze_soon(dir)` debounces (`analyze_debounce_ms`, default 1500) — BufWritePost uses it so `:wa` schedules one build, not one per file.
 
-**Compiler resolution (`compiler_prefix()`)** — no VSCode extension required. Prefers
-`al compile` from the dotnet tool (`al` = the same binary as the MCP/agentic-LSP server),
-which forwards `/project:` `/packagecachepath:` `/analyzer:` straight to a bundled alc;
-falls back to the extension's `alc` binary only when the dotnet tool is absent. The
-extension is needed for EditorServices (LSP/DAP) only — never preferred for compiling.
-Returns nil → notify to run `:ALInstallExtension` or `:ALInstallDotnetTool`. Analyzer DLLs
-(`analyzer_dll()`) resolve in the same order: the `net8.0` build bundled in the dotnet tool
-store first (`~/.dotnet/tools/.store/.../tools/net8.0/any/*.dll`, globbed + cached —
-version-matched to the bundled alc), else the extension's shared `bin/Analyzers/`. So cops
-work in either mode. `:ALInfo` shows the resolved compiler (`M.compiler_prefix` exported).
-Verified e2e: compiles ALTest via `al compile` with `ext.path = nil`.
+**Compiler (`compiler_prefix()`)** — `{ altool.binary(), "compile" }`, or nil when the
+tool is missing (→ `altool.missing_msg`). No extension fallback; see "The AL dotnet tool
+is the toolchain". `al compile` forwards `/project:` `/packagecachepath:` `/analyzer:` to the
+alc it bundles — so seeing `alc` in a process list does **not** mean the extension's
+compiler ran. Analyzer DLLs (`analyzer_dll()`) come only from the tool's store: the
+`net8.0` build under `<tool dir>/.store/.../tools/net8.0/any/`, cached per resolved binary.
+Verified e2e on tool 30.0.42 with no VS Code extension installed and the tool found only
+via PATH: clean build, `.app` produced.
 
 **`<CR>` path resolution** — `alc` inherits Neovim's cwd, which may differ from `project_dir` (e.g. cwd = parent of project). `build_cwd = vim.fn.getcwd()` captured at compile time; relative paths in `alc` output resolved against `build_cwd`, not `project_dir`. Same applies to `parse_output` (fixes quickfix/diagnostic filenames).
 
@@ -308,39 +338,35 @@ All commands use `lsp.get_root()` — `compile.lua` has no separate `find_projec
 
 ## Symbol downloads
 
-`<leader>as` / `:ALDownloadSymbols` prompts for source:
-- **Server / Sandbox / Docker** — direct curl to BC dev endpoint; requires `launch.json`
-- **Global (NuGet / AppSource)** — LSP request `al/downloadSymbolsFromGlobalSources`; no server needed
+`<leader>as` / `:ALDownloadSymbols` prompts for source; `:ALDownloadSymbolsGlobal` skips
+the picker. Both sources go through the AL dotnet tool, by whichever route it offers
+(`symbols.lua` `transport()`):
 
-`:ALDownloadSymbolsGlobal` skips the picker and goes straight to global.
+| | tool 30+ — CLI `al downloadsymbols` | older — MCP `al_downloadsymbols` |
+|---|---|---|
+| output | streamed live (`--raw`) into `altool.run`'s float | one result at the end |
+| global | `--globalsourcesonly` + `--symbolscountryregion` + `--nugetfeeds` (repeated) | `globalSourcesOnly = true`; **no custom feeds** (warns) |
+| server | `altool.connection_flags(cfg)` | `altool.connection(cfg)`; AAD sets `useInteractiveLogin` |
 
-**Global download** — preferred path: dotnet AL tool MCP `al_downloadsymbols` with `globalSourcesOnly=true, force=true` via `altool.mcp_call()` — extension-free, no running LSP needed, no auth, no country prompt; result is a JSON envelope `{ succeeded, message, data = { downloadedCount } }`. Fallback (no dotnet tool): `al/downloadSymbolsFromGlobalSources` to the running EditorServices client — requires `symbolsCountryRegion` (prompted, saved to `alnvim.json`) and an active LSP client.
+Server downloads use `conn.pick_launch`, the same picker as publish; UserPassword
+credentials go in via `altool.cred_env` (`BC_SERVER_USERNAME`/`BC_SERVER_PASSWORD`).
+`--force` on every run — an explicit download means refresh.
 
-AppSource-registered ISV packages (Continia, etc.) are resolved automatically via built-in feeds — no custom feed config needed for those. Custom `nugetFeeds` are for additional **public, unauthenticated** NuGet v3 feeds only; authenticated/private feeds are not supported by this LSP method.
+Removed, with reasons: the EditorServices request `al/downloadSymbolsFromGlobalSources`
+(needed the extension's server running for the project) and the hand-rolled curl calls
+to `/dev/packages` (own auth path; only the five base packages plus direct dependencies,
+never transitive ones). The tool resolves dependencies itself, transitively.
 
-**`nugetFeeds` resolution** (in `symbols.lua`):
-1. `alnvim.json` `nugetFeeds` array — set via `:ALSetNuGetFeeds`
-2. `.vscode/settings.json` `al.nugetFeeds` array — VSCode-compatible fallback (file can exist without VSCode)
-3. `vim.NIL` if neither — server uses built-in AppSource/NuGet defaults
+**Live streaming matters for AAD.** Sign-in can stop and print a device code; collected
+output would leave the user watching a job that never finishes.
 
-**Payload:**
-```lua
-{
-  symbolsCountryRegion = "w1",  -- or "us", "gb", "de", etc.
-  force                = true,
-  nugetFeeds           = read_nuget_feeds(root),  -- array or vim.NIL
-  useOnlyCustomFeeds   = false,
-  enforceMinorVersion  = false,
-  browserInfo          = { browser = vim.NIL, incognito = false },
-  environmentInfo      = { env = vim.NIL },
-}
-```
+AppSource-registered ISV packages (Continia, etc.) resolve via the built-in feeds.
+Custom `nugetFeeds` (`:ALSetNuGetFeeds`, else `.vscode/settings.json` `al.nugetFeeds`) are
+for additional public NuGet v3 feeds and need tool 30+.
 
-**Server download** — always includes implicit Microsoft base packages even with empty `app.json` dependencies:
-- `Microsoft/System` — version from `app.platform`
-- `Microsoft/System Application`, `Business Foundation`, `Base Application`, `Application` — version from `app.application`
-
-Explicit deps appended after, duplicates skipped.
+**BC v29 symbols are not on Microsoft's feed yet** (2026 wave 2 is not GA as of
+2026-10-01), so a project targeting `application: 29.0.0.0` — `:ALNewProject`'s default
+top entry — fails global download with "Exact version 29.0 not found". Not a tool fault.
 
 ## BC dev API endpoints
 
@@ -411,7 +437,7 @@ Browser values stored in `alnvim.json` as `"browser"`. macOS: no-path value → 
 
 ## AL MCP Server (`lua/al/mcp.lua`)
 
-Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `~/.dotnet/tools/al`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
+Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via stdio. Entry key: `"al:" .. basename(root)`. Binary: `altool.binary()`. Read/write pattern: `readfile` → `json_decode` → mutate → `al.json.write` (preserves all other keys).
 
 **Per-project, never global.** This wrote `~/.claude/settings.json` until 2026-09-15. With `auto_mcp` on by default, every AL project ever opened left an entry there — eleven had accumulated, including one for a deleted `/tmp` scratch dir. The entry's **last positional argument is the server's workspace root**, so a stale or mis-resolved one is not inert: it is an AL language server indexing that tree in *every* Claude Code session. One (`al:rojaws`) pointed at a 3.6TB NFS share, because a stray `app.json` above the projects made `get_root()` resolve the mount point. `lsp.find_root_upward` now bounds that resolution; writing per-project bounds the damage if it ever resolves wrongly again. `:ALMcpStatus` reports leftover global `al:*` entries but does not remove them — that file holds the user's own config.
 
@@ -464,6 +490,10 @@ under the root — so a root-level starter object was renamed out from under the
 user on the very first `:w`. Writing it in the right place also means
 `ids.invalidate()` has to be called explicitly (same reason as `wizard`:
 `vim.fn.writefile` fires no autocommands).
+
+**No `showMyCode`.** Emitting it alongside `resourceExposurePolicy` is compiler error
+AL1075, so every generated project failed its first build until 2026-10-01. MS's
+templates carry `resourceExposurePolicy` only.
 
 **`gen_uuid` seeds once per session and draws from `vim.uv.random`.** It used to
 reseed from `os.time() + os.clock()` on every call, which makes the value a
@@ -545,11 +575,11 @@ Without `/startDebugging`: hangs in LSP mode. Without `/projectRoot`: can't loca
 
 **`M.close_debug()`** (`<leader>adX` / `:ALDapClose`): terminates DAP session, closes adapter output float (`_out_win`), calls `dapui.close()` silently (no-op if dap-ui absent), restores `_pre_debug_buf` (captured at `M.launch()` start). Scans windows first; falls back to `nvim_set_current_buf` if pre-debug buf is not currently displayed.
 
-**One-shot DAP listeners must be armed after a clean compile.** `alnvim_publish_only` and `alnvim_launch_browser` delete themselves when `event_al/refreshExplorerObjects` fires. Registering them *before* `compile()` leaked them on every failed build: the listener never fired, never unregistered, and the next `:ALLaunch` tripped it — the publish-only one calls `dap.disconnect()`, killing the new session mid-attach. `clear_oneshot_listeners(dap)` also runs at the start of `launch`/`publish_only` to cover an adapter that dies before emitting the event.
+**One-shot DAP listeners must be armed after a clean compile.** `alnvim_launch_browser` deletes itself when `event_al/refreshExplorerObjects` fires. Registering it *before* `compile()` leaked it on every failed build: the listener never fired, never unregistered, and the next `:ALLaunch` tripped it. `clear_oneshot_listeners(dap)` also runs at the start of `launch` to cover an adapter that dies before emitting the event. (There used to be a second one for `debug.publish_only`; that publish path is gone.)
 
 **⚠️ On-prem ALLaunch on Windows — NOT WORKING**: fails with "Could not publish the package". Cloud works on both platforms. Root cause unknown. Use cloud sandboxes or VSCode for on-prem debugging.
 
-**Publish dispatcher** (`publish.M.publish`): 1. `al publishapp` (dotnet tool — extension-free, all BC versions, AAD/Windows/UserPassword auth built in; explicit `--server`/`--environmentname` flags from the picked launch config override launch.json; UserPassword creds passed via `BC_SERVER_USERNAME`/`BC_SERVER_PASSWORD` env) → 2. DAP adapter (`debug.publish_only`, needs nvim-dap + extension) → 3. `publish.M.publish_http` direct POST (BC < 25 only — cloud/BC 25+ returns HTTP 415 for external octet-stream POSTs). `debug.publish_only`'s no-dap fallback calls `publish_http`, never `publish` (dispatch loop).
+**Publish** (`publish.M.publish`): `al publishapp` only — all BC versions, AAD/Windows/UserPassword auth built in; explicit connection flags from the picked launch config (`altool.connection_flags`) override launch.json; UserPassword creds via `altool.cred_env`. Output streams through `altool.run`. The DAP-adapter (`debug.publish_only`) and direct-HTTP (`publish_http`, BC < 25) fallbacks were removed — they turned a missing tool into a crash on Windows. `:ALLaunch` still publishes through the adapter, because it debugs.
 
 ## Inspecting the AL extension protocol
 
@@ -565,7 +595,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (122 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (137 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -577,6 +607,11 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 
 - A `.alpackages` fixture cannot test the package-cache filter. `vim.fn.glob("**/*")` never descends into dot-directories, so those files are excluded regardless and the test passes with the filter deleted. Use a **non-dotted** `packagecachepath`.
 - Hard-coded cursor columns silently point at the wrong character when a fixture's indentation changes. Derive positions from the fixture string.
+- **Stub the fallback you are proving is not taken.** `al.ext` resolves on first
+  `require`; if that happens inside a faked environment (empty `HOME`) it reports no
+  extension, and a "does not fall back to the extension" test then passes with the
+  fallback restored — there was nothing to fall back to. `altool_spec`'s
+  `with_fake_extension` makes the extension present regardless of the machine.
 - A mutation that is a pure reordering (swapping two mutually exclusive `if`
   branches) *should* stay green. Use one as a control: if it goes red, the test
   is asserting on something incidental.
@@ -590,7 +625,7 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 ## AI agents (Claude Code / Pi)
 
 `lua/al/agent.lua` opens an AI coding agent in a terminal split at the project root:
-- `:ALClaude` / `<leader>ai` → **Claude Code** (`claude` CLI; uses the al-mcp entry `al.mcp` registers in `~/.claude/settings.json`).
+- `:ALClaude` / `<leader>ai` → **Claude Code** (`claude` CLI; uses the `al:<project>` MCP entry `al.mcp` writes to `<project>/.claude/settings.json`).
 - `:ALPi` / `<leader>ak` → **Pi** ([pi.dev](https://pi.dev)). Built as `{ pi, -e <pi_provider>, --model <pi_model> }` unless `agent.pi_cmd` is set.
 
 Configure via `require("al").setup({ agent = { claude_cmd, pi_cmd, pi_provider, pi_model, pi_env } })`.

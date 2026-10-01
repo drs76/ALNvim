@@ -634,7 +634,7 @@ function M.generate()
             "ALReportLayout: " .. table.concat(compile_types, " + ")
             .. " rendering " .. (#compile_types == 1 and "entry" or "entries")
             .. " added — run :ALCompile (<leader>ab) to generate the layout "
-            .. (#compile_types == 1 and "file" or "files") .. " with alc",
+            .. (#compile_types == 1 and "file" or "files"),
             vim.log.levels.INFO)
         end
       end)

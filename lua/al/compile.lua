@@ -3,38 +3,28 @@ local M = {}
 local platform = require("al.platform")
 local lsp      = require("al.lsp")
 
--- Extension alc invocation, or nil when no VSCode extension is installed.
--- Resolved per call (not at require time) so a mid-session :ALInstallExtension
--- is picked up without restarting Neovim. ext.alc_cmd() owns the layout
--- difference (native bin/<platform>/alc vs `dotnet bin/alc.dll`).
-local function ext_alc()
-  return require("al.ext").alc_cmd()
-end
-
 -- Namespace for compile diagnostics pushed to vim.diagnostic (file-tree badges).
 local DIAG_NS = vim.api.nvim_create_namespace("al_compile")
 
--- Resolve the compiler invocation prefix.
---   1. `al compile` from the dotnet tool (Microsoft.Dynamics.BusinessCentral.
---      Development.Tools) — forwards its args straight to a bundled alc, so the same
---      /project: /packagecachepath: /analyzer: flags work. Preferred: the extension-free
---      stack is the primary toolchain; the VSCode extension is only needed for
---      EditorServices (LSP/DAP).
---   2. Fallback: the VSCode extension's alc binary, when the dotnet tool is absent.
--- Returns a fresh array (safe to append to), or nil if neither compiler is available.
+-- The compiler: `al compile` from the dotnet tool, which forwards its args to
+-- the alc it bundles (so /project: /packagecachepath: /analyzer: all work).
+--
+-- There is deliberately NO fallback to the VS Code extension's alc. There used
+-- to be, and it hid the real problem: on a Windows machine where the tool was
+-- not found (see altool.candidates for why that happens), every build silently
+-- ran the extension's compiler instead — with the extension's analyzers, from
+-- a different release than the tool the rest of ALNvim was using. A missing
+-- tool is now an error that says where it looked.
+--
+-- Returns a fresh array (safe to append to), or nil when the tool is missing.
 local function compiler_prefix()
-  local al_bin = require("al.agentic_lsp").binary()
-  if vim.fn.executable(al_bin) == 1 then
-    return { al_bin, "compile" }
-  end
-  -- Already a command array, and already validated/chmod'd by ext.alc_cmd().
-  return ext_alc()
+  local altool = require("al.altool")
+  if not altool.available() then return nil end
+  return { altool.binary(), "compile" }
 end
 
--- Map VSCode cop tokens to analyzer DLL basenames. Resolved to a full path by
--- analyzer_dll() below, preferring the DLLs bundled inside the dotnet tool
--- store (version-matched to the `al compile` alc) and falling back to the
--- extension's shared Analyzers dir.
+-- Map VSCode cop tokens to analyzer DLL basenames, resolved to full paths by
+-- analyzer_dll() from the dotnet tool's own store.
 local COP_DLL = {
   ["${CodeCop}"]               = "Microsoft.Dynamics.Nav.CodeCop.dll",
   ["${PerTenantExtensionCop}"] = "Microsoft.Dynamics.Nav.PerTenantExtensionCop.dll",
@@ -42,42 +32,40 @@ local COP_DLL = {
   ["${AppSourceCop}"]          = "Microsoft.Dynamics.Nav.AppSourceCop.dll",
 }
 
--- Analyzer directory inside the dotnet tool store. Cached: nil = not yet probed,
--- false = probed and absent, string = the resolved directory.
-local _store_analyzer_dir = nil
+-- Analyzer directory inside the dotnet tool store, cached per resolved binary.
+--
+-- The store is a sibling of the binary (<tools>/.store/<package>/...), so it is
+-- located from altool.binary() rather than from "~": on Windows those can
+-- differ, and a store looked up under the wrong home is simply not found.
+-- Globbed paths come back with backslashes on Windows, so they are normalised
+-- before matching the framework folder.
+local _analyzers = { bin = nil, dir = nil }
 local function dotnet_analyzer_dir()
-  if _store_analyzer_dir ~= nil then return _store_analyzer_dir or nil end
-  local base = vim.fn.expand("~/.dotnet/tools/.store/microsoft.dynamics.businesscentral.development.tools")
-  local hits = vim.fn.glob(base .. "/**/Microsoft.Dynamics.Nav.CodeCop.dll", false, true)
-  -- Prefer a net8.0 build for broad runtime compatibility, else take the first.
+  local bin = require("al.altool").binary()
+  if _analyzers.bin == bin then return _analyzers.dir or nil end
+  local store = vim.fn.fnamemodify(bin, ":h")
+    .. "/.store/microsoft.dynamics.businesscentral.development.tools"
+  local hits = vim.fn.glob(store .. "/**/Microsoft.Dynamics.Nav.CodeCop.dll", false, true)
+  -- Prefer the net8.0 build: it matches the alc the tool bundles on the
+  -- broadest set of installed runtimes.
   local chosen
   for _, h in ipairs(hits) do
-    if h:match("/net8%.0/") then chosen = h break end
+    if h:gsub("\\", "/"):match("/net8%.0/") then chosen = h break end
   end
   chosen = chosen or hits[1]
-  _store_analyzer_dir = chosen and vim.fn.fnamemodify(chosen, ":h") or false
-  return _store_analyzer_dir or nil
+  _analyzers.bin = bin
+  _analyzers.dir = chosen and vim.fn.fnamemodify(chosen, ":h") or false
+  return _analyzers.dir or nil
 end
 
 -- Resolve a cop token to an analyzer DLL path (or nil if unavailable).
 local function analyzer_dll(token)
   local base = COP_DLL[token]
   if not base then return nil end
-  -- Dotnet tool store first — matches the compiler priority in compiler_prefix()
-  -- so analyzer and alc versions stay in sync.
   local dir = dotnet_analyzer_dir()
-  if dir then
-    local p = dir .. "/" .. base
-    if vim.fn.filereadable(p) == 1 then return p end
-  end
-  -- Extension fallback. Analyzers live in bin/Analyzers/ on the native layout
-  -- and flat in bin/ on the dotnet one; ext.analyzers_dir() resolves both.
-  local ext_dir = require("al.ext").analyzers_dir()
-  if ext_dir then
-    local p = ext_dir .. "/" .. base
-    if vim.fn.filereadable(p) == 1 then return p end
-  end
-  return nil
+  if not dir then return nil end
+  local p = dir .. "/" .. base
+  return vim.fn.filereadable(p) == 1 and p or nil
 end
 
 -- Parse alc compiler output into a quickfix-compatible list.
@@ -125,34 +113,8 @@ local _build_win = nil
 local _analyze_job = nil
 local _analyze_gen = 0
 
--- jobstart (without stdout_buffered) delivers output in chunks where data[1]
--- continues the previous chunk's trailing partial line and data[#data] is itself
--- partial. Appending chunks verbatim splits a diagnostic across two "lines", so
--- it renders garbled in the panel and never matches the quickfix pattern.
---
--- Returns (feed, flush): feed(data) hands on_lines only complete lines; flush()
--- emits the final partial line and must be called from on_exit.
-local function line_stream(on_lines)
-  local carry = ""
-  local function feed(data)
-    if not data then return end
-    local out = {}
-    carry = carry .. (data[1] or "")
-    for i = 2, #data do
-      out[#out + 1] = carry
-      carry = data[i]
-    end
-    if #out > 0 then on_lines(out) end
-  end
-  local function flush()
-    if carry ~= "" then
-      local last = carry
-      carry = ""
-      on_lines({ last })
-    end
-  end
-  return feed, flush
-end
+-- Line framing for job output lives in altool (shared with the tool runner).
+local line_stream = require("al.altool").line_stream
 
 -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
 local function strip_cr(lines)
@@ -373,9 +335,7 @@ function M.compile(project_dir, extra_args, on_success)
   local build_cwd = vim.fn.getcwd()
   local prefix = compiler_prefix()
   if not prefix then
-    vim.notify(
-      "AL: no compiler found — run :ALInstallExtension or :ALInstallDotnetTool",
-      vim.log.levels.ERROR)
+    vim.notify(require("al.altool").missing_msg("Compiling"), vim.log.levels.ERROR)
     return
   end
   require("al.status").set_compiling()

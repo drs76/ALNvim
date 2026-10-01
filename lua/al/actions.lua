@@ -5,11 +5,11 @@ local M = {}
 -- key = "" means no dedicated keymap binding.
 local ACTIONS = {
   -- Build & Deploy -------------------------------------------------------
-  { name = "Compile",                  key = "<leader>ab",  desc = "Build project with alc; stream output to panel",
+  { name = "Compile",                  key = "<leader>ab",  desc = "Build project with al compile (AL dotnet tool); stream output to panel",
     run = function() vim.cmd("ALCompile") end },
-  { name = "Publish",                  key = "<leader>ap",  desc = "Compile then POST .app to BC server",
+  { name = "Publish",                  key = "<leader>ap",  desc = "Compile then publish with al publishapp (AL dotnet tool)",
     run = function() vim.cmd("ALPublish") end },
-  { name = "Publish Only",             key = "<leader>aP",  desc = "POST existing .app to BC without recompiling",
+  { name = "Publish Only",             key = "<leader>aP",  desc = "Publish existing .app with al publishapp, without recompiling",
     run = function() vim.cmd("ALPublishOnly") end },
   { name = "Analyze",                  key = "<leader>aA",  desc = "Silent alc pass; populate diagnostics / file-tree badges",
     run = function() vim.cmd("ALAnalyze") end },

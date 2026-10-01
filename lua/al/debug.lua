@@ -235,7 +235,7 @@ end
 -- Mirrors the VSCode F5 flow: compile → DAP launch request.
 -- The DAP adapter (EditorServices.Host) handles publishing to BC when it
 -- receives a "launch" request — VSCode never does a direct HTTP POST to
--- /dev/apps. We compile with alc, then hand a launch config to dap.run().
+-- /dev/apps. We compile (al compile), then hand a launch config to dap.run().
 
 -- Create a no-op xdg-open stub in the ALNvim cache dir (Linux/macOS only).
 -- On Windows the adapter is given nil env (inherit parent), and launchBrowser is
@@ -409,9 +409,8 @@ local function register_al_dap_events(dap)
     vim.notify("AL: BC web client — " .. body.uri, vim.log.levels.INFO)
   end
 
-  -- Fired by the adapter after a successful publish on all environment types.
-  -- For publish-only mode a one-shot listener ("alnvim_publish_only") handles
-  -- this instead and shows the success message; here we just update the status.
+  -- Fired by the adapter after a successful publish on all environment types
+  -- (the publish step of :ALLaunch); here we just update the status.
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim"] = function()
     require("al.status").set_publish_result(true)
   end
@@ -430,14 +429,13 @@ local function register_al_dap_events(dap)
   end
 end
 
--- Clear the self-removing publish/launch listeners before starting a new run.
--- They normally delete themselves when they fire, but an adapter that dies
--- before emitting al/refreshExplorerObjects would leave one armed and it would
--- then trip on the *next* session (the publish-only one disconnects it).
+-- Clear the self-removing launch listener before starting a new run. It
+-- normally deletes itself when it fires, but an adapter that dies before
+-- emitting al/refreshExplorerObjects would leave it armed to trip on the *next*
+-- session. (Publishing without debugging goes through `al publishapp` in
+-- publish.lua, never the adapter.)
 local function clear_oneshot_listeners(dap)
-  for _, key in ipairs({ "alnvim_publish_only", "alnvim_launch_browser" }) do
-    dap.listeners.before["event_al/refreshExplorerObjects"][key] = nil
-  end
+  dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_launch_browser"] = nil
 end
 
 -- The AL adapter responds to configurationDone with {"command":null,...}.
@@ -610,126 +608,6 @@ local function apply_vscode_defaults(cfg, root, boe, borw)
   -- from getProjectReferences()). For a single-project workspace this is []. Sending nil
   -- (absent) instead of [] can cause NullReferenceException in the adapter's C# code.
   if cfg.projectReferenceDefinitions == nil then cfg.projectReferenceDefinitions = {} end
-end
-
--- Publish the compiled .app to BC via the adapter without starting a debug session.
--- Works on all BC versions (adapter handles the correct publish API internally).
--- Falls back to direct HTTP publish if nvim-dap is not installed.
-function M.publish_only(root)
-  local ok, dap = pcall(require, "dap")
-  if not ok then
-    -- Direct HTTP fallback (BC < 25). Never publish.publish() here — that
-    -- dispatcher may route back to this function.
-    require("al.publish").publish_http(root)
-    return
-  end
-
-  root = root or lsp.get_root()
-  if not root then
-    vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
-    return
-  end
-
-  restore_bak_if_exists(root)
-  reset_output_win()
-
-  conn.pick_launch(root, function(cfg)
-    patch_dap_nil_command(dap)
-    register_al_dap_events(dap)
-    clear_oneshot_listeners(dap)
-
-    local host, host_args = editor_services_host()
-    if not host then return end
-    local p    = require("al.platform")
-    local user, pass = conn.user_password(cfg)
-
-    dap.adapters.al = {
-      type    = "executable",
-      id      = "al",     -- nvim-dap sends this as adapterID in DAP initialize
-      command = host,
-      args    = vim.list_extend(vim.list_slice(host_args), {
-                  "/startDebugging", "/logLevel:Verbose",
-                  "/projectRoot:" .. require("al.platform").native_path(root) }),
-      options = {
-        env      = make_adapter_env(),
-        cwd      = root,   -- adapter must run from project root to find the .app
-        detached = not p.is_windows,
-        initialize_timeout_sec = 30,
-      },
-      reverse_request_handlers = {
-        ["al/launchDeviceLoginWindow"] = function(session, request)
-          local uri = ((request.arguments or {}).Uri or "")
-          if uri ~= "" then
-            require("al.platform").open_url(uri)
-            vim.notify("AL: Opening device login — " .. uri, vim.log.levels.INFO)
-          end
-          session:response(request, {})
-        end,
-      },
-    }
-
-    -- Pass through ALL fields from launch.json unchanged (deepcopy), then apply
-    -- only the transforms VSCode applies. Do NOT inject userName/password here —
-    -- VSCode does not include them in the DAP launch request; the adapter reads
-    -- credentials from the LSP credential store (populated by save_creds_to_lsp).
-    local launch_cfg = vim.deepcopy(cfg)
-    launch_cfg.type    = "al"
-    launch_cfg.request = "launch"
-    -- On Linux/macOS: adapter's launchBrowser calls xdg-open (our no-op stub); open
-    -- from Lua instead via the refreshExplorerObjects event listener below.
-    -- On Windows: adapter opens the browser natively — leave launchBrowser as-is.
-    if not p.is_windows then
-      launch_cfg.launchBrowser = false
-    end
-    -- Do NOT override environmentType or usePublicURLFromServer — pass through from launch.json.
-    -- Publish-only: never break on errors (not a debug session).
-    apply_vscode_defaults(launch_cfg, root, false, false)
-    -- Do NOT inject userName/password — VSCode never sends them in the DAP launch request.
-
-    -- One-shot listener: fires when the adapter signals publish is complete.
-    -- Disconnect so the adapter exits cleanly without starting a debug session
-    -- (which would occupy the BC debug slot and block a subsequent ALLaunch).
-    --
-    -- Registered only after a clean compile. Registering before the compile
-    -- leaked the listener whenever the build failed: it never fired, never
-    -- removed itself, and the next :ALLaunch tripped it and disconnected the
-    -- new debug session mid-attach.
-    local function arm_publish_only_listener()
-      dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = function()
-        dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim_publish_only"] = nil
-        vim.notify("AL: Published successfully", vim.log.levels.INFO)
-        -- On Linux/macOS: launchBrowser=true makes the adapter call xdg-open (our stub).
-        -- Open from Lua instead. On Windows: adapter opens the browser natively — skip.
-        if not p.is_windows then
-          local browser = require("al.cops").get_browser(_current_root)
-          require("al.platform").open_url(conn.webclient_url(cfg), browser)
-        end
-        vim.schedule(function()
-          if dap.session() then dap.disconnect({ terminateDebuggee = false }) end
-        end)
-      end
-    end
-
-    require("al.compile").compile(root, nil, function()
-      -- Verify the .app was produced before handing off to the adapter.
-      local app_json = require("al.lsp").read_app_json(root)
-      local app_file = app_json and require("al.publish").find_app(root, app_json)
-      if not app_file then
-        vim.notify(
-          "AL: Compile succeeded but no .app found in " .. root
-          .. "\nCheck that alc is producing output to the project root.",
-          vim.log.levels.ERROR)
-        return
-      end
-      vim.notify("AL: Publishing " .. vim.fn.fnamemodify(app_file, ":t") .. " …", vim.log.levels.INFO)
-      arm_publish_only_listener()
-      -- Pass launch_cfg (resolved config) so the LSP stores credentials under the
-      -- same key the adapter will look up (environmentType=OnPrem, etc.).
-      save_creds_to_lsp(launch_cfg, user, pass, function()
-        dap.run(launch_cfg)
-      end)
-    end)
-  end)
 end
 
 function M.launch(root)

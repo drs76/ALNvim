@@ -15,16 +15,15 @@
 
 local M = {}
 
-local platform = require("al.platform")
-
 -- PIDs of agentic servers started this session — VimLeavePre kills the whole
 -- .NET process tree on exit (mirrors _al_server_pids for EditorServices).
 M.pids = {}
 
--- Resolve the `al` dotnet tool binary (~/.dotnet/tools/al[.exe]).
+-- Resolve the `al` dotnet tool binary.
 function M.binary()
-  local base = vim.fn.expand("~/.dotnet/tools/al")
-  return platform.is_windows and (base .. ".exe") or base
+  -- Delegates: altool owns the one resolver (it also searches %USERPROFILE%
+  -- and PATH, which a bare "~" misses on Windows).
+  return require("al.altool").binary()
 end
 
 -- True if the al binary exists AND exposes launchlspserver (older tool versions
