@@ -747,6 +747,16 @@ vim.api.nvim_create_user_command("ALInfo", function()
           end)()),
     "Project   : " .. (root or "(not found)"),
   }
+  if not root and lsp.last_root_reason then
+    table.insert(lines, "  why     : " .. lsp.last_root_reason)
+  end
+  if agentic and not require("al.agentic_lsp").available() then
+    table.insert(lines, "  ⚠ al launchlspserver not available — update the dotnet tool (--prerelease)")
+  end
+  if app then
+    table.insert(lines, string.format("App       : %s – %s (v%s)",
+      app.publisher or "?", app.name or "?", app.version or "?"))
+  end
 
   -- Every AL operation except formatting (EditorServices) and interactive
   -- debugging (DAP) runs through the dotnet tool, with no extension fallback —
@@ -770,20 +780,7 @@ vim.api.nvim_create_user_command("ALInfo", function()
   else
     vim.list_extend(lines, vim.split(altool.missing_msg("Compile, publish and symbols"), "\n"))
   end
-  vim.list_extend(lines, {
-    "Extension used only for: formatting (EditorServices), debugging (DAP)",
-    "──────────────────────────────────",
-  })
-  if not root and lsp.last_root_reason then
-    table.insert(lines, "  why     : " .. lsp.last_root_reason)
-  end
-  if agentic and not require("al.agentic_lsp").available() then
-    table.insert(lines, "  ⚠ al launchlspserver not available — update the dotnet tool (--prerelease)")
-  end
-  if app then
-    table.insert(lines, string.format("App       : %s – %s (v%s)",
-      app.publisher or "?", app.name or "?", app.version or "?"))
-  end
+  table.insert(lines, "Extension used only for: formatting (EditorServices), debugging (DAP)")
   -- Show launch.json connection details for diagnosing URL issues
   local cfg = root and conn.read_launch(root)
   if cfg then
