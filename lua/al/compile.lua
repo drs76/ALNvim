@@ -349,6 +349,11 @@ function M.compile(project_dir, extra_args, on_success)
     "/project:" .. project_dir,
     "/packagecachepath:" .. packagecache,
   })
+  -- Repeated rather than one comma list: alc accumulates them, and a directory
+  -- name may itself contain a comma.
+  for _, dir in ipairs(lsp.assembly_probing_paths(project_dir)) do
+    table.insert(cmd, "/assemblyprobingpaths:" .. dir)
+  end
 
   -- Add active code analyzers so warnings from CodeCop etc. appear in compile output.
   -- Uses the same cop selection as the LSP (saved in .vscode/alnvim.json or defaults).
@@ -427,6 +432,11 @@ function M.analyze_diagnostics(project_dir)
     "/project:" .. project_dir,
     "/packagecachepath:" .. packagecache,
   })
+  -- Repeated rather than one comma list: alc accumulates them, and a directory
+  -- name may itself contain a comma.
+  for _, dir in ipairs(lsp.assembly_probing_paths(project_dir)) do
+    table.insert(cmd, "/assemblyprobingpaths:" .. dir)
+  end
   for _, token in ipairs(require("al.cops").get_active(project_dir)) do
     local dll = analyzer_dll(token)
     if dll then

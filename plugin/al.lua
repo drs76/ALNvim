@@ -117,13 +117,10 @@ vim.api.nvim_create_autocmd("FileType", {
     end
 
     -- assemblyProbingPaths must be a non-null array; omitting it crashes the server.
-    -- The default in the VSCode extension is ['./.netpackages'], but probing a
-    -- network-mounted path blocks indefinitely. Send an empty array — the server
-    -- skips .NET assembly probing, which is correct for Cloud-target projects.
-    -- Users who need on-prem .NET assembly probing can add paths via config.
+    -- See lsp.assembly_probing_paths for where the paths come from.
     local res_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
-      assemblyProbingPaths   = {},
+      assemblyProbingPaths   = require("al.lsp").assembly_probing_paths(root),
       codeAnalyzers          = require("al.cops").get_active(root),
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
@@ -385,11 +382,10 @@ vim.api.nvim_create_autocmd("LspAttach", {
     status.set_cops(require("al.cops").get_active(root))
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
-    -- Use empty array — avoids hanging on network-mounted .netpackages directories.
     local al_cfg = require("al").config
     local ws_cfg = {
       packageCachePaths      = { root .. "/.alpackages" },
-      assemblyProbingPaths   = {},
+      assemblyProbingPaths   = require("al.lsp").assembly_probing_paths(root),
       codeAnalyzers          = require("al.cops").get_active(root),
       enableCodeAnalysis     = true,
       backgroundCodeAnalysis = "Project",
@@ -760,6 +756,12 @@ vim.api.nvim_create_user_command("ALInfo", function()
   if app then
     table.insert(lines, string.format("App       : %s – %s (v%s)",
       app.publisher or "?", app.name or "?", app.version or "?"))
+  end
+
+  if root then
+    local probing = lsp.assembly_probing_paths(root)
+    table.insert(lines, "  .NET    : " .. (#probing > 0 and table.concat(probing, ", ")
+      or "(no assembly probing paths)"))
   end
 
   -- Every AL operation except formatting (EditorServices) and interactive

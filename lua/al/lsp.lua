@@ -130,6 +130,71 @@ function M.workspace_roots(ws_file)
   return roots
 end
 
+local function read_jsonc(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local content = f:read("*a")
+  f:close()
+  local data = require("al.json").decode_jsonc(content)
+  return type(data) == "table" and data or nil
+end
+
+-- VS Code's relative paths mean the project folder; it expands these variables.
+local function resolve_probing_path(root, path)
+  path = path:gsub("%${workspaceFolder}", function() return root end)
+             :gsub("%${workspaceRoot}", function() return root end)
+             :gsub("%${userHome}", function() return vim.fn.expand("~") end)
+             :gsub("%${env:([%w_]+)}", function(name) return vim.env[name] or "" end)
+  if path == "~" or path:match("^~[/\\]") then
+    return vim.fn.expand("~") .. path:sub(2)
+  end
+  if path:match("^[/\\]") or path:match("^%a:[/\\]") then return path end
+  return root .. "/" .. path:gsub("^%.[/\\]", "")
+end
+
+-- Directories alc and the language servers search for .NET assemblies, in VS
+-- Code's precedence: the project's .vscode/settings.json, then a .code-workspace
+-- beside or above the project, then setup({ assembly_probing_paths }), then VS
+-- Code's user settings. The first that sets it wins outright, [] included;
+-- VS Code replaces arrays between scopes rather than merging them.
+--
+-- Unset falls back to VS Code's default ./.netpackages, only when it exists.
+-- Passing it blind is what hung on network mounts.
+function M.assembly_probing_paths(root)
+  local key = "al.assemblyProbingPaths"
+  local parent = vim.fn.fnamemodify(root, ":h")
+  local configured
+  local function consider(value)
+    if configured == nil and type(value) == "table" then configured = value end
+  end
+
+  consider((read_jsonc(root .. "/.vscode/settings.json") or {})[key])
+  for _, dir in ipairs({ root, parent }) do
+    local ws = M.find_workspace_file(dir)
+    local data = ws and read_jsonc(ws)
+    consider(data and type(data.settings) == "table" and data.settings[key] or nil)
+  end
+  consider(require("al").config.assembly_probing_paths)
+  for _, path in ipairs(require("al.platform").vscode_user_settings()) do
+    consider((read_jsonc(path) or {})[key])
+  end
+
+  if configured == nil then
+    return vim.fn.isdirectory(root .. "/.netpackages") == 1 and { root .. "/.netpackages" } or {}
+  end
+  local paths, seen = {}, {}
+  for _, p in ipairs(configured) do
+    if type(p) == "string" and p ~= "" then
+      local abs = resolve_probing_path(root, p)
+      if not seen[abs] then
+        seen[abs] = true
+        paths[#paths + 1] = abs
+      end
+    end
+  end
+  return paths
+end
+
 -- Implicit Microsoft base packages: always required for full type resolution.
 -- The appIds are stable Microsoft-assigned GUIDs that do not change across BC versions.
 -- Versions come from app.json platform/application fields.

@@ -103,7 +103,7 @@ function M.apply(root, cops, silent)
       workspacePath = root,
       alResourceConfigurationSettings = {
         packageCachePaths      = { root .. "/.alpackages" },
-        assemblyProbingPaths   = {},
+        assemblyProbingPaths   = require("al.lsp").assembly_probing_paths(root),
         codeAnalyzers          = cops,
         enableCodeAnalysis     = true,
         backgroundCodeAnalysis = "Project",
