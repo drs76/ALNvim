@@ -45,6 +45,12 @@ M.defaults = {
   -- Relative path inside the project root where symbol packages are cached
   packagecachepath = ".alpackages",
 
+  -- Directories searched for .NET assemblies referenced by `dotnet` blocks, for
+  -- machines without VS Code settings. al.assemblyProbingPaths in the project's
+  -- .vscode/settings.json or .code-workspace wins; this beats VS Code's user
+  -- settings. See lsp.assembly_probing_paths.
+  assembly_probing_paths = nil,
+
   -- Reopen the AL Explorer when the file you opened from it is closed, so the
   -- object list behaves like something you step in and out of rather than a
   -- one-shot jump. The list is rebuilt from cache, so reopening costs no rg

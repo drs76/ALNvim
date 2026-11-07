@@ -57,6 +57,9 @@ function M.start(bufnr, root)
     "--packagecachepath", cache,
     "--disableTelemetry",
   }
+  for _, dir in ipairs(require("al.lsp").assembly_probing_paths(root)) do
+    vim.list_extend(cmd, { "--assemblyprobingpath", dir })
+  end
   -- A .vscode/settings.json (if present) supplies al.* keys the server honours.
   local vscode_settings = root .. "/.vscode/settings.json"
   if vim.fn.filereadable(vscode_settings) == 1 then

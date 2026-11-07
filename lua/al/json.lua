@@ -101,4 +101,37 @@ function M.write(path, data)
   return true
 end
 
+-- Decode JSON with comments and trailing commas, which VS Code allows in its
+-- settings files and json_decode rejects. Returns nil when still invalid.
+function M.decode_jsonc(text)
+  local out, i, n = {}, 1, #text
+  while i <= n do
+    local c = text:sub(i, i)
+    if c == '"' then
+      local j = i + 1
+      while j <= n and text:sub(j, j) ~= '"' do
+        j = j + (text:sub(j, j) == "\\" and 2 or 1)
+      end
+      out[#out + 1] = text:sub(i, j)
+      i = j + 1
+    elseif text:sub(i, i + 1) == "//" then
+      i = (text:find("\n", i, true) or n + 1)
+    elseif text:sub(i, i + 1) == "/*" then
+      local _, e = text:find("*/", i + 2, true)
+      i = (e or n) + 1
+    else
+      if c == "]" or c == "}" then
+        -- Drop a trailing comma; a comment may have sat between it and here.
+        local k = #out
+        while k > 0 and out[k]:match("^%s$") do k = k - 1 end
+        if out[k] == "," then out[k] = "" end
+      end
+      out[#out + 1] = c
+      i = i + 1
+    end
+  end
+  local ok, data = pcall(vim.fn.json_decode, table.concat(out))
+  return ok and data or nil
+end
+
 return M

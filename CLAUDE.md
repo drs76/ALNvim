@@ -158,7 +158,7 @@ client:request("al/setActiveWorkspace", {
     workspacePath                   = root,
     alResourceConfigurationSettings = {
       packageCachePaths    = { root .. "/.alpackages" },
-      assemblyProbingPaths = {},   -- MUST be non-null array; empty avoids network-mount hang
+      assemblyProbingPaths = lsp.assembly_probing_paths(root),  -- MUST be non-null array
       enableCodeAnalysis   = true,
       backgroundCodeAnalysis = "Project",
       enableCodeActions    = true,
@@ -174,7 +174,7 @@ client:request("al/setActiveWorkspace", {
 
 **`expectedProjectReferenceDefinitions`** — always prepend implicit Microsoft base packages (System, System Application, Business Foundation, Base Application, Application) using stable GUIDs, even when `app.json` has no dependencies. Without them, AL server never loads standard symbol tables. Versions from `app.json` `platform`/`application` fields. Explicit deps appended after, duplicates skipped. Single shared builder: `require("al.lsp").build_project_refs(root)` — used by both `plugin/al.lua` (first send) and `cops.apply()` (every re-send); never build this list inline.
 
-**`assemblyProbingPaths` must be a non-null JSON array** — omitting causes `ArgumentNullException("path")` crash. VSCode default `['./.netpackages']` hangs on CIFS/SMB — use `{}`.
+**`assemblyProbingPaths` must be a non-null JSON array** — omitting causes `ArgumentNullException("path")` crash. Sending VS Code's default `['./.netpackages']` blind hangs on CIFS/SMB, so `lsp.assembly_probing_paths` adds it only when the directory exists.
 
 ### `al/activeProjectLoaded` — must return a response
 
@@ -286,6 +286,12 @@ credentials go into the debug adapter's environment (see "BC dev API / DAP").
 
 **The FileType root is bounded** (`lsp.find_root_upward`, not `vim.fs.root`). For this
 backend the root is the workspace the server indexes.
+
+## .NET assembly probing (`lsp.assembly_probing_paths(root)`)
+
+The one source for compile (`/assemblyprobingpaths:`, repeated per directory), the agentic LSP and MCP server (`--assemblyprobingpath`), and EditorServices (`assemblyProbingPaths`). Without it, any project with a `dotnet` block fails with AL0451 "could not be found in the assembly probing paths ''" then AL0185, while VS Code compiles it.
+
+Precedence, first set wins and `[]` counts as set (VS Code replaces arrays between scopes): `.vscode/settings.json` → `.code-workspace` in the project or its parent → `setup({ assembly_probing_paths })` → VS Code user settings. Unset → `.netpackages` if it exists. Relative paths mean the project root; `${workspaceFolder}`, `${workspaceRoot}`, `${userHome}`, `${env:X}` and `~` expand. Files are read with `json.decode_jsonc`, because VS Code settings may hold comments and trailing commas. `:ALInfo` prints the result.
 
 ## Compiling
 
@@ -654,7 +660,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (165 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (178 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

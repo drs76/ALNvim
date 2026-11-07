@@ -91,6 +91,9 @@ local function build_args(root)
     "--disableTelemetry",
     "--packagecachepath", root .. "/" .. (cfg.packagecachepath or ".alpackages"),
   }
+  for _, dir in ipairs(require("al.lsp").assembly_probing_paths(root)) do
+    vim.list_extend(args, { "--assemblyprobingpath", dir })
+  end
   if cfg.ruleset_path and cfg.ruleset_path ~= "" then
     vim.list_extend(args, { "--ruleset", cfg.ruleset_path })
   end
@@ -207,5 +210,7 @@ function M.status(root)
   local project = root and collect(settings_path(root)) or {}
   return project, collect(GLOBAL_SETTINGS)
 end
+
+M._test = { build_args = build_args }
 
 return M

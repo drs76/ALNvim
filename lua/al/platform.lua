@@ -155,6 +155,19 @@ function M.glob_al_files(root)
   end, files)
 end
 
+-- VS Code's user settings files, stable before Insiders.
+function M.vscode_user_settings()
+  local base
+  if M.is_windows then
+    base = vim.env.APPDATA or ""
+  elseif vim.fn.has("mac") == 1 then
+    base = vim.fn.expand("~") .. "/Library/Application Support"
+  else
+    base = vim.env.XDG_CONFIG_HOME or (vim.fn.expand("~") .. "/.config")
+  end
+  return { base .. "/Code/User/settings.json", base .. "/Code - Insiders/User/settings.json" }
+end
+
 -- Convert a path to the OS-native separator.
 -- On Windows, replaces forward slashes with backslashes.
 -- On Linux/macOS, returns the path unchanged.
