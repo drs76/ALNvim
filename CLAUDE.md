@@ -644,7 +644,7 @@ They were first added beside `make_adapter_env`, *below* `register_al_dap_events
 wrong-port fallback did. A browser session without the debugging context never hits a
 breakpoint, which is how the first live breakpoint test failed.
 
-**Publish** (`publish.M.publish`): `al publishapp` only — all BC versions, AAD/Windows/UserPassword auth built in; explicit connection flags from the picked launch config (`altool.connection_flags`) override launch.json; UserPassword creds via `altool.cred_env`. Output streams through `altool.run`. The DAP-adapter (`debug.publish_only`) and direct-HTTP (`publish_http`, BC < 25) fallbacks were removed — they turned a missing tool into a crash on Windows. `:ALLaunch` still publishes through the adapter, because it debugs.
+**Publish** (`publish.M.publish`): `al publishapp` only — all BC versions, AAD/Windows/UserPassword auth built in; explicit connection flags from the picked launch config (`altool.connection_flags`) override launch.json; UserPassword creds via `altool.cred_env`. Output streams through `altool.run`. **`forceUpgrade: true` must be sent as `--forceupgrade`** — the CLI does not read that key from launch.json, so it was silently ignored by `:ALPublish` until 2026-11-14; `:ALLaunch` needs nothing, the launch request hands it to the adapter as VS Code does. The DAP-adapter (`debug.publish_only`) and direct-HTTP (`publish_http`, BC < 25) fallbacks were removed — they turned a missing tool into a crash on Windows. `:ALLaunch` still publishes through the adapter, because it debugs.
 
 ## Inspecting the AL extension protocol
 
@@ -660,7 +660,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (178 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (180 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
