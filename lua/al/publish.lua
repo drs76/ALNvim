@@ -55,6 +55,14 @@ local function publishapp_args(root, cfg, app_file)
   if cfg.schemaUpdateMode then
     vim.list_extend(a, { "--schemaupdatemode", cfg.schemaUpdateMode })
   end
+  -- launch.json `forceUpgrade: true` runs the upgrade codeunits even when the
+  -- version has not changed. The CLI does not read it from launch.json — it
+  -- only honours its own --forceupgrade flag — so a config that worked in VS
+  -- Code (which hands the value straight to the debug adapter) was silently
+  -- ignored here. :ALLaunch needs nothing: the launch request carries it.
+  if cfg.forceUpgrade == true then
+    a[#a + 1] = "--forceupgrade"
+  end
   vim.list_extend(a, require("al.altool").connection_flags(cfg))
   return a
 end
@@ -137,5 +145,8 @@ function M.publish(root, skip_compile, on_success)
 end
 
 M.find_app = find_app_file
+
+-- Internals reached by tests only — never call from plugin code.
+M._test = { publishapp_args = publishapp_args }
 
 return M

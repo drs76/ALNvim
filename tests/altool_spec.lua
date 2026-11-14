@@ -235,3 +235,24 @@ describe("mcp.configure", function()
     eq(path, entry.command)
   end)
 end)
+
+describe("publish.publishapp_args", function()
+  local args = require("al.publish")._test.publishapp_args
+  local function has_flag(a, f)
+    for _, x in ipairs(a) do if x == f then return true end end
+    return false
+  end
+
+  it("passes launch.json forceUpgrade to al publishapp", function()
+    -- Regression: the CLI only honours its own --forceupgrade flag, not the
+    -- launch.json key, so `forceUpgrade: true` was silently ignored by
+    -- :ALPublish while VS Code (and :ALLaunch) applied it.
+    local a = args("/p", { forceUpgrade = true, server = "http://bc", serverInstance = "BC" }, "/p/x.app")
+    ok(has_flag(a, "--forceupgrade"), vim.inspect(a))
+  end)
+
+  it("omits it when false or absent", function()
+    eq(false, has_flag(args("/p", { forceUpgrade = false }, "/p/x.app"), "--forceupgrade"))
+    eq(false, has_flag(args("/p", {}, "/p/x.app"), "--forceupgrade"))
+  end)
+end)
