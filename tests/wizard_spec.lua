@@ -57,12 +57,12 @@ describe("wizard object types", function()
   it("builds CRS paths for the new types", function()
     local root = project()
     local cases = {
-      reportextension        = "/src/reportextension/Sales_Inv_Ext.ReportExt.al",
-      permissionsetextension = "/src/permissionsetextension/Sales_Inv_Ext.PermissionSetExt.al",
-      profile                = "/src/profile/Sales_Inv_Ext.Profile.al",
-      pagecustomization      = "/src/pagecustomization/Sales_Inv_Ext.PageCust.al",
-      controladdin           = "/src/controladdin/Sales_Inv_Ext.ControlAddin.al",
-      entitlement            = "/src/entitlement/Sales_Inv_Ext.Entitlement.al",
+      reportextension        = "/src/reportextension/SalesInvExt.ReportExt.al",
+      permissionsetextension = "/src/permissionsetextension/SalesInvExt.PermissionSetExt.al",
+      profile                = "/src/profile/SalesInvExt.Profile.al",
+      pagecustomization      = "/src/pagecustomization/SalesInvExt.PageCust.al",
+      controladdin           = "/src/controladdin/SalesInvExt.ControlAddin.al",
+      entitlement            = "/src/entitlement/SalesInvExt.Entitlement.al",
     }
     for key, want in pairs(cases) do
       local _, path = W.build_path(root, type_info(key), "Sales Inv Ext")
@@ -124,6 +124,19 @@ describe("wizard.organise_file scope", function()
     eq(path, vim.api.nvim_buf_get_name(b))
     eq(1, vim.fn.filereadable(path))
     eq(0, vim.fn.isdirectory(root .. "/src/table"))
+  end)
+
+  it("removes spaces from the object name — never replaces them with _", function()
+    -- CRS naming strips spaces. Until 2026-11-15 sanitise_name wrote "_"
+    -- instead, so a project with hand-named PrivateGallerySetup.Page.al got
+    -- a second file Private_Gallery_Setup.Page.al on its first :w.
+    local root = project()
+    local b, path = open_al(root, "src/page/PrivateGallerySetup.Page.al",
+      { 'page 50100 "Private Gallery Setup"', "{", "}" })
+    W.organise_file(b)
+    eq(path, vim.api.nvim_buf_get_name(b))
+    eq(1, vim.fn.filereadable(path))
+    eq(0, vim.fn.filereadable(root .. "/src/page/Private_Gallery_Setup.Page.al"))
   end)
 
   it("still moves a root-level file into src/<type>/", function()

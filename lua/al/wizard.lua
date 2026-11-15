@@ -505,7 +505,7 @@ end
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function sanitise_name(name)
-  return name:gsub("%s+", "_"):gsub("[^%w_%-]", "")
+  return (name:gsub("%s+", ""):gsub("[^%w_%-]", ""))
 end
 
 -- Read CRS.ObjectNameSuffix from .vscode/settings.json, walking upward from
