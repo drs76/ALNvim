@@ -1,7 +1,7 @@
 -- AL Object Wizard: interactive prompt flow to create a new AL object file.
 --
 -- M.new_object([root])  →  :ALNewObject
---   1. Pick object type (12 supported)
+--   1. Pick object type (18 supported)
 --   2. Enter object ID (pre-filled with next free ID from idRanges)
 --   3. Enter object name
 --   4. Type-specific extra prompts (DataClassification, PageType, extends, …)
@@ -28,6 +28,12 @@ local TYPES = {
   { label = "Enum Extension",       key = "enumextension",       has_id = true,  file_type = "EnumExt" },
   { label = "Interface",            key = "interface",           has_id = false, file_type = "Interface" },
   { label = "Permission Set",       key = "permissionset",       has_id = true,  file_type = "PermissionSet" },
+  { label = "Report Extension",     key = "reportextension",     has_id = true,  file_type = "ReportExt" },
+  { label = "Permission Set Extension", key = "permissionsetextension", has_id = true, file_type = "PermissionSetExt" },
+  { label = "Profile",              key = "profile",             has_id = false, file_type = "Profile" },
+  { label = "Page Customization",   key = "pagecustomization",   has_id = false, file_type = "PageCust" },
+  { label = "Control Add-in",       key = "controladdin",        has_id = false, file_type = "ControlAddin" },
+  { label = "Entitlement",          key = "entitlement",         has_id = false, file_type = "Entitlement" },
 }
 
 local DATA_CLASSIFICATIONS = {
@@ -306,6 +312,82 @@ local function tpl_permissionset(d)
 ]], d.id, d.name, d.name, table.concat(perm_lines, "\n"))
 end
 
+local function tpl_reportextension(d)
+  return string.format([[reportextension %d "%s" extends "%s"
+{
+    dataset
+    {
+    }
+
+    requestpage
+    {
+        layout
+        {
+        }
+    }
+}
+]], d.id, d.name, d.extends or "")
+end
+
+local function tpl_permissionsetextension(d)
+  return string.format([[permissionsetextension %d "%s" extends "%s"
+{
+    // Permissions =
+    //     tabledata "My Table" = RIMD;
+}
+]], d.id, d.name, d.extends or "")
+end
+
+local function tpl_profile(d)
+  return string.format([[profile "%s"
+{
+    Caption = '%s';
+    RoleCenter = "%s";
+}
+]], d.name, d.name, d.role_center or "")
+end
+
+local function tpl_pagecustomization(d)
+  return string.format([[pagecustomization "%s" customizes "%s"
+{
+    layout
+    {
+    }
+
+    actions
+    {
+    }
+}
+]], d.name, d.extends or "")
+end
+
+local function tpl_controladdin(d)
+  return string.format([[controladdin "%s"
+{
+    RequestedHeight = 300;
+    MinimumHeight = 300;
+    VerticalStretch = true;
+    HorizontalStretch = true;
+
+    // Scripts = 'src/controladdin/script.js';
+    // StartupScript = 'src/controladdin/startup.js';
+
+    event OnReady();
+
+    procedure SetData(Data: JsonObject);
+}
+]], d.name)
+end
+
+local function tpl_entitlement(d)
+  return string.format([[entitlement "%s"
+{
+    Type = Implicit;
+    ObjectEntitlements = "%s";
+}
+]], d.name, d.permission_set or "")
+end
+
 local TEMPLATES = {
   table          = tpl_table,
   tableextension = tpl_tableextension,
@@ -319,6 +401,12 @@ local TEMPLATES = {
   enumextension  = tpl_enumextension,
   interface      = tpl_interface,
   permissionset  = tpl_permissionset,
+  reportextension        = tpl_reportextension,
+  permissionsetextension = tpl_permissionsetextension,
+  profile                = tpl_profile,
+  pagecustomization      = tpl_pagecustomization,
+  controladdin           = tpl_controladdin,
+  entitlement            = tpl_entitlement,
 }
 
 -- ── Object list helpers ───────────────────────────────────────────────────────
@@ -375,6 +463,45 @@ local function pick_object(root, obj_type, prompt, cb)
   end)
 end
 
+-- Role Center pages for a Profile's RoleCenter property: pages whose source
+-- says PageType = RoleCenter, across project + symbol packages. Two async rg
+-- passes — the files, then each file's page declaration.
+local function pick_role_center(root, cb)
+  local explorer = require("al.explorer")
+  local dirs = explorer.build_search_dirs(root)
+  local cmd = { "rg", "--files-with-matches", "--color=never", "-i",
+    "--glob", "*.al", "--glob", "*.AL", "-e", [[^\s*PageType\s*=\s*RoleCenter\s*;]] }
+  vim.list_extend(cmd, dirs)
+  explorer.rg_async(cmd, function(files)
+    local function choose(list)
+      if #list == 0 then
+        vim.ui.input({ prompt = "Role Center page: " }, function(val)
+          cb(val ~= nil and val ~= "" and val or nil)
+        end)
+        return
+      end
+      vim.ui.select(list, { prompt = "Role Center page:" }, cb)
+    end
+    if #files == 0 then return choose({}) end
+    local decl = { "rg", "--no-heading", "--no-filename", "--color=never", "-i", "-m", "1",
+      "-e", [[^\s*page\s+\d+]] }
+    vim.list_extend(decl, files)
+    explorer.rg_async(decl, function(lines)
+      local seen, names = {}, {}
+      for _, line in ipairs(lines) do
+        local rest = line:match("^%s*%a+%s+%d+%s*(.*)")
+        local name = rest and (rest:match('^"([^"]+)"') or rest:match("^([%w_]+)"))
+        if name and not seen[name] then
+          seen[name] = true
+          names[#names + 1] = name
+        end
+      end
+      table.sort(names, function(a, b) return a:lower() < b:lower() end)
+      choose(names)
+    end)
+  end)
+end
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 local function sanitise_name(name)
@@ -424,6 +551,21 @@ local function has_affix(name, affix)
   return nl:sub(-#al) == al or nl:sub(1, #al) == al
 end
 
+-- Object types declared without a numeric ID: `interface "Name"`,
+-- `profile Name`, `pagecustomization Name customizes "Page"`, ...
+local NO_ID_TYPES = {
+  interface = true, profile = true, profileextension = true,
+  pagecustomization = true, controladdin = true, entitlement = true,
+}
+
+-- (keyword, rest) when line declares an ID-less object.
+local function no_id_decl(line)
+  local kw, rest = line:match("^%s*(%a+)%s+(.+)$")
+  if kw and NO_ID_TYPES[kw:lower()] and rest:match("^[\"'%w_]") then
+    return kw:lower(), rest
+  end
+end
+
 -- Return (zero-based line index, raw line text, object name) for the first
 -- AL object declaration found in the buffer.
 local function find_obj_decl(bufnr)
@@ -433,15 +575,21 @@ local function find_obj_decl(bufnr)
     local name = line:match('^%s*%a+%s+%d+%s+"([^"]+)"')
               or line:match("^%s*%a+%s+%d+%s+'([^']+)'")
               or line:match('^%s*%a+%s+%d+%s+([^%s{"\']+)')
-    -- Interface (no ID): interface "Name"
+    -- No ID: interface "Name", profile Name, pagecustomization Name customizes …
     if not name then
-      name = line:match('^%s*interface%s+"([^"]+)"')
-          or line:match("^%s*interface%s+'([^']+)'")
-          or line:match('^%s*interface%s+([^%s{"\']+)')
+      local _, rest = no_id_decl(line)
+      if rest then
+        name = rest:match('^"([^"]+)"') or rest:match("^'([^']+)'")
+            or rest:match('^([^%s{"\']+)')
+      end
     end
     if name then
-      -- Strip "extends ..." subtype clause (reserved keyword; never part of name).
-      name = vim.trim(name:match("^(.-)%s+[Ee]xtends%s") or name:match("^(.-)%s+[Ee]xtends$") or name)
+      -- Strip "extends ..." / "customizes ..." clauses (reserved keywords; never
+      -- part of the name).
+      for _, kw in ipairs({ "[Ee]xtends", "[Cc]ustomizes" }) do
+        name = name:match("^(.-)%s+" .. kw .. "%s") or name:match("^(.-)%s+" .. kw .. "$") or name
+      end
+      name = vim.trim(name)
       return i - 1, line, name
     end
   end
@@ -456,6 +604,7 @@ local FILE_TYPE_MAP = {
   interface="Interface", permissionset="PermissionSet",
   permissionsetextension="PermissionSetExt", profile="Profile",
   profileextension="ProfileExt", controladdin="ControlAddin",
+  entitlement="Entitlement",
 }
 
 -- Note: no object ID in the filename. organise_file() derives the same
@@ -766,6 +915,46 @@ extra_prompts.enumextension = function(data, cb)
   end)
 end
 
+extra_prompts.reportextension = function(data, cb)
+  pick_object(data.root, "report", "Extends report:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
+    cb(data)
+  end)
+end
+
+extra_prompts.permissionsetextension = function(data, cb)
+  pick_object(data.root, "permissionset", "Extends permission set:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
+    cb(data)
+  end)
+end
+
+extra_prompts.pagecustomization = function(data, cb)
+  pick_object(data.root, "page", "Customizes page:", function(choice)
+    if not choice then cb(nil); return end
+    data.extends = choice
+    cb(data)
+  end)
+end
+
+extra_prompts.profile = function(data, cb)
+  pick_role_center(data.root, function(choice)
+    if not choice then cb(nil); return end
+    data.role_center = choice
+    cb(data)
+  end)
+end
+
+extra_prompts.entitlement = function(data, cb)
+  pick_object(data.root, "permissionset", "Object entitlements (permission set):", function(choice)
+    if not choice then cb(nil); return end
+    data.permission_set = choice
+    cb(data)
+  end)
+end
+
 extra_prompts.permissionset = function(data, cb)
   local entries = scan_project_objects(data.root)
   if #entries == 0 then
@@ -866,7 +1055,7 @@ local ORG_TYPES = {
   table=1, tableextension=1, page=1, pageextension=1, pagecustomization=1,
   codeunit=1, report=1, reportextension=1, query=1, xmlport=1,
   enum=1, enumextension=1, interface=1, permissionset=1, permissionsetextension=1,
-  profile=1, profileextension=1, controladdin=1,
+  profile=1, profileextension=1, controladdin=1, entitlement=1,
 }
 
 local function detect_obj_type(bufnr)
@@ -875,10 +1064,26 @@ local function detect_obj_type(bufnr)
     -- Types with numeric IDs: keyword <number>
     local typ = line:match("^%s*([%a]+)%s+%d+")
     if typ and ORG_TYPES[typ:lower()] then return typ:lower() end
-    -- Interface has no numeric ID: interface "Name"
-    if line:lower():match('^%s*interface%s+["\']') then return "interface" end
+    -- No numeric ID: interface "Name", profile Name, …
+    local kw = no_id_decl(line)
+    if kw then return kw end
   end
   return nil
+end
+
+-- rel is the file's path relative to the project root. The organiser owns the
+-- root itself and the organise_dirs subtrees (default { "src" }); a file under
+-- app/Setup/ in one of MS's templates is laid out by feature on purpose and
+-- must keep both its location and its name.
+local function in_organise_scope(rel)
+  if not rel:find("/", 1, true) then return true end
+  local al = package.loaded["al"]
+  local dirs = al and al.config and al.config.organise_dirs or { "src" }
+  for _, d in ipairs(dirs) do
+    d = vim.fs.normalize(d):gsub("^%./", ""):gsub("/+$", "")
+    if d ~= "" and rel:sub(1, #d + 1) == d .. "/" then return true end
+  end
+  return false
 end
 
 -- Guard against re-entrancy when organise_file triggers a :write.
@@ -900,6 +1105,7 @@ function M.organise_file(bufnr)
   if root == "" then return end
 
   if path:sub(1, #root) ~= root then return end
+  if not in_organise_scope(path:sub(#root + 2)) then return end
 
   local obj_type = detect_obj_type(bufnr)
   if not obj_type then return end
@@ -1016,6 +1222,12 @@ M.build_path     = build_path
 M.write_and_open = write_and_open
 M.find_obj_decl  = find_obj_decl
 
-M._test = { write_and_open = write_and_open }
+M._test = {
+  write_and_open    = write_and_open,
+  detect_obj_type   = detect_obj_type,
+  in_organise_scope = in_organise_scope,
+  TYPES             = TYPES,
+  TEMPLATES         = TEMPLATES,
+}
 
 return M

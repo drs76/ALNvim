@@ -33,6 +33,12 @@ M.defaults = {
   -- e.g. object_name_suffix = "PTE"
   object_name_suffix = nil,
 
+  -- Directories (relative to the project root) whose AL files the organiser
+  -- may move into src/<type>/ and re-suffix on save. Files at the root itself
+  -- are always organised. Anything else is left where it is — MS's own
+  -- templates lay code out under app/ and test/ by feature.
+  organise_dirs = { "src" },
+
   -- Colorscheme applied when the first AL buffer loads. ALNvim ships bc_dark
   -- and bc_yellow, tuned to match the VS Code AL palette.
   --
