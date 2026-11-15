@@ -66,6 +66,17 @@ M.defaults = {
   -- via :ALMcpSetup / :ALMcpRemove.
   auto_mcp = true,
 
+  -- Extra MCP servers written beside the project server (tool 30+). Each is
+  -- another process per Claude Code session, so both default off.
+  --   profiling — `al launchprofilingmcpproxy`: CPU profiles (.alcpuprofile)
+  --               of a slow BC session, saved under <root>/.profiles
+  --   snapshot  — `al launchsnapshotmcpproxy`: snapshot debugging archives
+  -- Connection flags come from the first AL launch configuration, on the BC
+  -- API/OData port (launch.json `mcpServicePort`, default 7047) — not the dev
+  -- port. UserPassword credentials are referenced as ${AL_BC_USERNAME} /
+  -- ${AL_BC_PASSWORD} in the entry's env, never written as values.
+  mcp = { profiling = false, snapshot = false },
+
   -- Automatically start the AL LSP when Neovim opens inside an AL project root
   -- (i.e. app.json exists in the current working directory). Enables diagnostics
   -- in the file explorer without needing to open an AL file first.

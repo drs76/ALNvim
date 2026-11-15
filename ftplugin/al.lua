@@ -294,6 +294,13 @@ vim.keymap.set("n", "<leader>adl", "<cmd>ALLaunch<CR>",          vim.tbl_extend(
 vim.keymap.set("n", "<leader>ads", "<cmd>ALSnapshotStart<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Start snapshot debug session" }))
 vim.keymap.set("n", "<leader>adf", "<cmd>ALSnapshotFinish<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Finish snapshot and download" }))
 vim.keymap.set("n", "<leader>add", "<cmd>ALDebugSetup<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Configure nvim-dap for AL" }))
+-- Profiling / snapshot via the tool's MCP proxies. Under the <leader>ad prefix:
+-- <leader>ap* would shadow <leader>ap (Publish) with a timeout wait.
+vim.keymap.set("n", "<leader>adp", "<cmd>ALProfileCapture<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Arm CPU profiling on a BC session" }))
+vim.keymap.set("n", "<leader>adP", "<cmd>ALProfileCollect<CR>",  vim.tbl_extend("force", opts, { desc = "AL: Collect profiles and open viewer" }))
+vim.keymap.set("n", "<leader>ado", "<cmd>ALProfileOpen<CR>",     vim.tbl_extend("force", opts, { desc = "AL: Open newest .alcpuprofile viewer" }))
+vim.keymap.set("n", "<leader>adS", "<cmd>ALSnapshotCapture<CR>", vim.tbl_extend("force", opts, { desc = "AL: Arm snapshot debugging (MCP proxy)" }))
+vim.keymap.set("n", "<leader>adF", "<cmd>ALSnapshotCollect<CR>", vim.tbl_extend("force", opts, { desc = "AL: Collect snapshot archive (MCP proxy)" }))
 -- nvim-dap runtime controls (only mapped when nvim-dap is present)
 if pcall(require, "dap") then
   local dap = require("dap")

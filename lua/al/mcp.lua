@@ -82,6 +82,77 @@ local function entry_key(root)
   return "al:" .. vim.fn.fnamemodify(root, ":t")
 end
 
+-- The two MCP proxies the tool ships from 30.x, keyed by the config flag that
+-- opts each in (setup({ mcp = { profiling = true, snapshot = true } })).
+local PROXIES = {
+  { kind = "profiling", subcommand = "launchprofilingmcpproxy", prefix = "al-profiling:" },
+  { kind = "snapshot",  subcommand = "launchsnapshotmcpproxy",  prefix = "al-snapshot:" },
+}
+
+-- Every key this module may own for `root`: al:, al-profiling:, al-snapshot:.
+local function all_keys(root)
+  local name = vim.fn.fnamemodify(root, ":t")
+  local keys = { entry_key(root) }
+  for _, p in ipairs(PROXIES) do keys[#keys + 1] = p.prefix .. name end
+  return keys
+end
+
+local function is_own_key(k)
+  return k:match("^al:") or k:match("^al%-profiling:") or k:match("^al%-snapshot:")
+end
+
+-- Args for a proxy entry: the subcommand plus connection flags from a launch
+-- configuration on the *MCP service* port (altool.mcp_port — the API/OData
+-- port, 7047 by default, never the dev port 7049 the other commands use).
+-- Profiling also gets its artifact folder inside the project, so Claude's
+-- captures land where :ALProfileOpen looks.
+local function proxy_args(kind, root, launch_cfg)
+  local altool = require("al.altool")
+  local proxy
+  for _, p in ipairs(PROXIES) do if p.kind == kind then proxy = p end end
+  local args = { proxy.subcommand }
+  vim.list_extend(args, altool.connection_flags(launch_cfg, { port = "mcp" }))
+  if kind == "profiling" then
+    vim.list_extend(args, { "--profilefolder", root .. "/.profiles" })
+  end
+  return args
+end
+
+-- Environment block for a proxy entry. UserPassword proxies read
+-- BC_SERVER_USERNAME / BC_SERVER_PASSWORD; the entry references the AL_BC_*
+-- variables ALNvim already honours (Claude Code expands ${VAR} in MCP server
+-- env) rather than copying a password out of launch.json into another file.
+local function proxy_env(launch_cfg)
+  local auth = launch_cfg.authentication or ""
+  if auth == "UserPassword" or auth == "NavUserPassword" then
+    return { BC_SERVER_USERNAME = "${AL_BC_USERNAME}", BC_SERVER_PASSWORD = "${AL_BC_PASSWORD}" }
+  end
+  return nil
+end
+
+-- The proxy entries configure() should write for `root`: only those opted in,
+-- only when the installed tool has the subcommand, and only with a launch
+-- configuration to point them at. Returns { [key] = entry }.
+local function proxy_entries(root)
+  local cfg    = require("al").config
+  local altool = require("al.altool")
+  local out    = {}
+  local opt    = type(cfg.mcp) == "table" and cfg.mcp or {}
+  local launch = require("al.connection").read_launch(root)
+  if not launch then return out end
+  local name = vim.fn.fnamemodify(root, ":t")
+  for _, p in ipairs(PROXIES) do
+    if opt[p.kind] and altool.has(p.subcommand) then
+      out[p.prefix .. name] = {
+        command = al_binary(),
+        args    = proxy_args(p.kind, root, launch),
+        env     = proxy_env(launch),
+      }
+    end
+  end
+  return out
+end
+
 -- Build the args array for the MCP server process.
 local function build_args(root)
   local cfg   = require("al").config
@@ -133,22 +204,26 @@ function M.configure(root)
     settings.mcpServers = {}
   end
 
-  local key   = entry_key(root)
-  local entry = {
-    command = al_binary(),
-    args    = build_args(root),
-  }
+  local wanted = proxy_entries(root)
+  wanted[entry_key(root)] = { command = al_binary(), args = build_args(root) }
 
   -- auto_mcp calls this on every LspAttach. Skip the write (and the notify) when
-  -- the entry is already correct, so simply opening an AL file does not rewrite
-  -- the user's settings file or spam the message area.
-  if vim.deep_equal(settings.mcpServers[key], entry) then
-    return true
+  -- every entry is already correct, so simply opening an AL file does not
+  -- rewrite the user's settings file or spam the message area. Entries for a
+  -- proxy that is opted out are left alone, not removed — :ALMcpRemove does that.
+  local changed = {}
+  for key, entry in pairs(wanted) do
+    if not vim.deep_equal(settings.mcpServers[key], entry) then
+      settings.mcpServers[key] = entry
+      changed[#changed + 1] = key
+    end
   end
+  if #changed == 0 then return true end
+  table.sort(changed)
 
-  settings.mcpServers[key] = entry
   if not write_settings(path, settings) then return false end
-  vim.notify("AL MCP: configured '" .. key .. "' in " .. vim.fn.fnamemodify(path, ":~:.")
+  vim.notify("AL MCP: configured '" .. table.concat(changed, "', '") .. "' in "
+    .. vim.fn.fnamemodify(path, ":~:.")
     .. " — restart Claude Code or run /mcp to activate.", vim.log.levels.INFO)
   return true
 end
@@ -167,14 +242,20 @@ function M.deconfigure(root)
       .. " — not modifying it.", vim.log.levels.ERROR)
     return
   end
-  local key = entry_key(root)
-  if type(settings.mcpServers) ~= "table" or not settings.mcpServers[key] then
-    vim.notify("AL MCP: no entry for '" .. key .. "' in " .. vim.fn.fnamemodify(path, ":~:."),
-      vim.log.levels.WARN)
+  -- Remove every entry this module may have written: the project server and
+  -- both proxies, whether or not they are currently opted in.
+  local removed = {}
+  for _, key in ipairs(all_keys(root)) do
+    if type(settings.mcpServers) == "table" and settings.mcpServers[key] then
+      settings.mcpServers[key] = nil
+      removed[#removed + 1] = key
+    end
+  end
+  if #removed == 0 then
+    vim.notify("AL MCP: no entry for '" .. entry_key(root) .. "' in "
+      .. vim.fn.fnamemodify(path, ":~:."), vim.log.levels.WARN)
     return
   end
-
-  settings.mcpServers[key] = nil
   -- Drop the container when it empties, rather than leaving "mcpServers": {}.
   if vim.tbl_isempty(settings.mcpServers) then settings.mcpServers = nil end
   if vim.tbl_isempty(settings) then
@@ -183,10 +264,10 @@ function M.deconfigure(root)
   else
     write_settings(path, settings)
   end
-  vim.notify("AL MCP: removed '" .. key .. "'", vim.log.levels.INFO)
+  vim.notify("AL MCP: removed '" .. table.concat(removed, "', '") .. "'", vim.log.levels.INFO)
 end
 
--- Report the al:* entries for `root`, plus any left in the GLOBAL settings file.
+-- Report the al:* / al-profiling:* / al-snapshot:* entries for `root`, plus any left in the GLOBAL settings file.
 --
 -- The global list matters: entries written there by older versions of this
 -- module keep starting an AL language server in every Claude Code session, for
@@ -200,17 +281,20 @@ function M.status(root)
     local out = {}
     -- Read-only: an unparseable file just reports nothing rather than erroring.
     for k, v in pairs((read_settings(path) or {}).mcpServers or {}) do
-      if k:match("^al:") then
+      if is_own_key(k) then
         out[#out + 1] = { key = k, command = v.command, args = v.args, path = path }
       end
     end
-    table.sort(out, function(a, b) return a.key < b.key end)
+    -- al:<name> first, then its proxies ('-' sorts before ':' otherwise).
+    local function rank(k) return (k:gsub("^al:", "al!:")) end
+    table.sort(out, function(a, b) return rank(a.key) < rank(b.key) end)
     return out
   end
   local project = root and collect(settings_path(root)) or {}
   return project, collect(GLOBAL_SETTINGS)
 end
 
-M._test = { build_args = build_args }
+M._test = { build_args = build_args, proxy_args = proxy_args, proxy_env = proxy_env,
+            proxy_entries = proxy_entries, all_keys = all_keys }
 
 return M

@@ -20,11 +20,12 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
-| `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping, `M.mcp_call()` one-shot MCP client |
+| `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping (`connection_flags(cfg, { port = "mcp" })` = proxy port), `M.mcp_call()`/`M.mcp_call_server()` one-shot MCP client, `M.mcp_tools()` cached `tools/list` |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
 | `lua/al/tests.lua` | Test running through the tool: `M.list` (`al listtests --appfile`), `M.run` (`al runtests --raw` → quickfix; `:ALRunTests!` = test under cursor), `M.doc` (`al doc build` → `.aldoc`), `M.run_object` (web-client URL for the buffer's object). Parsers under `M._test` |
+| `lua/al/profile.lua` | Profiling + snapshot through the tool's MCP proxies (tool 30+): `M.capture`/`M.collect` (`al launchprofilingmcpproxy`: `schedule_profiling` → `stop_schedule_and_get_profiles` → `.profiles/<ts>/`), `M.open` (`.alcpuprofile` hot-function viewer, `<CR>` jumps), `M.snapshot_capture`/`M.snapshot_collect` (`al launchsnapshotmcpproxy`). Pure helpers under `M._test` |
 | `lua/al/fixes.lua` | Diagnostic quick fixes (Create procedure, AA0137/AA0206/AA0008, `:ALFixCops`), Option→enum refactor, related-code navigation; pure helpers under `M._test`, registered as actions by codeactions.lua |
 | `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
@@ -34,7 +35,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — 65 actions with descriptions; Telescope or `vim.ui.select` fallback |
+| `lua/al/actions.lua` | ALActions picker — 70 actions with descriptions; Telescope or `vim.ui.select` fallback |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
@@ -357,6 +358,8 @@ via PATH: clean build, `.app` produced.
 | `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
 | `grn` | RenameObject — rename quoted AL identifier project-wide (falls back to LSP rename for unquoted symbols) |
 | `<F5>`/`<leader>adl/ads/adf/add` | Launch / SnapshotStart / SnapshotFinish / DebugSetup |
+| `<leader>adp/adP/ado` | ProfileCapture (arm a schedule on a BC session id) / ProfileCollect (save `.alcpuprofile`s, open viewer) / ProfileOpen (newest profile). Under `ad`, not `ap`: `<leader>ap*` would make `<leader>ap` Publish wait on `timeoutlen` |
+| `<leader>adS/adF` | SnapshotCapture / SnapshotCollect — proxy route (`al launchsnapshotmcpproxy`) |
 | `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
 | `<C-Space>`/`<Nul>` (insert) | Object ID completion (`<C-x><C-u>`) |
@@ -367,7 +370,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALRunTests[!] [dir]`, `:ALListTests [dir]`, `:ALDoc [dir]`, `:ALRunObject`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALSnapshotCapture/Collect [dir]`, `:ALProfileCapture/Collect [dir]`, `:ALProfileOpen [file]`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALRunTests[!] [dir]`, `:ALListTests [dir]`, `:ALDoc [dir]`, `:ALRunObject`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -487,6 +490,57 @@ Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via s
 **Never overwrite a settings file you could not parse.** `mcp.read_settings` returns `(data, err)`: `{}` for absent/empty, `nil` plus a reason when the file exists but is invalid JSON. Collapsing those two into `{}` meant one trailing comma in a hand-edited `.claude/settings.json` was read as empty and then rewritten with only `mcpServers` — destroying the user's permissions and hooks. `auto_mcp` reaches this on every `LspAttach`, so opening one `.al` file was enough.
 
 **Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `~/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
+
+**Proxy entries (opt-in, tool 30+).** `setup({ mcp = { profiling = true, snapshot = true } })`
+(both default off — each is one more process per Claude Code session) makes `configure(root)`
+also write `al-profiling:<name>` (`al launchprofilingmcpproxy … --profilefolder <root>/.profiles`)
+and `al-snapshot:<name>` (`al launchsnapshotmcpproxy …`) beside `al:<name>`, from the **first** AL
+launch configuration (`conn.read_launch` — `LspAttach` cannot prompt). Their connection flags
+come from `altool.connection_flags(cfg, { port = "mcp" })`: **the proxies take the BC API/OData
+port (`mcpServicePort` in launch.json, default 7047), not the dev port 7049** every other tool
+command uses — `--help` says so, and a proxy given 7049 starts cleanly and then fails every
+call. Cloud has no port. UserPassword credentials are referenced as `${AL_BC_USERNAME}` /
+`${AL_BC_PASSWORD}` in the entry's `env` (never copied as values); whether Claude Code expands
+`${VAR}` in `settings.json` `mcpServers.env` is **unverified**. An opted-out proxy's entry is
+left alone by `configure`; `:ALMcpRemove` drops all three keys, `:ALMcpStatus` lists them (`al:`
+sorted first). Same `deep_equal` skip and unparsable-file refusal.
+
+## Profiling and snapshot proxies (`lua/al/profile.lua`)
+
+Both proxies are stdio MCP servers and both are **two-phase**: arming captures nothing, the user
+reproduces the scenario in the BC client, stopping returns the capture. So each is a command
+pair, with the armed state in `M._profile` / `M._snapshot`. Every call is a fresh
+`altool.mcp_call_server` process (one-shot client), which is fine because the state that matters
+(`scheduleId`, `debuggingContext`) lives on the NST. There is no list-sessions tool, so the BC
+session id is prompted for (web client `?` → Help → Session ID).
+
+**Tool names, from `tools/list` on 30.0.42** (fixtures `phase2b-*-tools-list.json` in the side
+session notes; the list is answered with the server down, so `altool.mcp_tools` can probe before
+a call and name the real tools when one is missing):
+
+| proxy | arm | collect | other |
+|---|---|---|---|
+| `launchprofilingmcpproxy` | `schedule_profiling { targetSessionId, durationSeconds=300, samplingIntervalMs, profileCreationThresholdMs, description }` → `scheduleId`, `nextStep` | `stop_schedule_and_get_profiles { targetSessionId, scheduleId }` → base64 zip of `<activityId>.alcpuprofile` (inline when small, else a `resourceUri`) + `profilesOverview` | `get_profile_for_activity`, `analyze_profiles_in_folder` (local) |
+| `launchsnapshotmcpproxy` | `initialize_snapshot_debugging { clientType=WebClient, sessionId?, snappoints?, snapshotVerbosity }` → `debuggingContext`, `hostId` | `stop_snapshot_debugging { debuggingContext, hostId? }` → archive + Markdown/JSON projection of the captures | `get_snapshot_status`, `run_tests` |
+
+**Stop-response shapes are not verified live** (bc2 down throughout). `extract_archives` scans
+the result for a `resource` block blob or any string in the text block's JSON whose base64
+decodes to `PK…`; `find_field` searches for the id keys case-insensitively at any depth. An
+archive referenced only by `resourceUri` is reported, not fetched (that needs `resources/read`
+in the same proxy process). `hostId` is passed back on collect because a fresh proxy process has
+forgotten the owning node.
+
+`parse_cpuprofile`: `timeDeltas[i]` is attributed to `samples[i]`; total = self + descendants
+via `children[]` (or `parent` links); nodes sharing a call frame are merged. Viewer `<CR>` →
+`frame_location(url, functionName)`: a readable path or basename under
+`explorer.build_search_dirs(root)`, else `kind + id/name` parsed from the url (kinds tried
+longest-first — Lua patterns have no alternation, and `tableextension` must not read as `table`)
+rg'd over the same dirs, then `basedef.member_line` for the procedure. **The url shape of an AL
+frame is unknown until a live capture**; the resolver tries all three.
+
+The curl `:ALSnapshotStart/Finish` in `debug.lua` stay. The proxy route (`:ALSnapshotCapture/
+Collect`) is the one that goes through the tool and is to be preferred once verified live; the
+curl pair goes then.
 
 ## AL Extension Installer (`lua/al/install.lua`)
 

@@ -38,6 +38,11 @@
 | `<Space>ads` | Start BC snapshot debug session |
 | `<Space>adf` | Finish snapshot — download trace file to `.snapshots/` |
 | `<Space>add` | Configure nvim-dap for AL live attach |
+| `<Space>adp` | Arm CPU profiling on a BC session id (tool 30+, `al launchprofilingmcpproxy`) |
+| `<Space>adP` | Collect profiles → `.profiles/<ts>/*.alcpuprofile`, open hot-function viewer |
+| `<Space>ado` | Open newest `.alcpuprofile` (viewer: `<CR>` jumps to source, `q` closes) |
+| `<Space>adS` | Arm snapshot debugging via `al launchsnapshotmcpproxy` |
+| `<Space>adF` | Collect snapshot archive + summary → `.snapshots/<ts>/` |
 
 After `:ALDebugSetup`, use standard nvim-dap keys (install nvim-dap separately):
 
@@ -272,6 +277,11 @@ selectable until you move into it.
 | `:ALDownloadSymbols` | Fetch `.alpackages` from BC |
 | `:ALSnapshotStart` | Begin snapshot debug session |
 | `:ALSnapshotFinish` | End session + download trace |
+| `:ALProfileCapture [dir]` | Arm a profiling schedule on a BC session (prompts for session id and window) |
+| `:ALProfileCollect [dir]` | Stop it, save `.alcpuprofile`s under `.profiles/`, open the viewer |
+| `:ALProfileOpen [file]` | Hot-function viewer (self/total ms per frame; default newest profile) |
+| `:ALSnapshotCapture [dir]` | Arm snapshot debugging through the MCP proxy |
+| `:ALSnapshotCollect [dir]` | Stop it, save archive + decoded summary under `.snapshots/` |
 | `:ALDebugSetup` | Wire nvim-dap for AL attach |
 | `:ALOpenAppJson` | Edit `app.json` |
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
