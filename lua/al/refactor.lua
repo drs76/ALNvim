@@ -1,5 +1,10 @@
 -- AL code refactoring utilities.
--- M.extract_label() — extract a single-quoted string to a Label variable.
+--
+-- Interactive entry points (M.extract_label, M.extract_to_procedure, …) read
+-- the buffer, then call pure string-array functions (M.to_validate,
+-- M.make_var_global, M.add_publishers, …) that take `lines` and return new
+-- lines or (nil, reason). The pure functions are what tests/refactor_spec.lua
+-- exercises; the shared parsers live in M.helpers for lua/al/codeactions.lua.
 
 local M = {}
 local lsp_mod = require("al.lsp")
@@ -390,7 +395,63 @@ function M.rename_object()
   end)
 end
 
-function M.extract_label()
+-- Build a Label declaration. Locked only when asked: a translatable label is
+-- the default, and `Locked = true` used to be emitted unconditionally, so
+-- every extracted label silently dropped out of translation.
+local function label_decl(var_name, text, locked)
+  local d = var_name .. ": Label '" .. text .. "'"
+  if locked then d = d .. ", Locked = true" end
+  return d .. ";"
+end
+
+-- Insert a variable declaration into `lines` (pure; returns new array).
+--   scope = "local"  → the procedure `bounds` (find_proc_bounds result)
+--   scope = "global" → the object-level var block (created before the first
+--                      procedure when absent)
+-- Existing blocks get the declaration appended after their last non-blank
+-- line, at that line's indentation.
+local function insert_var_decl(lines, scope, decl, bounds)
+  local out = vim.deepcopy(lines)
+  local function indent_of(l) return (l or ""):match("^(%s*)") or "" end
+
+  if scope == "global" then
+    local gvar, ins = global_var_info(out)
+    if gvar then
+      local var_end = gvar
+      for i = gvar + 1, ins - 1 do
+        if vim.trim(out[i]) ~= "" then var_end = i end
+      end
+      local ind = (var_end > gvar) and indent_of(out[var_end]) or (indent_of(out[gvar]) .. "    ")
+      table.insert(out, var_end + 1, ind .. decl)
+    else
+      local ind = (ins <= #out) and indent_of(out[ins]) or "    "
+      table.insert(out, ins, ind .. "    " .. decl)
+      table.insert(out, ins, ind .. "var")
+      table.insert(out, ins, "")
+    end
+    return out
+  end
+
+  assert(bounds, "insert_var_decl: local scope needs bounds")
+  local beg_ind  = indent_of(out[bounds.beg])
+  local decl_ind = beg_ind .. "    "
+  if bounds.var then
+    local var_end = bounds.var
+    for i = bounds.var + 1, bounds.beg - 1 do
+      if vim.trim(out[i]) ~= "" then var_end = i end
+    end
+    local ind = (var_end > bounds.var) and indent_of(out[var_end]) or decl_ind
+    table.insert(out, var_end + 1, ind .. decl)
+  else
+    table.insert(out, bounds.beg, decl_ind .. decl)
+    table.insert(out, bounds.beg, beg_ind .. "var")
+  end
+  return out
+end
+
+-- opts.locked → `Locked = true` on the generated Label (default: translatable).
+function M.extract_label(opts)
+  opts = opts or {}
   local bufnr   = vim.api.nvim_get_current_buf()
   local pos     = vim.api.nvim_win_get_cursor(0)
   local lnum    = pos[1]   -- 1-based
@@ -433,67 +494,19 @@ function M.extract_label()
             return
           end
 
-          -- ── 1. Replace all occurrences in body (bottom-up: same line count) ──
+          -- 1. Replace all occurrences in the body (same line count).
           local pat   = "'" .. vim.pesc(text) .. "'"
           local count = 0
-          for i = b.fin, b.beg, -1 do
-            local ln  = buf_lines[i]
-            local n   = 0
-            local new = ln:gsub(pat, function() n = n + 1; return var_name end)
+          for i = b.beg, b.fin do
+            local n = 0
+            buf_lines[i] = buf_lines[i]:gsub(pat, function() n = n + 1; return var_name end)
             count = count + n
-            if new ~= ln then
-              vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { new })
-              buf_lines[i] = new  -- keep in sync for var-block logic below
-            end
           end
 
-          -- ── 2. Insert var declaration ─────────────────────────────────────────
-          local beg_ind  = buf_lines[b.beg]:match('^(%s*)') or '    '
-          local decl_ind = beg_ind .. '    '
-          local label_decl = var_name .. ": Label '" .. text .. "', Locked = true;"
-
-          if is_global then
-            local gvar, ins = global_var_info(buf_lines)
-            if gvar then
-              -- Find last non-blank line in the existing global var block
-              local var_end = gvar
-              for i = gvar + 1, ins - 1 do
-                if vim.trim(buf_lines[i]) ~= '' then var_end = i end
-              end
-              local g_ind = (var_end > gvar)
-                and (buf_lines[var_end]:match('^(%s*)') or decl_ind)
-                or  decl_ind
-              vim.api.nvim_buf_set_lines(bufnr, var_end, var_end, false,
-                { g_ind .. label_decl })
-            else
-              -- Create new global var block just before first procedure
-              local g_var_ind = beg_ind
-              vim.api.nvim_buf_set_lines(bufnr, ins - 1, ins - 1, false, {
-                '',
-                g_var_ind .. 'var',
-                g_var_ind .. '    ' .. label_decl,
-              })
-            end
-          else
-            if b.var then
-              -- Append to existing local var block
-              local var_end = b.var
-              for i = b.var + 1, b.beg - 1 do
-                if vim.trim(buf_lines[i]) ~= '' then var_end = i end
-              end
-              local l_ind = (var_end > b.var)
-                and (buf_lines[var_end]:match('^(%s*)') or decl_ind)
-                or  decl_ind
-              vim.api.nvim_buf_set_lines(bufnr, var_end, var_end, false,
-                { l_ind .. label_decl })
-            else
-              -- No var block: create one before begin
-              vim.api.nvim_buf_set_lines(bufnr, b.beg - 1, b.beg - 1, false, {
-                beg_ind .. 'var',
-                decl_ind .. label_decl,
-              })
-            end
-          end
+          -- 2. Insert the declaration.
+          local decl = label_decl(var_name, text, opts.locked)
+          local new_lines = insert_var_decl(buf_lines, is_global and "global" or "local", decl, b)
+          vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
 
           vim.notify(
             string.format('AL: "%s" → %s (%d occurrence%s)',
@@ -504,8 +517,490 @@ function M.extract_label()
   end)
 end
 
+-- ── Pure refactors (string arrays in, string arrays out) ─────────────────────
+
+-- Split `line` into code and string segments by pairing quotes left to right.
+-- Returns a copy of the line where every quoted span (single or double) is
+-- replaced by spaces of the same length, so pattern matches on the result
+-- never land inside a string, yet positions still map onto the original.
+local function mask_strings(line)
+  local out, i, n = {}, 1, #line
+  while i <= n do
+    local c = line:sub(i, i)
+    if c == "'" or c == '"' then
+      local j = i + 1
+      while j <= n do
+        if line:sub(j, j) == c then
+          if line:sub(j + 1, j + 1) == c then j = j + 2 else break end
+        else
+          j = j + 1
+        end
+      end
+      if j > n then
+        -- unterminated: mask to end of line
+        out[#out + 1] = string.rep(" ", n - i + 1)
+        i = n + 1
+      else
+        out[#out + 1] = string.rep(" ", j - i + 1)
+        i = j + 1
+      end
+    else
+      out[#out + 1] = c
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+-- Parse `X := Y;` on one line. Returns indent, lhs, rhs (all trimmed) or
+-- nil, reason. Compound assignments (+= -= *= /=) are not simple assignments.
+local function parse_assignment(line)
+  local masked = mask_strings(line)
+  if not masked:match(";%s*$") then
+    return nil, "statement does not end on this line (multi-line statements are not supported)"
+  end
+  local s, e = masked:find(":=", 1, true)
+  if not s then
+    if masked:match("[%+%-%*/]=") then return nil, "compound assignment (+= etc.) is not a simple assignment" end
+    return nil, "no `:=` assignment on this line"
+  end
+  if masked:find(":=", e + 1, true) then return nil, "more than one `:=` on this line" end
+  local indent = line:match("^(%s*)")
+  local lhs = vim.trim(line:sub(1, s - 1))
+  local rhs = vim.trim(line:sub(e + 1):gsub(";%s*$", ""))
+  if lhs == "" or rhs == "" then return nil, "incomplete assignment" end
+  return indent, lhs, rhs
+end
+
+-- Split `Rec."Field"` / `Rec.Field` into receiver and member on the last dot
+-- outside quotes. A bare `Field` returns nil receiver.
+local function split_member(expr)
+  local masked = mask_strings(expr)
+  local last = nil
+  local i = 0
+  while true do
+    i = masked:find(".", i + 1, true)
+    if not i then break end
+    last = i
+  end
+  if not last then return nil, expr end
+  return expr:sub(1, last - 1), expr:sub(last + 1)
+end
+
+-- `X := Y;` → `Validate(X, Y);` — with a receiver, `Rec."No." := V;` becomes
+-- `Rec.Validate("No.", V);`. Each line is one statement.
+function M.to_validate(sel_lines)
+  local out = {}
+  for _, line in ipairs(sel_lines) do
+    local indent, lhs, rhs = parse_assignment(line)
+    if not indent then return nil, lhs end
+    local recv, member = split_member(lhs)
+    if recv then
+      out[#out + 1] = string.format("%s%s.Validate(%s, %s);", indent, recv, member, rhs)
+    else
+      out[#out + 1] = string.format("%sValidate(%s, %s);", indent, member, rhs)
+    end
+  end
+  return out
+end
+
+-- `X := Y;` → `Evaluate(X, Y);`
+function M.to_evaluate(sel_lines)
+  local out = {}
+  for _, line in ipairs(sel_lines) do
+    local indent, lhs, rhs = parse_assignment(line)
+    if not indent then return nil, lhs end
+    out[#out + 1] = string.format("%sEvaluate(%s, %s);", indent, lhs, rhs)
+  end
+  return out
+end
+
+-- Move the local variable declared on `cursor` (1-based) to the global var
+-- block. Drops the local `var` keyword when the block becomes empty.
+function M.make_var_global(lines, cursor)
+  local b = find_proc_bounds(lines, cursor)
+  if not b then return nil, "cursor is not inside a procedure or trigger" end
+  if not b.var or cursor <= b.var or cursor >= b.beg then
+    return nil, "cursor is not on a local variable declaration"
+  end
+  local decl = vim.trim(lines[cursor])
+  if not decl:match("^[%a_][%w_]*%s*:") and not decl:match('^"[^"]+"%s*:') then
+    return nil, "line is not a variable declaration"
+  end
+
+  -- Remove the local line (and a now-empty var block) first: both sit below
+  -- the global block, so the global insertion point is unaffected.
+  local out = vim.deepcopy(lines)
+  table.remove(out, cursor)
+  local remaining = false
+  for i = b.var + 1, b.beg - 2 do
+    if vim.trim(out[i]) ~= "" then remaining = true; break end
+  end
+  if not remaining then
+    for i = b.beg - 2, b.var, -1 do table.remove(out, i) end
+  end
+  return insert_var_decl(out, "global", decl)
+end
+
+-- Parse `[local ]procedure Name(params)[: Ret]` on one line. Returns
+-- { name, params = { { text, is_var, name } }, indent } or nil.
+local function parse_proc_header(line)
+  local indent, name, plist = line:match("^(%s*)[Ll]ocal%s+[Pp]rocedure%s+([%w_\"%. ]-)%s*%((.-)%)")
+  if not name then
+    indent, name, plist = line:match("^(%s*)[Pp]rocedure%s+([%w_\"%. ]-)%s*%((.-)%)")
+  end
+  if not name then return nil end
+  local params = {}
+  for p in (plist or ""):gmatch("[^;]+") do
+    p = vim.trim(p)
+    if p ~= "" then
+      local is_var = p:lower():match("^var%s") ~= nil
+      local pname = p:gsub("^[Vv]ar%s+", ""):match("^([^:]+):")
+      params[#params + 1] = { text = p, is_var = is_var, name = vim.trim(pname or p) }
+    end
+  end
+  return { name = name, params = params, indent = indent }
+end
+
+local function codeactions_config()
+  local al = package.loaded["al"]
+  local cfg = al and al.config and al.config.codeactions or {}
+  return {
+    publisher_var_params  = cfg.publisher_var_params ~= false,
+    initialize_is_handled = cfg.initialize_is_handled ~= false,
+  }
+end
+
+-- Add OnBefore<Name>/OnAfter<Name> integration-event publishers for the
+-- procedure whose header is on `hdr_lnum`, and call them from its body.
+--   opts.publisher_var_params  — pass every parameter as `var` (default true)
+--   opts.initialize_is_handled — emit `IsHandled := false;` first (default true)
+function M.add_publishers(lines, hdr_lnum, opts)
+  opts = vim.tbl_extend("keep", opts or {}, codeactions_config())
+  local hdr = parse_proc_header(lines[hdr_lnum] or "")
+  if not hdr then return nil, "line is not a procedure header" end
+  local b = find_proc_bounds(lines, hdr_lnum)
+  if not b or b.hdr ~= hdr_lnum then return nil, "could not find the procedure body" end
+
+  local before_name, after_name = "OnBefore" .. hdr.name, "OnAfter" .. hdr.name
+  for _, l in ipairs(lines) do
+    if l:match("%f[%w_]" .. vim.pesc(before_name) .. "%s*%(") then
+      return nil, before_name .. " already exists"
+    end
+  end
+
+  local sig, args = {}, {}
+  for _, p in ipairs(hdr.params) do
+    local text = p.text
+    if opts.publisher_var_params and not p.is_var then text = "var " .. text end
+    sig[#sig + 1]   = text
+    args[#args + 1] = p.name
+  end
+  local before_sig = vim.deepcopy(sig); before_sig[#before_sig + 1] = "var IsHandled: Boolean"
+  local before_args = vim.deepcopy(args); before_args[#before_args + 1] = "IsHandled"
+
+  local ind      = hdr.indent
+  local body_ind = ind .. "    "
+  local function publisher(name, s)
+    return {
+      "",
+      ind .. "[IntegrationEvent(false, false)]",
+      ind .. "local procedure " .. name .. "(" .. table.concat(s, "; ") .. ")",
+      ind .. "begin",
+      ind .. "end;",
+    }
+  end
+
+  local out = vim.deepcopy(lines)
+  -- Bottom-up: publishers after end; OnAfter call before end; OnBefore block
+  -- after begin; IsHandled declaration in the var block.
+  local tail = publisher(before_name, before_sig)
+  vim.list_extend(tail, publisher(after_name, sig))
+  for i = #tail, 1, -1 do table.insert(out, b.fin + 1, tail[i]) end
+
+  table.insert(out, b.fin, body_ind .. after_name .. "(" .. table.concat(args, ", ") .. ");")
+
+  local head = {}
+  if opts.initialize_is_handled then head[#head + 1] = body_ind .. "IsHandled := false;" end
+  head[#head + 1] = body_ind .. before_name .. "(" .. table.concat(before_args, ", ") .. ");"
+  head[#head + 1] = body_ind .. "if IsHandled then"
+  head[#head + 1] = body_ind .. "    exit;"
+  head[#head + 1] = ""
+  for i = #head, 1, -1 do table.insert(out, b.beg + 1, head[i]) end
+
+  return insert_var_decl(out, "local", "IsHandled: Boolean;", b)
+end
+
+-- Fixed signatures for test handler attributes.
+M.HANDLER_SIGNATURES = {
+  MessageHandler            = "(Message: Text[1024])",
+  ConfirmHandler            = "(Question: Text[1024]; var Reply: Boolean)",
+  StrMenuHandler            = "(Options: Text[1024]; var Choice: Integer; Instruction: Text[1024])",
+  PageHandler               = '(var TestPage: TestPage "MyPage")',
+  ModalPageHandler          = '(var TestPage: TestPage "MyPage")',
+  RequestPageHandler        = '(var RequestPage: TestRequestPage "MyReport")',
+  ReportHandler             = '(var Report: Report "MyReport")',
+  FilterPageHandler         = "(var RecRef: RecordRef): Boolean",
+  SendNotificationHandler   = "(var Notification: Notification): Boolean",
+  RecallNotificationHandler = "(var Notification: Notification): Boolean",
+  HyperlinkHandler          = "(Message: Text[1024])",
+  SessionSettingsHandler    = "(var TestSessionSettings: SessionSettings): Boolean",
+}
+M.HANDLER_KINDS = vim.tbl_keys(M.HANDLER_SIGNATURES)
+table.sort(M.HANDLER_KINDS)
+
+-- From a `[HandlerFunctions('A,B')]` attribute on `cursor`, list the handler
+-- names with no `procedure <Name>(` in `lines`. Returns { missing = {...},
+-- proc_fin = <end line of the attributed test procedure> } or nil, reason.
+function M.missing_handlers(lines, cursor)
+  local line = lines[cursor] or ""
+  local list = line:match("%[HandlerFunctions%s*%(%s*'([^']*)'%s*%)%s*%]")
+  if not list then return nil, "line has no [HandlerFunctions('…')] attribute" end
+  local b = nil
+  for i = cursor + 1, math.min(#lines, cursor + 5) do
+    if is_proc_line(lines[i]) then b = find_proc_bounds(lines, i); break end
+  end
+  if not b then return nil, "no procedure follows the attribute" end
+  local missing = {}
+  for name in list:gmatch("[^,]+") do
+    name = vim.trim(name)
+    if name ~= "" then
+      local found = false
+      for _, l in ipairs(lines) do
+        if l:match("[Pp]rocedure%s+" .. vim.pesc(name) .. "%s*%(") then found = true; break end
+      end
+      if not found then missing[#missing + 1] = name end
+    end
+  end
+  return { missing = missing, proc_fin = b.fin, indent = lines[b.hdr]:match("^(%s*)") or "    " }
+end
+
+-- Insert a stub `[<kind>] procedure <name><signature>` after `after_lnum`.
+function M.create_handler_function(lines, name, kind, after_lnum, indent)
+  local sig = M.HANDLER_SIGNATURES[kind]
+  if not sig then return nil, "unknown handler kind " .. tostring(kind) end
+  indent = indent or "    "
+  local stub = {
+    "",
+    indent .. "[" .. kind .. "]",
+    indent .. "procedure " .. name .. sig,
+    indent .. "begin",
+    indent .. "end;",
+  }
+  local out = vim.deepcopy(lines)
+  for i = #stub, 1, -1 do table.insert(out, after_lnum + 1, stub[i]) end
+  return out
+end
+
+-- Index of the `}` closing the block whose header is on `start` (the `{` may
+-- be on the header line or a following one). Braces inside strings ignored.
+local function block_end(lines, start)
+  local depth, opened = 0, false
+  for i = start, #lines do
+    local m = mask_strings(lines[i])
+    for ch in m:gmatch("[{}]") do
+      if ch == "{" then depth = depth + 1; opened = true
+      else depth = depth - 1 end
+      if opened and depth == 0 then return i end
+    end
+  end
+  return nil
+end
+
+-- Promote the `action(<Name>)` on `cursor`: add an actionref to
+-- `area(Promoted)` of the enclosing `actions` block, creating the area and a
+-- `group(Category_Process)` when absent.
+function M.promote_action(lines, cursor)
+  local name = (lines[cursor] or ""):match("^%s*action%s*%(%s*(.-)%s*%)")
+  if not name or name == "" then return nil, "cursor is not on an action(<Name>) line" end
+  local bare = name:gsub('"', ""):gsub("[^%w_]", "")
+  local ref_name = bare .. "_Promoted"
+
+  local actions_lnum = nil
+  for i = cursor, 1, -1 do
+    if vim.trim(lines[i]):lower() == "actions" then actions_lnum = i; break end
+  end
+  if not actions_lnum then return nil, "no enclosing actions block" end
+  local actions_end = block_end(lines, actions_lnum)
+  if not actions_end or actions_end < cursor then return nil, "could not find the end of the actions block" end
+
+  for i = actions_lnum, actions_end do
+    if lines[i]:match("actionref%s*%(.-;%s*" .. vim.pesc(name) .. "%s*%)") then
+      return nil, name .. " is already promoted"
+    end
+  end
+
+  local a_ind = lines[actions_lnum]:match("^(%s*)") or ""
+  local i1, i2, i3 = a_ind .. "    ", a_ind .. "        ", a_ind .. "            "
+  local out = vim.deepcopy(lines)
+
+  local area_lnum = nil
+  for i = actions_lnum, actions_end do
+    if lines[i]:lower():match("^%s*area%s*%(%s*promoted%s*%)") then area_lnum = i; break end
+  end
+
+  local function ins(at, new)
+    for k = #new, 1, -1 do table.insert(out, at, new[k]) end
+  end
+
+  if not area_lnum then
+    ins(actions_end, {
+      i1 .. "area(Promoted)",
+      i1 .. "{",
+      i2 .. "group(Category_Process)",
+      i2 .. "{",
+      i3 .. "actionref(" .. ref_name .. "; " .. name .. ")",
+      i3 .. "{",
+      i3 .. "}",
+      i2 .. "}",
+      i1 .. "}",
+    })
+    return out
+  end
+
+  local area_end = block_end(lines, area_lnum)
+  if not area_end then return nil, "could not find the end of area(Promoted)" end
+  local group_lnum = nil
+  for i = area_lnum + 1, area_end do
+    if lines[i]:match("^%s*group%s*%(") then group_lnum = i; break end
+  end
+  if group_lnum then
+    local group_end = block_end(lines, group_lnum)
+    local g_ind = lines[group_lnum]:match("^(%s*)") or i2
+    ins(group_end, {
+      g_ind .. "    actionref(" .. ref_name .. "; " .. name .. ")",
+      g_ind .. "    {",
+      g_ind .. "    }",
+    })
+  else
+    ins(area_end, {
+      i2 .. "group(Category_Process)",
+      i2 .. "{",
+      i3 .. "actionref(" .. ref_name .. "; " .. name .. ")",
+      i3 .. "{",
+      i3 .. "}",
+      i2 .. "}",
+    })
+  end
+  return out
+end
+
+-- ── Interactive wrappers over the pure functions ─────────────────────────────
+
+-- Current line in normal mode, '< .. '> in visual / <cmd> from visual.
+local function current_range(l1, l2)
+  if l1 and l2 then return math.min(l1, l2), math.max(l1, l2) end
+  local mode = vim.fn.mode()
+  if mode:match("^[vV\22]") then
+    local s = vim.fn.line("v"); local e = vim.fn.line(".")
+    return math.min(s, e), math.max(s, e)
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  return row, row
+end
+M.current_range = current_range
+
+local function apply_or_warn(bufnr, new_lines, err, what)
+  if not new_lines then
+    vim.notify("AL " .. what .. ": " .. tostring(err), vim.log.levels.WARN)
+    return false
+  end
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+  return true
+end
+
+local function convert_range(fn, what, l1, l2)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local s, e = current_range(l1, l2)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, s - 1, e, false)
+  local new, err = fn(lines)
+  if not new then
+    vim.notify("AL " .. what .. ": " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+  vim.api.nvim_buf_set_lines(bufnr, s - 1, e, false, new)
+end
+
+function M.convert_to_validate(l1, l2) convert_range(M.to_validate, "Validate", l1, l2) end
+function M.convert_to_evaluate(l1, l2) convert_range(M.to_evaluate, "Evaluate", l1, l2) end
+
+function M.make_var_global_at_cursor()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row   = vim.api.nvim_win_get_cursor(0)[1]
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local new, err = M.make_var_global(lines, row)
+  apply_or_warn(bufnr, new, err, "make var global")
+end
+
+function M.add_publishers_at_cursor()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row   = vim.api.nvim_win_get_cursor(0)[1]
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local b = find_proc_bounds(lines, row)
+  if not b then
+    vim.notify("AL add publishers: cursor is not inside a procedure", vim.log.levels.WARN)
+    return
+  end
+  local new, err = M.add_publishers(lines, b.hdr)
+  apply_or_warn(bufnr, new, err, "add publishers")
+end
+
+function M.promote_action_at_cursor()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row   = vim.api.nvim_win_get_cursor(0)[1]
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local new, err = M.promote_action(lines, row)
+  apply_or_warn(bufnr, new, err, "promote action")
+end
+
+-- Cursor on `[HandlerFunctions('A,B')]`: pick a missing handler (when more
+-- than one) and its attribute kind, then insert the stub after the test.
+function M.create_handler()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row   = vim.api.nvim_win_get_cursor(0)[1]
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local info, err = M.missing_handlers(lines, row)
+  if not info then
+    vim.notify("AL create handler: " .. err, vim.log.levels.WARN)
+    return
+  end
+  if #info.missing == 0 then
+    vim.notify("AL create handler: all handlers already exist", vim.log.levels.INFO)
+    return
+  end
+  local function pick_kind(name)
+    vim.ui.select(M.HANDLER_KINDS, { prompt = "Handler attribute for " .. name .. ":" }, function(kind)
+      if not kind then return end
+      vim.schedule(function()
+        local cur = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local new, e = M.create_handler_function(cur, name, kind, info.proc_fin, info.indent)
+        apply_or_warn(bufnr, new, e, "create handler")
+      end)
+    end)
+  end
+  if #info.missing == 1 then
+    pick_kind(info.missing[1])
+  else
+    vim.ui.select(info.missing, { prompt = "Create handler:" }, function(name)
+      if name then pick_kind(name) end
+    end)
+  end
+end
+
+-- Shared parsers for lua/al/codeactions.lua.
+M.helpers = {
+  find_proc_bounds   = find_proc_bounds,
+  global_var_info    = global_var_info,
+  parse_var_map      = parse_var_map,
+  find_quoted_string = find_quoted_string,
+  is_proc_line       = is_proc_line,
+  mask_strings       = mask_strings,
+  parse_proc_header  = parse_proc_header,
+}
+
 -- Pure internals exposed for tests/ only. Not API.
 M._test = { find_quoted_string = find_quoted_string, find_proc_bounds = find_proc_bounds,
-            suggest_name = suggest_name }
+            suggest_name = suggest_name, insert_var_decl = insert_var_decl,
+            label_decl = label_decl, parse_assignment = parse_assignment }
 
 return M

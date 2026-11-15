@@ -130,6 +130,12 @@ M.defaults = {
     pi_env      = {},
   },
 
+  -- Lua code actions (lua/al/codeactions.lua) — :ALAddPublishers options.
+  codeactions = {
+    publisher_var_params  = true,   -- pass every parameter to the publishers as `var`
+    initialize_is_handled = true,   -- emit `IsHandled := false;` before OnBefore…
+  },
+
   -- Optional callback: function(client, bufnr) – called when the AL LSP attaches
   on_attach = nil,
 }

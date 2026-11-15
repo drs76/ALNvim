@@ -22,7 +22,8 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
 | `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping, `M.mcp_call()` one-shot MCP client |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
-| `lua/al/refactor.lua` | Code refactoring: `M.extract_label()` (cursor string → Label var), `M.extract_to_procedure()` (visual selection → local procedure) |
+| `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
+| `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
 | `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
@@ -31,7 +32,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — 45 actions with descriptions; Telescope or `vim.ui.select` fallback |
+| `lua/al/actions.lua` | ALActions picker — 56 actions with descriptions; Telescope or `vim.ui.select` fallback |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
@@ -335,14 +336,16 @@ via PATH: clean build, `.app` produced.
 | `<leader>ab/ap/aP/as` | Compile / Publish / PublishOnly / DownloadSymbols |
 | `<leader>ao/al` | OpenAppJson / OpenLaunchJson |
 | `<leader>aq` | Quickfix list |
-| `<leader>ac/aB` | SelectCops / SelectBrowser |
+| `<leader>aC/aB` | SelectCops / SelectBrowser (SelectCops moved from `<leader>ac` 2026-11-15 — it shadowed the `<leader>ac*` prefix) |
 | `<leader>am/aM` | McpSetup / McpStatus |
 | `<leader>ah/aH/aG` | Help / HelpTopics / Guidelines |
 | `<leader>an/aw/aW` | NewObject / ReportLayout / OpenLayout |
 | `<leader>aR` | GeneratePermissionSet — scan all project objects and create a `.PermissionSet.al` file |
 | `<leader>aN` | AddNamespace — add namespace to all source files |
 | `<leader>aA/aD/ae/af/ag` | Analyze (silent alc pass) / Diff / Explorer / ExplorerProcs / Search |
-| `<leader>aca/acf/acF/acn/acr` | Code actions (all/fix/fixAll/organise/refactor) — `acr` works in visual mode |
+| `<leader>aca/acf/acr` | Code actions via `al.codeactions.pick` (all / quickfix for cursor-line diagnostics / refactor) — `aca`/`acr` work in visual mode; Lua actions always, server actions only with `codeActionProvider` |
+| `<leader>acF/acn` | fixAll / organise namespaces — server-only; notify "not supported by this language server" on the agentic LSP |
+| `<leader>acl` | ExtractLabel (`:ALExtractLockedLabel` for `Locked = true`) |
 | `<leader>ace` | ExtractProcedure — extract visual selection into a new `local procedure` (auto-detects params from var block) |
 | `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
 | `grn` | RenameObject — rename quoted AL identifier project-wide (falls back to LSP rename for unquoted symbols) |
@@ -357,7 +360,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractProcedure`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -557,7 +560,15 @@ PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` �
 
 **V1 limits**: only detects local `var` block vars (not outer procedure params); identifiers inside string literals may false-match.
 
-**`M.extract_label()`** — cursor inside single-quoted string → prompts for Label var name → replaces all occurrences in proc body → inserts `var` declaration (local or global scope).
+**`M.extract_label({ locked })`** — cursor inside single-quoted string → prompts for Label var name → replaces all occurrences in proc body → inserts `var` declaration via `insert_var_decl` (local or global scope). **Default is a translatable label.** Until 2026-11-15 `Locked = true` was emitted unconditionally, so every extracted label silently dropped out of translation; `:ALExtractLockedLabel` / the "Extract to locked Label" action pass `locked = true`.
+
+**Pure refactors take and return string arrays** — `to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `missing_handlers` + `create_handler_function`. They return `(nil, reason)` on refusal; the `*_at_cursor` / `convert_*` wrappers read the buffer and `vim.notify` the reason. `mask_strings(line)` blanks quoted spans (single and double, doubled quote = escape) so `:=`, `.` and `{}` searches never land inside a literal — that is how `Rec.Name := 'a := b';` converts correctly and why `+=` is refused (no `:=` left).
+
+`add_publishers` edits bottom-up: publishers after `end;`, `OnAfter…` call before `end;`, `IsHandled` block after `begin`, then the `IsHandled: Boolean` declaration. Config `setup({ codeactions = { publisher_var_params = true, initialize_is_handled = true } })`, read through `package.loaded["al"]` so the module never requires `al` itself. `promote_action` walks brace blocks (`block_end`) from the enclosing `actions` line; it appends to the first `group` in `area(Promoted)`, else creates `area(Promoted) { group(Category_Process) { … } }`.
+
+## Code actions (`lua/al/codeactions.lua`)
+
+The agentic LSP has no `codeActionProvider`, so `vim.lsp.buf.code_action` did nothing on the user's backend. `M.register({ id, title, kind, applicable(ctx), run(ctx) })` keeps Lua actions; `M.pick({ only, range })` builds `ctx` (`bufnr, root, lines, row, col0, line, sel_start, sel_end, visual, bounds, diagnostics` — cursor-line diagnostics only), filters by `kind` prefix (`"refactor"` matches `"refactor.extract"`), and shows `vim.ui.select`. **It requests `textDocument/codeAction` only when `lsp.client(bufnr).server_capabilities.codeActionProvider` is set** — otherwise the request sits pending forever and the Lua actions never show. Server results are merged with a `[LSP]` prefix. Built-in actions are registered at the bottom of the module (not in refactor.lua, which must not require codeactions). `M._test = { registry, applicable_for }`.
 
 ## Snippets (`lua/al/snippets.lua`)
 

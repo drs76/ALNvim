@@ -187,7 +187,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>ALDownloadSymbols<CR>",  vim.tbl_extend(
 vim.keymap.set("n", "<leader>ao", "<cmd>ALOpenAppJson<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Open app.json" }))
 vim.keymap.set("n", "<leader>al", "<cmd>ALOpenLaunchJson<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open launch.json" }))
 vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
-vim.keymap.set("n", "<leader>ac", "<cmd>ALSelectCops<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Select active code cops" }))
+vim.keymap.set("n", "<leader>aC", "<cmd>ALSelectCops<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Select active code cops" }))
 vim.keymap.set("n", "<leader>aB", "<cmd>ALSelectBrowser<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Select browser for BC launch" }))
 vim.keymap.set("n", "<leader>am", "<cmd>ALMcpSetup<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Configure MCP server for Claude Code" }))
 vim.keymap.set("n", "<leader>aM", "<cmd>ALMcpStatus<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Show configured AL MCP entries" }))
@@ -210,24 +210,33 @@ vim.keymap.set("n", "<leader>av", "<cmd>ALPreviewPage<CR>",  vim.tbl_extend("for
 vim.keymap.set("n", "<leader>aw", "<cmd>ALReportLayout<CR>", vim.tbl_extend("force", opts, { desc = "AL: Report Layout Wizard (Excel/Word/RDLC)" }))
 vim.keymap.set("n", "<leader>aW", "<cmd>ALOpenLayout<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open existing report layout in default app" }))
 vim.keymap.set("n", "<leader>aA", "<cmd>ALAnalyze<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Force re-analysis / refresh diagnostics" }))
--- Code actions
--- <leader>ca (all code actions) is set globally via LspAttach in init.lua
-vim.keymap.set({ "n", "v" }, "<leader>aca", vim.lsp.buf.code_action,
+-- Code actions — lua/al/codeactions.lua. Lua actions always; the server's own
+-- only when the attached client advertises codeActionProvider (the agentic LSP
+-- does not, so plain vim.lsp.buf.code_action was a no-op there).
+local function ca_pick(only)
+  return function() require("al.codeactions").pick({ only = only }) end
+end
+local function ca_server_only(only, what)
+  return function()
+    if not require("al.codeactions").server_supported(0) then
+      vim.notify("AL: " .. what .. " is not supported by this language server", vim.log.levels.WARN)
+      return
+    end
+    vim.lsp.buf.code_action({ context = { only = { only } } })
+  end
+end
+vim.keymap.set({ "n", "v" }, "<leader>aca", ca_pick(nil),
   vim.tbl_extend("force", opts, { desc = "AL: Code actions (all)" }))
-vim.keymap.set("n", "<leader>acf", function()
-  vim.lsp.buf.code_action({ context = { only = { "quickfix" }, diagnostics = vim.diagnostic.get(0) } })
-end, vim.tbl_extend("force", opts, { desc = "AL: Quick fixes for diagnostics on cursor line" }))
-vim.keymap.set("n", "<leader>acF", function()
-  vim.lsp.buf.code_action({ context = { only = { "source.fixAll" } } })
-end, vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fixAll actions in file" }))
-vim.keymap.set("n", "<leader>acn", function()
-  vim.lsp.buf.code_action({ context = { only = { "source.organizeImports" } } })
-end, vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
+vim.keymap.set("n", "<leader>acf", ca_pick("quickfix"),
+  vim.tbl_extend("force", opts, { desc = "AL: Quick fixes for diagnostics on cursor line" }))
+vim.keymap.set("n", "<leader>acF", ca_server_only("source.fixAll", "fix all"),
+  vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fixAll actions in file" }))
+vim.keymap.set("n", "<leader>acn", ca_server_only("source.organizeImports", "organise namespaces"),
+  vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
 vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements (silent, no picker)" }))
-vim.keymap.set({ "n", "v" }, "<leader>acr", function()
-  vim.lsp.buf.code_action({ context = { only = { "refactor" } } })
-end, vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (convert with, promoted actions, interfaces…)" }))
+vim.keymap.set({ "n", "v" }, "<leader>acr", ca_pick("refactor"),
+  vim.tbl_extend("force", opts, { desc = "AL: Refactor actions (extract, Validate, publishers, promote…)" }))
 vim.keymap.set({ "n", "v" }, "<leader>ace", "<cmd>ALExtractProcedure<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Extract selection to new local procedure" }))
 vim.keymap.set("n", "<leader>aI", "<cmd>ALGhostToggle<CR>",

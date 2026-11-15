@@ -73,6 +73,13 @@ After `:ALDebugSetup`, use standard nvim-dap keys (install nvim-dap separately):
 | `gi` | Go to implementation |
 | `<Space>rn` | Rename symbol |
 | `<Space>ca` | Code action (fix suggestion) |
+| `<Space>aca` | AL code actions — Lua refactors + server actions when supported (n/v) |
+| `<Space>acf` | Quick fixes for diagnostics on the cursor line |
+| `<Space>acr` | Refactor actions: extract, Validate/Evaluate, publishers, promote… (n/v) |
+| `<Space>acl` | Extract string to Label (`:ALExtractLockedLabel` for a locked one) |
+| `<Space>ace` | Extract selection to local procedure |
+| `<Space>acF` / `<Space>acn` | Fix all / organise namespaces — server-only (not on the agentic LSP) |
+| `<Space>aC` | Select active code cops (was `<Space>ac`) |
 | `<Space>D` | Open diagnostic details float |
 | `[d` | Jump to previous diagnostic |
 | `]d` | Jump to next diagnostic |
@@ -263,3 +270,10 @@ selectable until you move into it.
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
 | `:ALInfo` | Show project + extension info |
+| `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`); takes a range |
+| `:ALRefactorValidate` / `:ALRefactorEvaluate` | `X := Y;` → `Validate(X, Y);` / `Evaluate(X, Y);` (range) |
+| `:ALExtractLabel` / `:ALExtractLockedLabel` | String under cursor → Label variable (locked variant adds `Locked = true`) |
+| `:ALMakeVarGlobal` | Move local variable under cursor to the global var block |
+| `:ALAddPublishers` | Add OnBefore/OnAfter IntegrationEvent publishers to the current procedure |
+| `:ALPromoteAction` | Add `actionref` for the action under cursor to `area(Promoted)` |
+| `:ALCreateHandler` | Stub a missing test handler named in `[HandlerFunctions]` |
