@@ -36,7 +36,14 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — 70 actions with descriptions; Telescope or `vim.ui.select` fallback |
+| `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, run); Telescope or `vim.ui.select` fallback. `tests/actions_spec.lua` checks every entry runs an existing command |
+| `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` via organizeImports |
+| `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
+| `lua/al/install.lua` | `:ALInstallExtension` / `:ALUpdateExtension` (VSIX from vsassets.io), `:ALInstallDotnetTool` |
+| `lua/al/project.lua` | `:ALNewProject` — AL Go! scaffold, built-in Hello World or extension templates |
+| `lua/al/agent.lua` | `:ALClaude` / `:ALPi` — AI agent terminal split at the project root |
+| `lua/al/textobj.lua` | `af`/`if` procedure and `aF`/`iF` block text objects |
+| `lua/al/ghost.lua` | Inline FIM ghost completions from Ollama (`:ALGhostToggle`, `<M-l>` accept) |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
@@ -279,6 +286,13 @@ names the target and the fallback resolves it:
 - First search per package extracts its sources synchronously (~8s for Base Application);
   `explorer.pending_extracts(root)` gates a "first time only" notice before it.
 
+**Inlay hints.** `agentic_lsp` `on_attach` calls `vim.lsp.inlay_hint.enable(true, { bufnr })`
+when `server_capabilities.inlayHintProvider` is set and `setup({ inlay_hints = true })` (default);
+`:ALInlayHints` toggles per buffer and `:ALInfo` prints the capability. **Probed 2026-11-15 on
+tool 30.0.42: `inlayHintProvider = false`** (`codeActionProvider = false`, `hoverProvider = true`),
+so the enable is a no-op until a tool version advertises it — the capability guard is what keeps
+`:ALInlayHints` from erroring on `textDocument/inlayHint` unsupported.
+
 **Features must not key on `al_language_server`.** `lsp.client(bufnr)` returns whichever AL
 client is attached (`lsp.CLIENT_NAMES`). Format-on-save looked up the EditorServices name
 only, so switching backends silently stopped formatting. Organise-imports and
@@ -357,6 +371,12 @@ via PATH: clean build, `.app` produced.
 | `<leader>aq` | Quickfix list |
 | `<leader>aC/aB` | SelectCops / SelectBrowser (SelectCops moved from `<leader>ac` 2026-11-15 — it shadowed the `<leader>ac*` prefix) |
 | `<leader>am/aM` | McpSetup / McpStatus |
+| `<leader>ai/ak/aI` | Claude Code / Pi agent terminal split / Ghost completions toggle (`<M-l>` accepts) |
+| `<leader>ad` | Diagnostics for the current buffer (Telescope or loclist) |
+| `<leader>av` | PreviewPage |
+| `<leader>acu` | AddUsings — server-only organizeImports |
+| `<leader>rn` | RenameObject (same as `grn`) |
+| `af/if`, `aF/iF` | Text objects: procedure, begin/end block |
 | `<leader>ah/aH/aG` | Help / HelpTopics / Guidelines |
 | `<leader>an/aw/aW` | NewObject / ReportLayout / OpenLayout |
 | `<leader>aR` | GeneratePermissionSet — scan all project objects and create a `.PermissionSet.al` file |
@@ -377,6 +397,7 @@ via PATH: clean build, `.app` produced.
 | `<leader>adp/adP/ado` | ProfileCapture (arm a schedule on a BC session id) / ProfileCollect (save `.alcpuprofile`s, open viewer) / ProfileOpen (newest profile). Under `ad`, not `ap`: `<leader>ap*` would make `<leader>ap` Publish wait on `timeoutlen` |
 | `<leader>adS/adF` | SnapshotCapture / SnapshotCollect — proxy route (`al launchsnapshotmcpproxy`) |
 | `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
+| `<F9>`/`<leader>adb/adB/adc/adq/adi`, `<F10>`/`<F11>`/`<F12>` | nvim-dap: breakpoint / conditional / continue / terminate / inspect, step over / into / over (only when nvim-dap is installed) |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
 | `<C-Space>`/`<Nul>` (insert) | Object ID completion (`<C-x><C-u>`) |
 
@@ -386,7 +407,9 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALSnapshotCapture/Collect [dir]`, `:ALProfileCapture/Collect [dir]`, `:ALProfileOpen [file]`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALRunTests[!] [dir]`, `:ALListTests [dir]`, `:ALDoc [dir]`, `:ALRunObject`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+Every `nvim_create_user_command` in `plugin/al.lua` (plus `:ALClaude`/`:ALPi`/`:ALOllamaChat` from `agent.lua`); `tests/actions_spec.lua` checks the ALActions table against this set. `docs/cheatsheet.md` carries the descriptions.
+
+`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALUpdate`, `:ALUpdateExtension`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -505,7 +528,7 @@ Writes **`<project>/.claude/settings.json`** to spawn `al launchmcpserver` via s
 
 **Never overwrite a settings file you could not parse.** `mcp.read_settings` returns `(data, err)`: `{}` for absent/empty, `nil` plus a reason when the file exists but is invalid JSON. Collapsing those two into `{}` meant one trailing comma in a hand-edited `.claude/settings.json` was read as empty and then rewritten with only `mcpServers` — destroying the user's permissions and hooks. `auto_mcp` reaches this on every `LspAttach`, so opening one `.al` file was enough.
 
-**Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `~/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 8 MCP tools: `al_build`, `al_publish`, `al_debug`, `al_setbreakpoint`, `al_symbolsearch`, `al_downloadsymbols`, `al_snapshotdebugging`.
+**Never write user-facing JSON with bare `json_encode` + `writefile`** — that emits one line and flattens the user's formatting. `<project>/.claude/settings.json` and `.vscode/alnvim.json` go through `require("al.json").write(path, data)`, which indents the encoder's output. `mcp.configure()` also `vim.deep_equal`-checks the existing entry and skips the write when unchanged, because `auto_mcp` calls it on every `LspAttach`. `auto_mcp = true` (default) calls `mcp.configure(root)` once per client on `LspAttach`. Restart Claude Code / run `/mcp` to pick up changes. 13 MCP tools on tool 30.0.42 (`tools/list`, verified 2026-11-15): `al_addproject`, `al_build`, `al_compile`, `al_downloadsymbols`, `al_getdiagnostics`, `al_getnextobjectid`, `al_getpackagedependencies`, `al_inspectpage`, `al_publish`, `al_searchtranslations`, `al_symbolrelations`, `al_symbolsearch`, `al_writetranslation`.
 
 **Proxy entries (opt-in, tool 30+).** `setup({ mcp = { profiling = true, snapshot = true } })`
 (both default off — each is one more process per Claude Code session) makes `configure(root)`
@@ -520,6 +543,14 @@ call. Cloud has no port. UserPassword credentials are referenced as `${AL_BC_USE
 `${VAR}` in `settings.json` `mcpServers.env` is **unverified**. An opted-out proxy's entry is
 left alone by `configure`; `:ALMcpRemove` drops all three keys, `:ALMcpStatus` lists them (`al:`
 sorted first). Same `deep_equal` skip and unparsable-file refusal.
+
+**Deliberately not implemented (Phase 5, 2026-11-15):** `al_getnextobjectid` via `mcp_call`
+(spawns a server per call, and `completefunc` is synchronous — `ids.lua` reads app.json instead);
+JSON schemas for jsonls (editor-config concern, not the plugin's); `useMcpServerForDebugging` /
+`mcpServicePort` wiring beyond the proxy port; `semanticFolding` / `extendGoToSymbol`
+(EditorServices-only settings, meaningless on the agentic LSP); permission sets as XML (legacy
+format, the wizard emits `.al`); `al.incognito` (telemetry opt-out for the extension, not used
+by the tool).
 
 ## Profiling and snapshot proxies (`lua/al/profile.lua`)
 

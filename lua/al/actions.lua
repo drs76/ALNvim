@@ -67,6 +67,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALOpenLayout") end },
 
   -- Refactor / Code ------------------------------------------------------
+  { name = "Inlay Hints",                key = "",            desc = "Toggle LSP inlay hints for this buffer (needs inlayHintProvider)",
+    run = function() vim.cmd("ALInlayHints") end },
   { name = "Ghost Toggle",               key = "<leader>aI",  desc = "Toggle inline AI ghost completions (Ollama FIM, accept with <M-l>)",
     run = function() vim.cmd("ALGhostToggle") end },
   { name = "Rename Object",             key = "grn",         desc = "Rename quoted identifier (object/field name) across all project .al files",
@@ -123,7 +125,7 @@ local ACTIONS = {
     run = function() vim.cmd("ALSelectCops") end },
   { name = "Select Browser",           key = "<leader>aB",  desc = "Choose default browser for BC webclient launch",
     run = function() vim.cmd("ALSelectBrowser") end },
-  { name = "MCP Setup",                key = "<leader>am",  desc = "Write AL MCP server entry to ~/.claude/settings.json",
+  { name = "MCP Setup",                key = "<leader>am",  desc = "Write AL MCP server entry to <project>/.claude/settings.json",
     run = function() vim.cmd("ALMcpSetup") end },
   { name = "MCP Status",               key = "<leader>aM",  desc = "Show configured AL MCP server entries",
     run = function() vim.cmd("ALMcpStatus") end },
@@ -211,5 +213,7 @@ function M.picker()
     end,
   }):find()
 end
+
+M._test = { ACTIONS = ACTIONS }
 
 return M

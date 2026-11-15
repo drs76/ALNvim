@@ -1,0 +1,80 @@
+-- namespace.lua — namespace detection, suggestion and insertion.
+
+local T = require("tests.harness")
+local describe, it, eq, ok = T.describe, T.it, T.eq, T.ok
+local ns = require("al.namespace")
+
+local function project(app)
+  local root = vim.fn.tempname()
+  vim.fn.mkdir(root .. "/src", "p")
+  vim.fn.writefile({ vim.fn.json_encode(app) }, root .. "/app.json")
+  return root
+end
+
+local function write(root, rel, lines)
+  local p = root .. "/" .. rel
+  vim.fn.writefile(lines, p)
+  return p
+end
+
+describe("namespace.suggest_namespace", function()
+  it("joins sanitised publisher and name", function()
+    local root = project({ publisher = "Acme Corp.", name = "My App 2" })
+    eq("AcmeCorp.MyApp2", ns.suggest_namespace(root))
+  end)
+  it("uses whichever part is present", function()
+    eq("Acme", ns.suggest_namespace(project({ publisher = "Acme" })))
+    eq("App", ns.suggest_namespace(project({ name = "App" })))
+    eq("", ns.suggest_namespace(project({})))
+  end)
+end)
+
+describe("namespace.has_namespace", function()
+  it("sees a namespace after a leading comment block", function()
+    local root = project({})
+    local p = write(root, "src/A.al", { "// header", "// more", "", "namespace Acme.App;", "codeunit 1 A { }" })
+    ok(ns.has_namespace(p))
+  end)
+  it("is false without one, and for a word inside an object", function()
+    local root = project({})
+    ok(not ns.has_namespace(write(root, "src/B.al", { "codeunit 1 B { }" })))
+    ok(not ns.has_namespace(write(root, "src/C.al", { "codeunit 1 C {", "  // namespace in a comment is not one", "}" })))
+    ok(not ns.has_namespace(root .. "/missing.al"))
+  end)
+end)
+
+describe("namespace.add_namespace_to_file", function()
+  it("prepends to a file with a leading comment block and keeps it", function()
+    local root = project({})
+    local p = write(root, "src/A.al", { "// Copyright", "// Acme", "codeunit 1 A { }" })
+    eq("added", ns.add_namespace_to_file(p, "Acme.App"))
+    eq({ "namespace Acme.App;", "", "// Copyright", "// Acme", "codeunit 1 A { }" }, vim.fn.readfile(p))
+    ok(ns.has_namespace(p))
+  end)
+  it("skips a file that already has one", function()
+    local root = project({})
+    local p = write(root, "src/A.al", { "namespace X;", "codeunit 1 A { }" })
+    eq("skipped", ns.add_namespace_to_file(p, "Y"))
+    eq({ "namespace X;", "codeunit 1 A { }" }, vim.fn.readfile(p))
+  end)
+  it("normalises CRLF", function()
+    local root = project({})
+    local p = root .. "/src/A.al"
+    local f = io.open(p, "w"); f:write("codeunit 1 A { }\r\n"); f:close()
+    eq("added", ns.add_namespace_to_file(p, "N"))
+    local g = io.open(p, "r"); local s = g:read("*a"); g:close()
+    eq("namespace N;\n\ncodeunit 1 A { }\n", s)
+  end)
+end)
+
+describe("namespace.add_namespace_to_project", function()
+  it("adds to every file without one and counts the rest", function()
+    local root = project({})
+    write(root, "src/A.al", { "codeunit 1 A { }" })
+    write(root, "src/B.al", { "namespace Z;", "codeunit 2 B { }" })
+    local r = ns.add_namespace_to_project(root, "N")
+    eq(1, #r.added)
+    eq(1, r.skipped)
+    eq({}, r.modified)
+  end)
+end)

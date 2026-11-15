@@ -1,7 +1,7 @@
 -- JSON write helpers.
 --
 -- vim.fn.json_encode emits everything on one line. Several files ALNvim writes
--- are user-facing and hand-maintained — ~/.claude/settings.json and the
+-- are user-facing and hand-maintained — <project>/.claude/settings.json and the
 -- per-project .vscode/alnvim.json — so encoding straight to disk silently
 -- flattens whatever formatting the user had. M.write() re-indents first.
 --

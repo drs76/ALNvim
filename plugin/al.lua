@@ -405,7 +405,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- VSCode extension sends: { currentWorkspaceFolderPath: <WorkspaceFolder>, settings: { ... } }
     -- Sending settings at the top level causes silent deserialization failure in the server.
-    -- Auto-configure the AL MCP server in ~/.claude/settings.json (once per client).
+    -- Auto-configure the AL MCP server in <project>/.claude/settings.json (once per client).
     if not client._al_mcp_configured then
       client._al_mcp_configured = true
       local al_cfg = require("al").config
@@ -769,6 +769,11 @@ vim.api.nvim_create_user_command("ALInfo", function()
             local c = lsp_command()
             return c and table.concat(c, " ") or "(none — install extension)"
           end)()),
+    "Inlay hints: " .. (function()
+        local c = lsp.client(vim.api.nvim_get_current_buf())
+        if not c then return "(no AL client attached)" end
+        return c.server_capabilities.inlayHintProvider and "supported" or "not advertised by this server"
+      end)(),
     "Project   : " .. (root or "(not found)"),
   }
   if not root and lsp.last_root_reason then
@@ -1153,6 +1158,18 @@ vim.api.nvim_create_user_command("ALCreateSnippet", function()
 end, {
   desc = "AL: Create user snippet from visual selection",
 })
+
+vim.api.nvim_create_user_command("ALInlayHints", function()
+  local buf = vim.api.nvim_get_current_buf()
+  local client = require("al.lsp").client(buf)
+  if not client or not client.server_capabilities.inlayHintProvider then
+    vim.notify("AL: inlay hints not supported by this language server", vim.log.levels.WARN)
+    return
+  end
+  local on = not vim.lsp.inlay_hint.is_enabled({ bufnr = buf })
+  vim.lsp.inlay_hint.enable(on, { bufnr = buf })
+  vim.notify("AL: inlay hints " .. (on and "on" or "off"), vim.log.levels.INFO)
+end, { desc = "AL: Toggle LSP inlay hints for this buffer" })
 
 vim.api.nvim_create_user_command("ALGhostToggle", function()
   require("al.ghost").toggle()
