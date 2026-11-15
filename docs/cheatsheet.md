@@ -115,6 +115,13 @@ After `:ALDebugSetup`, use standard nvim-dap keys (install nvim-dap separately):
 
 ## Snippets  *(type prefix in insert mode, then `<Tab>` to expand)*
 
+Loaded from the AL extension's own snippet files, then ALNvim's (`terror`,
+`tmessage`, `tconfirm`, `tfindset`, `tsetrange`, `ton*` triggers, `thttpclient`,
+`tjsonparse`), then yours (`:ALCreateSnippet`) — a later file wins on the same
+prefix. The MS snippets below need the extension installed; it also ships
+`treportext`, `tpagecust`, `tprofile`, `tpermissionset`, `tentitlement`,
+`tcontroladdin` and more.
+
 ### Object templates
 
 | Prefix | Object |
@@ -285,7 +292,9 @@ selectable until you move into it.
 | `:ALDebugSetup` | Wire nvim-dap for AL attach |
 | `:ALOpenAppJson` | Edit `app.json` |
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
-| `:ALReloadSnippets` | Reload LuaSnip snippets |
+| `:ALReloadSnippets` | Re-merge extension + ALNvim + user snippets |
+| `:ALNewProject` | New project from the built-in Hello World or an extension template (Agent, Copilot, …) |
+| `:ALNewObject [dir]` | Object wizard — 18 types incl. report/permission-set extensions, profile, page customization, control add-in, entitlement |
 | `:ALInfo` | Show project + extension info |
 | `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`); takes a range |
 | `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file; buffers edited, not written |

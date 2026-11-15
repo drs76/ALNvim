@@ -42,9 +42,8 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
 | `colors/bc_dark.lua` | BC Dark colorscheme |
 | `colors/bc_yellow.lua` | Alias for bc_dark with different `colors_name` — global default in `init.lua` |
-| `snippets/al.json` | VSCode-format snippets (committed, read-only) |
+| `snippets/al.json` | ALNvim-only VSCode-format snippets (committed, read-only) — MS's own come from the extension |
 | `snippets/al-user.json` | User-created snippets via `:ALCreateSnippet`; committed empty seed `{}` |
-| `package.json` | Tells LuaSnip's `from_vscode` loader about both snippet files |
 
 ## Windows compatibility
 
@@ -609,6 +608,23 @@ user on the very first `:w`. Writing it in the right place also means
 AL1075, so every generated project failed its first build until 2026-10-01. MS's
 templates carry `resourceExposurePolicy` only.
 
+**Templates.** The first prompt after the name is the template: "Hello World
+(built-in)" (the path above — always offered, works with no extension) then
+`list_templates()` = `<ext.path>/templates/*/altemplate.json` (Agent, Copilot,
+Copilot with tests, Hello World on 18.x/30.x). `scaffold_template` copies the
+tree byte-exact through `io` (CRLF survives), skipping `altemplate.json`;
+`glob("**/*")` never enters dot-dirs, so `.resources` (agent instructions, test
+datasets) has its own pass. `substitute(text, vars)` handles `{{id+N}}`,
+`{{guidK}}`, `{{projectname}}`, `{{publishername}}`, `{{rootnamespace}}`
+(`root_namespace`, the starter object's derivation); unknown placeholders stay.
+**`vars.guids` is one memo table per project** — `{{guid0}}` is the app id in
+app.json and must be the same value wherever else a file uses it.
+`generateAppJson = false` → the template's own app.json, substituted, and the
+runtime prompt is skipped (the template fixes `application`); `true` →
+`build_app_json` and any template app.json is ignored. launch.json and
+`.alpackages/` as for the built-in. Verified 2026-11-15: Agent template from
+extension 30.0.2863738 + global symbols (27.5) → `al compile` clean.
+
 **`gen_uuid` seeds once per session and draws from `vim.uv.random`.** It used to
 reseed from `os.time() + os.clock()` on every call, which makes the value a
 function of when the call happened rather than of any entropy. This is the
@@ -616,7 +632,11 @@ app.json `id`; BC rejects two extensions claiming the same one.
 
 ## AL Object Wizard (`lua/al/wizard.lua`)
 
-12 types: Table (DataClassification), TableExtension (extends picker), Page (PageType + SourceTable), PageExtension (extends), Codeunit, Report (SourceTable), Query (SourceTable), XmlPort, Enum (Extensible), EnumExtension (extends), Interface (no ID), PermissionSet (auto-generates permissions).
+18 types: Table (DataClassification), TableExtension (extends picker), Page (PageType + SourceTable), PageExtension (extends), Codeunit, Report (SourceTable), Query (SourceTable), XmlPort, Enum (Extensible), EnumExtension (extends), Interface (no ID), PermissionSet (auto-generates permissions), ReportExtension (report picker), PermissionSetExtension (permission set picker), Profile (no ID; Role Center picker — pages with `PageType = RoleCenter`), PageCustomization (no ID; page picker), ControlAddIn (no ID), Entitlement (no ID; permission set picker for `ObjectEntitlements`). Generated objects of every new type compile (checked 2026-11-15, tool 30.0.42).
+
+**ID-less declarations** (`NO_ID_TYPES`: interface, profile, profileextension, pagecustomization, controladdin, entitlement) are recognised by `detect_obj_type`/`find_obj_decl` quoted or bare; the name must start with a quote or word character, so a `Profile = …` property or `Entitlement: Record …` variable is not a declaration. `customizes …` is stripped from the name like `extends …`.
+
+**`organise_file` scope.** Only files at the project root or under `organise_dirs` (`setup({ organise_dirs = { "src" } })`, root-relative) are moved or re-suffixed. It used to act on every AL file under the root, so the first `:w` in an Agent-template project moved `app/Setup/MyAgentSetup.Table.al` to `src/table/` — scrambling the feature layout MS's templates use. Outside the scope both the move *and* the suffix rewrite are skipped.
 
 `M.generate_permissionset(root)` — skips the type picker, goes directly to ID → name → scan. Mirrors VS Code "AL: Generate Permission Set". Calls `run_wizard` with the permissionset entry directly.
 
@@ -721,7 +741,9 @@ EditorServices protocol extension; the tool's CLI replaces it).
 
 ## Snippets (`lua/al/snippets.lua`)
 
-`M.load()` / `M.reload()` — load both `snippets/al.json` (committed, read-only) and `snippets/al-user.json` (user-created) via `from_vscode.load({ paths = { PLUGIN_ROOT } })`. Both files listed in `package.json`; LuaSnip picks them up automatically.
+`M.load()` / `M.reload()` — explicit merge, keyed by prefix, later wins: the extension's `al`-language snippet files (its `package.json` `contributes.snippets`; only when `ext.path` is set) < `snippets/al.json` < `snippets/al-user.json`. Each entry goes through `ls.parser.parse_snippet` and the set is registered with `ls.add_snippets("al", list, { key = "alnvim" })`; the same key replaces the previous set, so `reload()` is a re-run that touches nothing else in the session. Files are read with `json.decode_jsonc`.
+
+**No `package.json` at the repo root.** It made LuaSnip's `from_vscode` loaders (including a user's `lazy_load()`, which scans the runtimepath) load the bundled files a second time beside the merge. **`snippets/al.json` is ALNvim-only** — the 31 copies of MS snippets (`ttable`, `tpage`, `tif`, …) were removed because the extension ships them; without an extension only the 12 ALNvim snippets plus user ones exist.
 
 `M.create_from_selection()` — wizard to create a user snippet from visual selection:
 
@@ -820,7 +842,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (256 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (316 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

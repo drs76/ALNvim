@@ -81,50 +81,104 @@ local function write_user_snippets(data)
   if not ok then error(err) end
 end
 
+-- ── Loading ────────────────────────────────────────────────────────────────
+
+local function read_snippet_file(path)
+  local ok, raw = pcall(vim.fn.readfile, path)
+  if not ok or not raw or #raw == 0 then return {} end
+  local data = require("al.json").decode_jsonc(table.concat(raw, "\n"))
+  return type(data) == "table" and data or {}
+end
+
+-- The extension's AL snippet files, from its package.json
+-- contributes.snippets (language "al" only — it also ships json/xml ones).
+local function ext_snippet_files(ext_path)
+  if not ext_path or ext_path == "" then return {} end
+  local pkg = read_snippet_file(ext_path .. "/package.json")
+  local list = type(pkg.contributes) == "table" and pkg.contributes.snippets or nil
+  local out = {}
+  for _, s in ipairs(type(list) == "table" and list or {}) do
+    if type(s) == "table" and s.language == "al" and type(s.path) == "string" then
+      out[#out + 1] = vim.fs.normalize(ext_path .. "/" .. s.path:gsub("^%./", ""))
+    end
+  end
+  return out
+end
+
+-- Merge VS Code snippet tables, lowest precedence first, keyed by prefix: a
+-- later source's snippet replaces an earlier one with the same trigger. One
+-- entry per prefix (a snippet with a prefix list contributes each).
+-- Returns { [prefix] = { name, prefix, body (string), description } }.
+local function merge(sources)
+  local out = {}
+  for _, src in ipairs(sources) do
+    for name, sn in pairs(src) do
+      if type(sn) == "table" and sn.prefix and sn.body then
+        local body = type(sn.body) == "table" and table.concat(sn.body, "\n") or tostring(sn.body)
+        local prefixes = type(sn.prefix) == "table" and sn.prefix or { sn.prefix }
+        for _, pfx in ipairs(prefixes) do
+          if type(pfx) == "string" and pfx ~= "" then
+            out[pfx] = {
+              name = name, prefix = pfx, body = body,
+              description = type(sn.description) == "string" and sn.description or nil,
+            }
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Extension snippets < snippets/al.json < snippets/al-user.json.
+-- ext_path defaults to the detected extension; false means none.
+local function collect(ext_path)
+  if ext_path == nil then
+    local ok, ext = pcall(require, "al.ext")
+    ext_path = ok and ext.path or nil
+  end
+  local sources = {}
+  for _, f in ipairs(ext_snippet_files(ext_path or nil)) do
+    sources[#sources + 1] = read_snippet_file(f)
+  end
+  sources[#sources + 1] = read_snippet_file(PLUGIN_ROOT .. "/snippets/al.json")
+  sources[#sources + 1] = read_snippet_file(USER_SNIPPET_FILE)
+  return merge(sources)
+end
+
+-- Register the merged set with LuaSnip under one key. add_snippets with the
+-- same key replaces the previous set, so reload() is a re-run that touches no
+-- other filetype's or plugin's snippets.
+local function register(ls, merged)
+  local list = {}
+  local prefixes = vim.tbl_keys(merged)
+  table.sort(prefixes)
+  for _, pfx in ipairs(prefixes) do
+    local sn = merged[pfx]
+    local ok, parsed = pcall(ls.parser.parse_snippet,
+      { trig = pfx, name = sn.name, dscr = sn.description }, sn.body)
+    if ok and parsed then list[#list + 1] = parsed end
+  end
+  ls.add_snippets("al", list, { key = "alnvim" })
+  return #list
+end
+
 function M.load()
   local ok, luasnip = pcall(require, "luasnip")
   if not ok then
     vim.notify("ALNvim: LuaSnip not available – snippets not loaded", vim.log.levels.WARN)
     return
   end
-  require("luasnip.loaders.from_vscode").load({ paths = { PLUGIN_ROOT } })
+  return register(luasnip, collect())
 end
 
--- The two snippet files declared in package.json, in load order.
-local SNIPPET_FILES = {
-  PLUGIN_ROOT .. "/snippets/al.json",
-  USER_SNIPPET_FILE,
-}
-
 function M.reload()
-  local ok = pcall(require, "luasnip")
+  local ok, luasnip = pcall(require, "luasnip")
   if not ok then
     vim.notify("ALNvim: LuaSnip not available", vim.log.levels.WARN)
     return
   end
-
-  -- Reload only our own two files.
-  --
-  -- This used to call luasnip.cleanup(), which drops *every* registered snippet
-  -- in the session — friendly-snippets and any other filetype's set included —
-  -- and then reloaded only the AL paths plus lazy_load(). Anything a config had
-  -- eagerly load()ed was gone until restart, from a plain :ALReloadSnippets or
-  -- an :ALCreateSnippet save.
-  --
-  -- loaders.reload_file() pokes LuaSnip's fs watcher for one path, so the
-  -- reload is scoped to that file and no global state is touched.
-  local ok_loaders, loaders = pcall(require, "luasnip.loaders")
-  if ok_loaders and type(loaders.reload_file) == "function" then
-    for _, path in ipairs(SNIPPET_FILES) do
-      if vim.fn.filereadable(path) == 1 then
-        pcall(loaders.reload_file, path)
-      end
-    end
-  else
-    -- Older LuaSnip without reload_file: re-running load() re-reads the same
-    -- paths. Still far better than cleanup()-ing the whole session.
-    require("luasnip.loaders.from_vscode").load({ paths = { PLUGIN_ROOT } })
-  end
+  register(luasnip, collect())
   vim.notify("ALNvim: Snippets reloaded", vim.log.levels.INFO)
 end
 
@@ -192,5 +246,13 @@ function M.create_from_selection()
     end)
   end)
 end
+
+-- Internals reached by tests/snippets_spec.lua only.
+M._test = {
+  merge             = merge,
+  collect           = collect,
+  register          = register,
+  ext_snippet_files = ext_snippet_files,
+}
 
 return M

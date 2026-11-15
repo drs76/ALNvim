@@ -148,3 +148,119 @@ describe("project name validation", function()
     eq(false, rejected("My App"))
   end)
 end)
+
+describe("project.substitute", function()
+  local function vars()
+    return { id = 50100, projectname = "My App", publishername = "Me",
+             rootnamespace = "Me.MyApp" }
+  end
+
+  it("replaces every placeholder the extension templates use", function()
+    local out = P.substitute(
+      "{{id+0}} {{id+1}} {{id+49}} {{id+149}} {{projectname}} {{publishername}} {{rootnamespace}}",
+      vars())
+    eq("50100 50101 50149 50249 My App Me Me.MyApp", out)
+  end)
+
+  it("turns {{guidK}} into a UUID", function()
+    local out = P.substitute('"id": "{{guid0}}"', vars())
+    ok(out:match('^"id": "%x+%-%x+%-4%x+%-[89ab]%x+%-%x+"$'), out)
+  end)
+
+  it("keeps one guid per index across files of one project", function()
+    -- app.json's {{guid0}} is the app id; a code file referring to {{guid0}}
+    -- must get the same value, not a fresh one.
+    local v = vars()
+    local a = P.substitute("{{guid0}}|{{guid1}}", v)
+    local b = P.substitute("{{guid0}}", v)
+    local g0, g1 = a:match("^(.-)|(.*)$")
+    eq(g0, b)
+    ok(g0 ~= g1, "different indices must differ")
+  end)
+
+  it("leaves unknown placeholders and % in values alone", function()
+    local v = vars(); v.projectname = "100% App"
+    eq("{{nope}} 100% App", P.substitute("{{nope}} {{projectname}}", v))
+  end)
+
+  it("derives the root namespace as the starter object does", function()
+    eq("MyPub.MyApp", P.root_namespace("My-App", "My Pub"))
+    eq("DefaultNamespace", P.root_namespace("App", ""))
+  end)
+end)
+
+-- A fake extension directory with two templates, one with a .resources dir.
+local function fake_ext()
+  local ext = vim.fn.tempname()
+  local function put(rel, text)
+    local p = ext .. "/" .. rel
+    vim.fn.mkdir(vim.fn.fnamemodify(p, ":h"), "p")
+    local f = assert(io.open(p, "wb")); f:write(text); f:close()
+  end
+  put("templates/agent/altemplate.json",
+    '{ "name": "Agent", "description": "Agent template", "generateAppJson": false }')
+  put("templates/agent/app.json",
+    '{ "id": "{{guid0}}", "name": "{{projectname}}", "publisher": "{{publishername}}",'
+    .. ' "idRanges": [ { "from": {{id+0}}, "to": {{id+49}} } ] }')
+  put("templates/agent/app/Setup/MyAgentSetup.Table.al",
+    "namespace {{rootnamespace}};\r\n\r\ntable {{id+0}} \"My Agent Setup\"\r\n{\r\n}\r\n")
+  put("templates/agent/app/Setup/Ref.Codeunit.al", "// {{guid0}}\n")
+  put("templates/agent/.resources/Instructions/InstructionsV1.txt", "Hi {{projectname}}\n")
+  put("templates/Hello World/altemplate.json",
+    '{ "name": "(Preview) Hello World", "generateAppJson": true }')
+  put("templates/Hello World/HelloWorld.al", "pageextension {{id+0}} X extends \"Customer List\" {}\n")
+  put("templates/Hello World/app.json", '{ "should": "not be copied" }')
+  return ext
+end
+
+describe("project.list_templates", function()
+  it("offers only the built-in starter without an extension", function()
+    local list = P.list_templates(false)
+    eq(1, #list)
+    eq("Hello World (built-in)", list[1].name)
+    ok(list[1].builtin)
+  end)
+
+  it("lists the extension's templates after the built-in one", function()
+    local list = P.list_templates(fake_ext())
+    eq({ "Hello World (built-in)", "(Preview) Hello World", "Agent" },
+       vim.tbl_map(function(t) return t.name end, list))
+    eq(false, list[3].generate_app_json)
+    eq(true, list[2].generate_app_json)
+  end)
+end)
+
+describe("project.scaffold_template", function()
+  local function read(p)
+    local f = assert(io.open(p, "rb")); local s = f:read("*a"); f:close(); return s
+  end
+
+  it("copies, substitutes and includes the dot-dir", function()
+    local list = P.list_templates(fake_ext())
+    local dest = vim.fn.tempname()
+    local written = P.scaffold_template(list[3], dest,
+      { name = "My App", publisher = "Me", id_from = 50100 })
+    table.sort(written)
+    eq({ ".resources/Instructions/InstructionsV1.txt", "app.json",
+         "app/Setup/MyAgentSetup.Table.al", "app/Setup/Ref.Codeunit.al" }, written)
+    eq(0, vim.fn.filereadable(dest .. "/altemplate.json"))
+    eq("Hi My App\n", read(dest .. "/.resources/Instructions/InstructionsV1.txt"))
+    -- CRLF survives: io, not readfile/writefile.
+    eq("namespace Me.MyApp;\r\n\r\ntable 50100 \"My Agent Setup\"\r\n{\r\n}\r\n",
+       read(dest .. "/app/Setup/MyAgentSetup.Table.al"))
+    local app = vim.fn.json_decode(read(dest .. "/app.json"))
+    eq(50149, app.idRanges[1].to)
+    eq("// " .. app.id .. "\n", read(dest .. "/app/Setup/Ref.Codeunit.al"))
+  end)
+
+  it("generates app.json when the template asks for it", function()
+    local list = P.list_templates(fake_ext())
+    local dest = vim.fn.tempname()
+    P.scaffold_template(list[2], dest,
+      { name = "H", publisher = "P", id_from = 60000, rv = runtime("16.0") })
+    local app = vim.fn.json_decode(read(dest .. "/app.json"))
+    eq("16.0", app.runtime)
+    eq(60000, app.idRanges[1].from)
+    eq(nil, app.should)
+  end)
+end)
