@@ -318,7 +318,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 |---|---|
 | `:ALActions` | Actions picker — every command below with a description |
 | `:ALInfo` | Extension, tool, LSP backend, inlay-hint support, project root and probing paths |
-| `:ALUpdate` | Pull the latest ALNvim |
+| `:ALUpdate` | Fast-forward this ALNvim checkout from `origin` — only on a clean `master`/`main`; never switches branch; no-op with a warning when `ALNVIM_DEV` is set |
 | `:ALInstallExtension` / `:ALUpdateExtension` | Install / update the MS AL VS Code extension (VSIX) |
 | `:ALInstallDotnetTool` | Install or update the AL dotnet tool |
 | `:ALNewProject` | New project from the built-in Hello World or an extension template (Agent, Copilot, …) |

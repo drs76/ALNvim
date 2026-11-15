@@ -37,14 +37,13 @@ vim.api.nvim_create_user_command("ALInstallDotnetTool", function()
 end, { desc = "Install or update the dotnet AL MCP tool (Microsoft.Dynamics.Nav.Al)" })
 
 -- ── ALUpdate — pull latest ALNvim from GitHub ─────────────────────────────────
+-- Fast-forwards the checkout this file was loaded from. Never switches branch:
+-- refuses on a dirty tree, a non-master/main branch, or when ALNVIM_DEV is set
+-- (a development checkout is updated by hand). See lua/al/update.lua.
 vim.api.nvim_create_user_command("ALUpdate", function()
   local dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h")
-  vim.fn.system({ "git", "-C", dir, "fetch", "origin" })
-  vim.fn.system({ "git", "-C", dir, "checkout", "master" })
-  local out = vim.fn.system({ "git", "-C", dir, "merge", "--ff-only", "origin/master" })
-  vim.notify("ALNvim :ALUpdate\n" .. vim.trim(out),
-    vim.v.shell_error == 0 and vim.log.levels.INFO or vim.log.levels.ERROR)
-end, { desc = "Pull latest ALNvim from GitHub" })
+  require("al.update").run_command(dir)
+end, { desc = "Fast-forward this ALNvim checkout from origin (master/main, clean tree only)" })
 
 -- ── AL Language Server (Microsoft.Dynamics.Nav.EditorServices.Host) ──────────
 -- The binary communicates via standard LSP over stdio.

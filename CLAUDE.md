@@ -39,6 +39,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, run); Telescope or `vim.ui.select` fallback. `tests/actions_spec.lua` checks every entry runs an existing command |
 | `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` via organizeImports |
 | `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
+| `lua/al/update.lua` | `:ALUpdate` — `M.update(dir, { run, getenv })` fast-forwards the running checkout; refuses (no git mutation) on a dirty tree, a non-`master`/`main` branch, or `ALNVIM_DEV` set; every step's exit code checked, success only after `merge --ff-only` exits 0 |
 | `lua/al/install.lua` | `:ALInstallExtension` / `:ALUpdateExtension` (VSIX from vsassets.io), `:ALInstallDotnetTool` |
 | `lua/al/project.lua` | `:ALNewProject` — AL Go! scaffold, built-in Hello World or extension templates |
 | `lua/al/agent.lua` | `:ALClaude` / `:ALPi` — AI agent terminal split at the project root |
@@ -137,6 +138,8 @@ Linux/macOS binaries ship without execute bit. `platform.ensure_executable()` us
 ## Loading / pack setup
 
 `vim.pack.add` defaults `load = false` during `init.lua` — must pass `{ load = true }` to source `plugin/` files. Installed copy at `~/.local/share/nvim/site/pack/core/opt/ALNvim/`; pull dev changes with `git -C ~/.local/share/nvim/site/pack/core/opt/ALNvim pull origin master`.
+
+**`:ALUpdate` never switches branch.** It used to run `fetch` → `checkout master` → `merge --ff-only` and report only the last exit code, so it could pull a feature-branch checkout onto master, merge over uncommitted work, or claim success after a failed fetch. `lua/al/update.lua` now checks `status --porcelain` and the current branch first, stops at the first failing step with that step's output, and is a warning-only no-op whenever `ALNVIM_DEV` is set (a dev checkout is updated by hand). Git is injected (`opts.run`), so `tests/update_spec.lua` covers the whole decision table with a stub plus one real `file://` repo.
 
 ## LSP
 
