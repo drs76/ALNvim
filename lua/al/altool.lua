@@ -216,7 +216,10 @@ end
 -- interactive sign-in instruction (device code / browser URL) for AAD, and a
 -- user who cannot see it just watches a job that never finishes.
 --
--- opts: title, cwd, env. on_exit(ok, code, log, win) runs on the main loop.
+-- opts: title, cwd, env, on_lines(lines) — a per-batch tap on the cleaned output
+-- for callers that parse it (tests.lua turns the pass/fail summary into quickfix)
+-- while the user still watches it live. on_exit(ok, code, log, win) runs on the
+-- main loop.
 function M.run(args, opts, on_exit)
   opts = opts or {}
   local cmd = { M.binary() }
@@ -230,7 +233,12 @@ function M.run(args, opts, on_exit)
       l = l:gsub("\r", "")
       if l ~= "" then clean[#clean + 1] = l end
     end
-    if #clean > 0 then vim.schedule(function() log(clean) end) end
+    if #clean > 0 then
+      vim.schedule(function()
+        log(clean)
+        if opts.on_lines then opts.on_lines(clean) end
+      end)
+    end
   end
   -- Separate carries: stdout and stderr interleave, and sharing one would glue
   -- a partial stdout line onto the start of a stderr one.
@@ -252,6 +260,42 @@ function M.run(args, opts, on_exit)
   if job <= 0 then
     log({ "Failed to start " .. cmd[1] })
     if on_exit then vim.schedule(function() on_exit(false, -1, log, win) end) end
+  end
+end
+
+-- Run `al <args>` and hand the collected output to cb(ok, text, code) on the
+-- main loop — for subcommands whose output is data, not a conversation
+-- (`listtests` prints one JSON document). No float: nothing here can stop for
+-- a sign-in (`--appfile` needs no server). Same line_stream framing as M.run,
+-- with separate stdout/stderr carries, so a JSON document split across chunks
+-- is reassembled intact. opts: cwd, env.
+function M.run_json(args, opts, cb)
+  opts = opts or {}
+  local bin = M.binary()
+  if vim.fn.executable(bin) == 0 then
+    vim.schedule(function() cb(false, M.missing_msg("al " .. (args[1] or "")), -1) end)
+    return
+  end
+  local cmd = { bin }
+  vim.list_extend(cmd, args)
+  local out = {}
+  local function collect(lines)
+    for _, l in ipairs(lines) do out[#out + 1] = (l:gsub("\r", "")) end
+  end
+  local feed_out, flush_out = M.line_stream(collect)
+  local feed_err, flush_err = M.line_stream(collect)
+  local job = vim.fn.jobstart(cmd, {
+    cwd = opts.cwd,
+    env = opts.env,
+    on_stdout = function(_, d) feed_out(d) end,
+    on_stderr = function(_, d) feed_err(d) end,
+    on_exit = function(_, code)
+      flush_out(); flush_err()
+      vim.schedule(function() cb(code == 0, table.concat(out, "\n"), code) end)
+    end,
+  })
+  if job <= 0 then
+    vim.schedule(function() cb(false, "Failed to start " .. bin, -1) end)
   end
 end
 

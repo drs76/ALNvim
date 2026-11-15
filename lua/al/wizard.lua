@@ -1014,6 +1014,7 @@ end
 -- writer, so generated files land where organise_file expects them.
 M.build_path     = build_path
 M.write_and_open = write_and_open
+M.find_obj_decl  = find_obj_decl
 
 M._test = { write_and_open = write_and_open }
 

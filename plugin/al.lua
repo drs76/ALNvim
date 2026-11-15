@@ -782,6 +782,8 @@ vim.api.nvim_create_user_command("ALInfo", function()
       "  symbols : " .. (altool.has("downloadsymbols") and "al downloadsymbols (CLI)"
                          or route("launchmcpserver", "al_downloadsymbols (MCP)")),
       "  MCP     : " .. route("launchmcpserver", "al launchmcpserver"),
+      "  tests   : " .. route("runtests", "al runtests / al listtests (tool 30+)"),
+      "  docs    : " .. route("doc", "al doc build (tool 30+)"),
     })
   else
     vim.list_extend(lines, vim.split(altool.missing_msg("Compile, publish and symbols"), "\n"))
@@ -1092,6 +1094,31 @@ end, { nargs = "?", complete = function() return { "extensible" } end,
 vim.api.nvim_create_user_command("ALFindRelated", function()
   require("al.codeactions").run_only("navigate")
 end, { desc = "AL: Go to related code — event publisher, handler function, table trigger" })
+
+vim.api.nvim_create_user_command("ALRunTests", function(o)
+  require("al.tests").run(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil,
+    { cursor = o.bang })
+end, { nargs = "?", bang = true, complete = "dir",
+       desc = "AL: Run tests via `al runtests` (! = the [Test] procedure under the cursor)" })
+
+vim.api.nvim_create_user_command("ALListTests", function(o)
+  require("al.tests").list(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil,
+    function(list)
+      local lines = {}
+      for _, cu in ipairs(list) do
+        lines[#lines + 1] = ("%d %s: %s"):format(cu.codeunitId, cu.name, table.concat(cu.methods, ", "))
+      end
+      vim.notify(#lines > 0 and table.concat(lines, "\n") or "no test codeunits", vim.log.levels.INFO)
+    end)
+end, { nargs = "?", complete = "dir", desc = "AL: List test codeunits in the built .app (`al listtests`)" })
+
+vim.api.nvim_create_user_command("ALDoc", function(o)
+  require("al.tests").doc(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil)
+end, { nargs = "?", complete = "dir", desc = "AL: Build reference docs into .aldoc (`al doc build`)" })
+
+vim.api.nvim_create_user_command("ALRunObject", function()
+  require("al.tests").run_object()
+end, { desc = "AL: Open the object declared in this buffer in the BC web client" })
 
 vim.api.nvim_create_user_command("ALCreateSnippet", function()
   require("al.snippets").create_from_selection()
