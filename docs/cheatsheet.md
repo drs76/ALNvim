@@ -14,6 +14,10 @@
 | `<Space>ap` | Compile **then** publish `.app` to Business Central |
 | `<Space>aP` | Publish existing `.app` to BC (skip compile) |
 | `<Space>as` | Download symbol packages from BC into `.alpackages/` |
+| `<Space>at` | Run tests — pick a test codeunit (from the built `.app`) then methods; pass/fail → quickfix |
+| `<Space>aT` | Run the `[Test]` procedure under the cursor |
+| `<Space>ar` | Run object — open this page/report/table in the BC web client |
+| `<Space>ax` | Build reference docs with `al doc build` into `.aldoc/` |
 
 ---
 
@@ -276,6 +280,10 @@ selectable until you move into it.
 | `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`); takes a range |
 | `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file; buffers edited, not written |
 | `:ALRefactorToEnum [extensible]` | Option field under cursor → new enum object (`ids.next_id`), field retyped `Enum "Name"` |
+| `:ALRunTests[!] [dir]` | `al runtests --raw` for a picked codeunit/methods (`!` = test under cursor); compiles first when no `.app` |
+| `:ALListTests [dir]` | Test codeunits and methods in the built `.app` (`al listtests --appfile`) |
+| `:ALDoc [dir]` | `al doc build` → `<root>/.aldoc` |
+| `:ALRunObject` | Open the object declared in the buffer in the web client |
 | `:ALFindRelated` | Publisher / handler / table trigger for the cursor line → quickfix (jumps when there is one hit) |
 | `:ALRefactorValidate` / `:ALRefactorEvaluate` | `X := Y;` → `Validate(X, Y);` / `Evaluate(X, Y);` (range) |
 | `:ALExtractLabel` / `:ALExtractLockedLabel` | String under cursor → Label variable (locked variant adds `Locked = true`) |

@@ -239,6 +239,14 @@ vim.keymap.set("n", "<leader>acE", "<cmd>ALRefactorToEnum<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Convert Option field to enum" }))
 vim.keymap.set("n", "<leader>aF", "<cmd>ALFindRelated<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Find related — publisher / handler / table trigger" }))
+vim.keymap.set("n", "<leader>at", "<cmd>ALRunTests<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Run tests — pick codeunit / methods (al runtests)" }))
+vim.keymap.set("n", "<leader>aT", "<cmd>ALRunTests!<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Run the [Test] procedure under the cursor" }))
+vim.keymap.set("n", "<leader>ar", "<cmd>ALRunObject<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Run object — open this page/report/table in the web client" }))
+vim.keymap.set("n", "<leader>ax", "<cmd>ALDoc<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Build reference docs (al doc build → .aldoc)" }))
 vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements (silent, no picker)" }))
 vim.keymap.set({ "n", "v" }, "<leader>acr", ca_pick("refactor"),

@@ -256,3 +256,50 @@ describe("publish.publishapp_args", function()
     eq(false, has_flag(args("/p", {}, "/p/x.app"), "--forceupgrade"))
   end)
 end)
+
+describe("altool.run_json", function()
+  -- A fake `al` that prints a JSON document in two writes (so it arrives in
+  -- separate chunks) plus a stderr line, and exits 0.
+  local function fake_json_tool()
+    local dir  = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local path = dir .. "/al"
+    vim.fn.writefile({
+      "#!/bin/sh",
+      "printf '{\"codeunits\":[{\"id\":1'",
+      "echo 'note' >&2",
+      "printf ',\"name\":\"X\"}]}\\n'",
+    }, path)
+    vim.uv.fs_chmod(path, 493)
+    return dir
+  end
+
+  it("collects the whole output and reports success", function()
+    local home = vim.fn.tempname(); vim.fn.mkdir(home, "p")
+    local dir  = fake_json_tool()
+    with_env({ HOME = home, PATH = dir, USERPROFILE = "", windows = false }, function()
+      local got
+      altool.run_json({ "listtests" }, nil, function(ok_, text, code)
+        got = { ok_, text, code }
+      end)
+      vim.wait(5000, function() return got ~= nil end)
+      ok(got, "callback never ran")
+      eq(true, got[1])
+      eq(0, got[3])
+      -- the JSON line was reassembled across chunks; stderr is included too
+      ok(got[2]:find('{"codeunits":[{"id":1,"name":"X"}]}', 1, true), got[2])
+      ok(got[2]:find("note", 1, true), got[2])
+    end)
+  end)
+
+  it("fails with the missing-tool message when there is no binary", function()
+    local home = vim.fn.tempname(); vim.fn.mkdir(home, "p")
+    with_env({ HOME = home, PATH = home, USERPROFILE = "", windows = false }, function()
+      local got
+      altool.run_json({ "listtests" }, nil, function(ok_, text) got = { ok_, text } end)
+      vim.wait(2000, function() return got ~= nil end)
+      eq(false, got[1])
+      ok(got[2]:find("not found", 1, true), got[2])
+    end)
+  end)
+end)

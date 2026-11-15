@@ -24,6 +24,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
+| `lua/al/tests.lua` | Test running through the tool: `M.list` (`al listtests --appfile`), `M.run` (`al runtests --raw` → quickfix; `:ALRunTests!` = test under cursor), `M.doc` (`al doc build` → `.aldoc`), `M.run_object` (web-client URL for the buffer's object). Parsers under `M._test` |
 | `lua/al/fixes.lua` | Diagnostic quick fixes (Create procedure, AA0137/AA0206/AA0008, `:ALFixCops`), Option→enum refactor, related-code navigation; pure helpers under `M._test`, registered as actions by codeactions.lua |
 | `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
@@ -33,7 +34,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — 56 actions with descriptions; Telescope or `vim.ui.select` fallback |
+| `lua/al/actions.lua` | ALActions picker — 65 actions with descriptions; Telescope or `vim.ui.select` fallback |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
@@ -349,6 +350,9 @@ via PATH: clean build, `.app` produced.
 | `<leader>acx/acE` | FixCops (apply every AA0137/AA0206/AA0008 fix project-wide) / RefactorToEnum (Option field → enum) |
 | `<leader>aF` | FindRelated — publisher for `[EventSubscriber]`, handlers for `[HandlerFunctions]`, table trigger for `Rec.Insert()` |
 | `<leader>acl` | ExtractLabel (`:ALExtractLockedLabel` for `Locked = true`) |
+| `<leader>at/aT` | RunTests (pick codeunit → methods) / RunTests! (the `[Test]` procedure under the cursor) |
+| `<leader>ar` | RunObject — open the buffer's page/report/table/query in the web client |
+| `<leader>ax` | Doc — `al doc build` reference docs into `<root>/.aldoc` |
 | `<leader>ace` | ExtractProcedure — extract visual selection into a new `local procedure` (auto-detects params from var block) |
 | `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
 | `grn` | RenameObject — rename quoted AL identifier project-wide (falls back to LSP rename for unquoted symbols) |
@@ -363,7 +367,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALRunTests[!] [dir]`, `:ALListTests [dir]`, `:ALDoc [dir]`, `:ALRunObject`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -610,6 +614,40 @@ start of alc's message) and `source = "alc"`; the LSP client sets `code` itself.
 `target_at_cursor`; `wizard.lua` exports `build_path`, `write_and_open`. Those are the one
 hover/object-lookup and one file-naming path — do not duplicate them in fixes.lua.
 
+## Tests, docs and run object (`lua/al/tests.lua`)
+
+All three are tool 30+ subcommands; `need(subcmd)` goes through `altool.has` and names
+`:ALInstallDotnetTool` when missing. No extension fallback (VS Code's test runner is an
+EditorServices protocol extension; the tool's CLI replaces it).
+
+- **Discovery is offline.** `al listtests --appfile <built .app> --project <root>` reads the
+  test codeunits out of the package through `altool.run_json` (collected, no float — nothing
+  here can prompt for a sign-in). No `.app` → `compile.compile(root, nil, cb)` first; the
+  `.app` is located with `publish.find_app`. Output is one JSON document:
+  `{"codeunits":[{"id":50130,"name":"My Tests","methods":[{"name":"X","isDataDriven":false}]}]}`
+  (captured on tool 30.0.42; fixture in `tests/tests_spec.lua`).
+- **Running streams.** `al runtests <id> --project <root> --raw [--testmethods M]… <connection
+  flags>` through `altool.run` with `altool.cred_env(cfg)`, because AAD can stop for a device
+  code. `--testmethods` is a `string[]` option: **repeat the flag per method**, do not
+  comma-join. `altool.run` gained `opts.on_lines`, a tap on the cleaned output, so the parser
+  sees the same lines the user watches. The `--raw` summary format comes from decompiling
+  `TestRunService.FormatResponse` (bc2 was down during Phase 2, so it is **not verified
+  live**): `===== Codeunit N =====`, `  PASS|FAIL|SKIP Name (Nms)`, a 7-space-indented error
+  line under a FAIL, and `Test run completed: P passed, F failed, S skipped.` per codeunit
+  and again as the final total. **When anything failed the whole summary is written to
+  stderr behind `Test run failed: `**, so `parse_runtests` strips that prefix on every line
+  and takes the totals from the *last* summary line. Results map to quickfix by scanning
+  project files for `codeunit <id>` then `procedure <Method>(`.
+- **Cursor variant** (`:ALRunTests!`): codeunit from `wizard.find_obj_decl` (exported for
+  this), method from `refactor.helpers.find_proc_bounds` and a walk up through the attribute
+  lines (`[HandlerFunctions(...)]` may sit between `[Test]` and the header).
+- **`al doc build -s <app> -o <root>/.aldoc -c <cache>`** emits a docfx YAML tree
+  (`reference/<app>/toc.yml`, one `.yml` per object) — no HTML. `:ALDoc` opens an
+  `index.html` if one ever appears, else notifies the folder.
+- **`:ALRunObject`** builds on `conn.webclient_url(cfg)` but replaces its startup-object
+  query (`?page=50100&tenant=default`; cloud has no tenant parameter). Types: page, report,
+  table, query, xmlport, codeunit; extensions are refused with a reason.
+
 ## Snippets (`lua/al/snippets.lua`)
 
 `M.load()` / `M.reload()` — load both `snippets/al.json` (committed, read-only) and `snippets/al-user.json` (user-created) via `from_vscode.load({ paths = { PLUGIN_ROOT } })`. Both files listed in `package.json`; LuaSnip picks them up automatically.
@@ -711,7 +749,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (180 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (256 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
