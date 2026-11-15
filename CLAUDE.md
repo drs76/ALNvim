@@ -24,6 +24,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
+| `lua/al/fixes.lua` | Diagnostic quick fixes (Create procedure, AA0137/AA0206/AA0008, `:ALFixCops`), Option→enum refactor, related-code navigation; pure helpers under `M._test`, registered as actions by codeactions.lua |
 | `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
@@ -345,6 +346,8 @@ via PATH: clean build, `.app` produced.
 | `<leader>aA/aD/ae/af/ag` | Analyze (silent alc pass) / Diff / Explorer / ExplorerProcs / Search |
 | `<leader>aca/acf/acr` | Code actions via `al.codeactions.pick` (all / quickfix for cursor-line diagnostics / refactor) — `aca`/`acr` work in visual mode; Lua actions always, server actions only with `codeActionProvider` |
 | `<leader>acF/acn` | fixAll / organise namespaces — server-only; notify "not supported by this language server" on the agentic LSP |
+| `<leader>acx/acE` | FixCops (apply every AA0137/AA0206/AA0008 fix project-wide) / RefactorToEnum (Option field → enum) |
+| `<leader>aF` | FindRelated — publisher for `[EventSubscriber]`, handlers for `[HandlerFunctions]`, table trigger for `Rec.Insert()` |
 | `<leader>acl` | ExtractLabel (`:ALExtractLockedLabel` for `Locked = true`) |
 | `<leader>ace` | ExtractProcedure — extract visual selection into a new `local procedure` (auto-detects params from var block) |
 | `<leader>acs` | CreateSnippet — wizard to save visual selection as a user snippet to `snippets/al-user.json` |
@@ -360,7 +363,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 ## User commands
 
-`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
+`:ALNewProject`, `:ALInstallExtension`, `:ALUpdateExtension`, `:ALInstallDotnetTool`, `:ALCompile [dir]`, `:ALPublish [dir]`, `:ALPublishOnly [dir]`, `:ALDownloadSymbols [dir]`, `:ALDownloadSymbolsGlobal [dir]`, `:ALSetNuGetFeeds [dir]`, `:ALLaunch [dir]`, `:ALSnapshotStart/Finish`, `:ALDebugSetup`, `:ALDapOutput`, `:ALDapClose`, `:ALHelp [url]`, `:ALHelpTopics`, `:ALGuidelines`, `:ALNewObject [dir]`, `:ALGeneratePermissionSet [dir]`, `:ALReportLayout`, `:ALOpenLayout`, `:ALExplorer [dir]`, `:ALExplorerReopen`, `:ALExplorerProcs`, `:ALSearch [dir]`, `:ALNextId`, `:ALAnalyze`, `:ALReindex`, `:ALAddNamespace [dir]`, `:ALDiff [dir]`, `:ALSelectCops`, `:ALSelectBrowser`, `:ALMcpSetup/Remove/Status [dir]`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALReloadSnippets`, `:ALClearCredentials`, `:ALRenameObject`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALCodeAction [kind]`, `:ALRefactorValidate`, `:ALRefactorEvaluate`, `:ALMakeVarGlobal`, `:ALAddPublishers`, `:ALPromoteAction`, `:ALCreateHandler`, `:ALFixCops [dir]`, `:ALRefactorToEnum [extensible]`, `:ALFindRelated`, `:ALCreateSnippet`, `:ALActions`, `:ALInfo`, `:ALUpdate`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -569,6 +572,43 @@ PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` �
 ## Code actions (`lua/al/codeactions.lua`)
 
 The agentic LSP has no `codeActionProvider`, so `vim.lsp.buf.code_action` did nothing on the user's backend. `M.register({ id, title, kind, applicable(ctx), run(ctx) })` keeps Lua actions; `M.pick({ only, range })` builds `ctx` (`bufnr, root, lines, row, col0, line, sel_start, sel_end, visual, bounds, diagnostics` — cursor-line diagnostics only), filters by `kind` prefix (`"refactor"` matches `"refactor.extract"`), and shows `vim.ui.select`. **It requests `textDocument/codeAction` only when `lsp.client(bufnr).server_capabilities.codeActionProvider` is set** — otherwise the request sits pending forever and the Lua actions never show. Server results are merged with a `[LSP]` prefix. Built-in actions are registered at the bottom of the module (not in refactor.lua, which must not require codeactions). `M._test = { registry, applicable_for }`.
+
+## Diagnostic quick fixes and navigation (`lua/al/fixes.lua`)
+
+Actions keyed on **`diagnostic.code`** of the cursor line, registered in codeactions.lua with
+kind `quickfix`. `compile.push_diagnostics` sets `code = "ALxxxx"/"AAxxxx"` (parsed from the
+start of alc's message) and `source = "alc"`; the LSP client sets `code` itself. Until
+2026-11-15 the alc namespace carried no `code`, so nothing could key on it.
+
+- **Create procedure** (`AL0118`/`AL0132`): `parse_call_args` splits the call at the diagnostic
+  column on top-level commas (quotes and bracket nesting respected — `Foo(Cust, 'a,b', Qty + 1)`
+  is three args). Types: literals by shape, identifiers by **hover** (`basedef.hover_text`,
+  all in parallel, 1.5s timeout, else `Variant`); Record params are `var`. Unqualified →
+  `local procedure` after the enclosing procedure; `Qualifier.Name(...)` → hover the qualifier,
+  `basedef.find_object`, and insert only when the file is **under the project root** — a
+  symbol-package stub is a read-only extracted copy. No return type.
+- **AA0137** removes the declaration (one name from a `a, b: T` list), and the `var` keyword
+  when nothing is left under it. **AA0206** removes a single-line `:=` statement. **AA0008**
+  inserts `()` after the identifier at the column (falls back to the quoted name in the message).
+- **`:ALFixCops`** — `compile.analyze_diagnostics(root, on_done)` (the `on_done(qf)` callback
+  was added for this; a cancelled run never calls it), then every fix **bottom-up per file**
+  on loaded buffers, not written; quickfix lists what changed.
+- **Option → enum** (`:ALRefactorToEnum [extensible]`): `option_to_enum` parses the enclosing
+  `field(...)` block, `OptionMembers` (quoted members, `" "` blank) and `OptionCaption`
+  (used only when the count matches), retypes the field `Enum "Name"`, drops both properties,
+  and the enum is written through `wizard.build_path` + `write_and_open` with
+  `ids.next_id(root, "enum")`. The field buffer is edited **before** `write_and_open` switches
+  to the new file.
+- **Navigation** (kind `navigate`, `:ALFindRelated` runs the single applicable one):
+  `[EventSubscriber(..., 'Event', ...)]` → rg `--multiline` for an `IntegrationEvent|BusinessEvent`
+  attribute followed by `procedure "?Event"?\s*\(` over `explorer.build_search_dirs` — the `(`
+  boundary is what stops `OnX` matching `OnXY`; `[HandlerFunctions('A,B')]` → `procedure A(` in
+  the project; `Rec.Insert/Modify/Delete/Rename(` → hover the qualifier, `find_object`, then
+  `basedef.member_line` for the trigger. Results go to quickfix; one hit jumps.
+
+`basedef.lua` exports `hover_text`, `find_object`, `parse_hover`, `member_line`,
+`target_at_cursor`; `wizard.lua` exports `build_path`, `write_and_open`. Those are the one
+hover/object-lookup and one file-naming path — do not duplicate them in fixes.lua.
 
 ## Snippets (`lua/al/snippets.lua`)
 

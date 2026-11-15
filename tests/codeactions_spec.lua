@@ -141,3 +141,247 @@ describe("codeactions.pick", function()
     lsp.client = o
   end)
 end)
+
+-- ── Phase 4: diagnostic quick fixes, enum refactor, navigation ───────────────
+
+local F = CA._test.fixes
+
+describe("fixes.parse_call_args", function()
+  it("splits arguments on top-level commas only", function()
+    local c = F.parse_call_args("Foo(Cust, 'a,b', Qty + 1)")
+    eq("Foo", c.name)
+    eq(nil, c.qualifier)
+    eq({ "Cust", "'a,b'", "Qty + 1" }, vim.tbl_map(function(a) return a.text end, c.args))
+  end)
+
+  it("keeps nested calls together and records the qualifier", function()
+    local c = F.parse_call_args('    Mgt.Post(Rec, Format(Today(), 0), "Sales Header");', 9)
+    eq("Post", c.name)
+    eq("Mgt", c.qualifier)
+    eq({ "Rec", "Format(Today(), 0)", '"Sales Header"' }, vim.tbl_map(function(a) return a.text end, c.args))
+    eq(14, c.args[1].s)  -- 1-based column of the first argument
+  end)
+
+  it("picks the call under the column, not the first one", function()
+    local line = "    A(1); B(2, 3);"
+    local col = line:find("B%(")
+    local c = F.parse_call_args(line, col)
+    eq("B", c.name)
+    eq(2, #c.args)
+  end)
+
+  it("returns an empty list for a parameterless call", function()
+    eq({}, F.parse_call_args("Foo()").args)
+  end)
+end)
+
+describe("fixes.create_procedure_text", function()
+  it("uses hovered types, var for records, Variant when unknown", function()
+    local call = F.parse_call_args("Foo(Cust, 'a,b', Qty + 1, Amount)")
+    local params = F.params_from(call, { "Record Customer", nil, nil, "Decimal" })
+    eq({
+      "    local procedure Foo(var Cust: Record Customer; Arg2: Text; Arg3: Variant; Amount: Decimal)",
+      "    begin",
+      "        ",
+      "    end;",
+    }, F.create_procedure_text("Foo", params, "    ", true))
+  end)
+
+  it("reads the type out of a hover and drops the namespace", function()
+    eq("Record Customer", F.hover_type("```al\n(local) Cust: Record Customer\n```"))
+    eq('Record "Sales Header"', F.hover_type('```al\n(parameter) SH: Record Microsoft.Sales.Document."Sales Header" temporary\n```'))
+    eq("Code[20]", F.hover_type("```al\n(field) \"No.\": Code[20]\n```"))
+    eq(nil, F.hover_type("```al\nTable Customer\n```"))
+  end)
+
+  it("inserts after the enclosing procedure", function()
+    local src = {
+      'codeunit 1 "X"', '{', '    procedure P()', '    begin', '        Foo(1);', '    end;', '}',
+    }
+    local out = F.insert_procedure(src, 5, { "    local procedure Foo(Arg1: Integer)", "    begin", "        ", "    end;" })
+    eq({
+      'codeunit 1 "X"', '{', '    procedure P()', '    begin', '        Foo(1);', '    end;',
+      '', '    local procedure Foo(Arg1: Integer)', '    begin', '        ', '    end;', '}',
+    }, out)
+  end)
+end)
+
+describe("fixes.cop quick fixes", function()
+  local src = {
+    'codeunit 1 "X"',            -- 1
+    '{',                         -- 2
+    '    procedure P()',         -- 3
+    '    var',                   -- 4
+    '        Unused: Integer;',  -- 5
+    '    begin',                 -- 6
+    '        Rec.Reset;',        -- 7
+    '        Unused := 1;',      -- 8
+    '    end;',                  -- 9
+    '}',                         -- 10
+  }
+
+  it("AA0137 removes the variable and collapses an emptied var block", function()
+    local out = F.remove_unused_var(src, 5, "Unused")
+    eq({ 'codeunit 1 "X"', '{', '    procedure P()', '    begin', '        Rec.Reset;',
+         '        Unused := 1;', '    end;', '}' }, out)
+  end)
+
+  it("AA0137 keeps var when other declarations remain", function()
+    local s2 = vim.deepcopy(src)
+    table.insert(s2, 6, '        Other: Text;')
+    local out = F.remove_unused_var(s2, 5, "Unused")
+    eq('    var', out[4])
+    eq('        Other: Text;', out[5])
+  end)
+
+  it("AA0137 drops one name from a comma list", function()
+    local s2 = vim.deepcopy(src)
+    s2[5] = '        Unused, Kept: Integer;'
+    eq('        Kept: Integer;', F.remove_unused_var(s2, 5, "Unused")[5])
+  end)
+
+  it("AA0137 refuses a line that is not a declaration", function()
+    local out, why = F.remove_unused_var(src, 8, "Unused")
+    eq(nil, out)
+    ok(why:match("declaration"))
+  end)
+
+  it("AA0206 removes the assignment line", function()
+    eq('    end;', F.remove_assignment(src, 8)[8])
+    local out = F.remove_assignment(src, 7)
+    eq(nil, out)
+  end)
+
+  it("AA0008 inserts () after the identifier at the column", function()
+    local col = src[7]:find("Reset")
+    eq('        Rec.Reset();', F.add_parens(src, 7, col, "Reset")[7])
+    local out, why = F.add_parens({ "    Rec.Reset();" }, 1, 9, "Reset")
+    eq(nil, out)
+    ok(why:match("already"))
+  end)
+
+  it("apply_cop_fix dispatches on diagnostic.code", function()
+    local d = { code = "AA0137", lnum = 4, col = 8, message = "The variable 'Unused' is declared but never used." }
+    eq(8, #F.apply_cop_fix(src, d))
+  end)
+end)
+
+describe("fixes.option_to_enum", function()
+  local src = {
+    'table 50100 "Doc"',                                            -- 1
+    '{',                                                            -- 2
+    '    fields',                                                   -- 3
+    '    {',                                                        -- 4
+    '        field(1; Status; Option)',                             -- 5
+    '        {',                                                    -- 6
+    "            Caption = 'Status';",                              -- 7
+    '            OptionMembers = " ",Open,Released,"Pending Approval";',  -- 8
+    "            OptionCaption = ' ,Open,Released,Pending Approval';",    -- 9
+    '        }',                                                    -- 10
+    '    }',                                                        -- 11
+    '}',                                                            -- 12
+  }
+
+  it("retypes the field, drops the Option properties and builds the enum", function()
+    local out, etext, values = F.option_to_enum(src, 8, { name = "Doc Status", id = 50100, extensible = false })
+    eq('        field(1; Status; Enum "Doc Status")', out[5])
+    eq("            Caption = 'Status';", out[7])
+    eq('        }', out[8])
+    eq(4, #values)
+    eq({ ord = 3, name = "Pending Approval", caption = "Pending Approval" }, values[4])
+    ok(etext:find('enum 50100 "Doc Status"', 1, true), etext)
+    ok(etext:find("Extensible = false;", 1, true), etext)
+    ok(etext:find('value(0; " ")', 1, true), etext)
+    ok(etext:find('value(3; "Pending Approval")', 1, true), etext)
+    ok(etext:find("Caption = 'Released';", 1, true), etext)
+  end)
+
+  it("refuses a non-Option field", function()
+    local s2 = vim.deepcopy(src)
+    s2[5] = '        field(1; Status; Code[10])'
+    local out, why = F.option_to_enum(s2, 7, { name = "X", id = 1 })
+    eq(nil, out)
+    ok(why:match("Option"))
+  end)
+
+  it("field_block spans header to closing brace", function()
+    eq({ s = 5, e = 10, name = "Status" }, F.field_block(src, 9))
+    eq(nil, F.field_block(src, 3))
+  end)
+end)
+
+describe("fixes.navigation patterns", function()
+  it("parses subscriber and handler attributes", function()
+    eq({ event = "OnAfterPostSalesDoc", element = "" },
+       F.parse_subscriber("    [EventSubscriber(ObjectType::Codeunit, Codeunit::\"Sales-Post\", 'OnAfterPostSalesDoc', '', false, false)]"))
+    eq({ "MsgHandler", "ConfirmHandler" }, F.parse_handlers("    [HandlerFunctions('MsgHandler,ConfirmHandler')]"))
+    eq(nil, F.parse_handlers("    [Test]"))
+  end)
+
+  it("finds the record method under the cursor", function()
+    local line = "        if Cust.Insert(true) then"
+    local rc = F.record_call_at(line, line:find("Insert") - 1)
+    eq("Cust", rc.qualifier)
+    eq("OnInsert", rc.trigger)
+    eq(nil, F.record_call_at("        Cust.Get(No);", 10))
+  end)
+
+  it("publisher pattern matches a two-line attribute + procedure, not OnXY", function()
+    if vim.fn.executable("rg") ~= 1 then return end
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({
+      'codeunit 80 "Sales-Post"',
+      '{',
+      '    [IntegrationEvent(false, false)]',
+      '    local procedure OnAfterPostSalesDoc(var SalesHeader: Record "Sales Header")',
+      '    begin',
+      '    end;',
+      '',
+      '    [IntegrationEvent(false, false)]',
+      '    local procedure OnAfterPostSalesDocXY()',
+      '    begin',
+      '    end;',
+      '',
+      '    [BusinessEvent(false)]',
+      '    procedure OnAfterPostSalesDocDropShipment(SalesHeader: Record "Sales Header")',
+      '    begin',
+      '    end;',
+      '',
+      '    procedure OnAfterPostSalesDoc()',   -- no attribute: not a publisher
+      '    begin',
+      '    end;',
+      '}',
+    }, dir .. "/SalesPost.Codeunit.al")
+    local out = vim.fn.systemlist({ "rg", "-n", "-i", "--multiline", "--no-heading",
+      "-e", F.publisher_pattern("OnAfterPostSalesDoc"), dir })
+    local procs = vim.tbl_filter(function(l) return l:find("procedure", 1, true) end, out)
+    eq(1, #procs, vim.inspect(out))
+    ok(procs[1]:match("^.-:4:"), procs[1])
+    vim.fn.delete(dir, "rf")
+  end)
+end)
+
+describe("codeactions quickfix applicability", function()
+  it("offers fixes by diagnostic code on the cursor line", function()
+    local src = { 'codeunit 1 "X"', '{', '    procedure P()', '    var', '        U: Integer;',
+                  '    begin', '        Foo(1);', '    end;', '}' }
+    local ctx = ctx_for(src, 7, 8)
+    ctx.diagnostics = { { code = "AL0118", lnum = 6, col = 8, message = "The name 'Foo' does not exist" } }
+    eq({ "create_procedure" }, ids(CA._test.applicable_for(ctx, "quickfix")))
+    ctx.diagnostics = { { code = "AA0137", lnum = 4, col = 8, message = "x" } }
+    eq({ "remove_unused_var" }, ids(CA._test.applicable_for(ctx, "quickfix")))
+    ctx.diagnostics = {}
+    eq({}, ids(CA._test.applicable_for(ctx, "quickfix")))
+  end)
+
+  it("offers navigation on subscriber lines and option-to-enum in Option fields", function()
+    local sub = { 'codeunit 1 "X"', '{', "    [EventSubscriber(ObjectType::Table, Database::Customer, 'OnAfterInsertEvent', '', false, false)]",
+                  '    local procedure H()', '    begin', '    end;', '}' }
+    eq({ "find_publisher" }, ids(CA._test.applicable_for(ctx_for(sub, 3, 0), "navigate")))
+    local tbl = { 'table 1 T', '{', '    fields', '    {', '        field(1; S; Option)', '        {',
+                  '            OptionMembers = A,B;', '        }', '    }', '}' }
+    local r = ids(CA._test.applicable_for(ctx_for(tbl, 7, 0), "refactor"))
+    ok(vim.tbl_contains(r, "option_to_enum") and vim.tbl_contains(r, "option_to_extensible_enum"), vim.inspect(r))
+  end)
+end)

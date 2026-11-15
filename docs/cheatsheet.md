@@ -74,7 +74,10 @@ After `:ALDebugSetup`, use standard nvim-dap keys (install nvim-dap separately):
 | `<Space>rn` | Rename symbol |
 | `<Space>ca` | Code action (fix suggestion) |
 | `<Space>aca` | AL code actions — Lua refactors + server actions when supported (n/v) |
-| `<Space>acf` | Quick fixes for diagnostics on the cursor line |
+| `<Space>acf` | Quick fixes for diagnostics on the cursor line — Create procedure (AL0118/AL0132), remove unused var (AA0137) / assignment (AA0206), add `()` (AA0008) |
+| `<Space>acx` | Fix cops — analyze, then apply every AA0137/AA0206/AA0008 fix project-wide; quickfix lists the changes |
+| `<Space>acE` | Convert Option field under cursor to a new enum object (`:ALRefactorToEnum extensible` for an extensible one) |
+| `<Space>aF` | Find related — event publisher for `[EventSubscriber]`, handlers for `[HandlerFunctions]`, table trigger for `Rec.Insert()` |
 | `<Space>acr` | Refactor actions: extract, Validate/Evaluate, publishers, promote… (n/v) |
 | `<Space>acl` | Extract string to Label (`:ALExtractLockedLabel` for a locked one) |
 | `<Space>ace` | Extract selection to local procedure |
@@ -270,7 +273,10 @@ selectable until you move into it.
 | `:ALOpenLaunchJson` | Edit `.vscode/launch.json` |
 | `:ALReloadSnippets` | Reload LuaSnip snippets |
 | `:ALInfo` | Show project + extension info |
-| `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`); takes a range |
+| `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`); takes a range |
+| `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file; buffers edited, not written |
+| `:ALRefactorToEnum [extensible]` | Option field under cursor → new enum object (`ids.next_id`), field retyped `Enum "Name"` |
+| `:ALFindRelated` | Publisher / handler / table trigger for the cursor line → quickfix (jumps when there is one hit) |
 | `:ALRefactorValidate` / `:ALRefactorEvaluate` | `X := Y;` → `Validate(X, Y);` / `Evaluate(X, Y);` (range) |
 | `:ALExtractLabel` / `:ALExtractLockedLabel` | String under cursor → Label variable (locked variant adds `Locked = true`) |
 | `:ALMakeVarGlobal` | Move local variable under cursor to the global var block |

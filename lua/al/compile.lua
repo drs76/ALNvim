@@ -263,10 +263,14 @@ local function push_diagnostics(qf)
     if item.filename then
       local bufnr = vim.fn.bufadd(item.filename)
       diag_by_buf[bufnr] = diag_by_buf[bufnr] or {}
+      -- `code` ("AL0118", "AA0137") is what lua/al/codeactions.lua keys its
+      -- quick fixes on; alc puts it at the start of the message text.
       table.insert(diag_by_buf[bufnr], {
         lnum     = math.max(0, (item.lnum or 1) - 1),
         col      = math.max(0, (item.col  or 1) - 1),
         message  = item.text,
+        code     = (item.text or ""):match("^(%u%u%d%d%d%d)"),
+        source   = "alc",
         severity = item.type == "E" and vim.diagnostic.severity.ERROR
                                      or vim.diagnostic.severity.WARN,
       })
@@ -407,7 +411,9 @@ end
 
 -- Run alc silently (no build window, no quickfix) and push results to vim.diagnostic.
 -- Used by ALAnalyze to populate file-tree badges for all project files.
-function M.analyze_diagnostics(project_dir)
+-- @param on_done  optional function(qf) called (scheduled) once the results are
+--                 published; a run cancelled by a newer one never calls it.
+function M.analyze_diagnostics(project_dir, on_done)
   project_dir = project_dir or lsp.get_root()
   if not project_dir then return end
 
@@ -478,6 +484,7 @@ function M.analyze_diagnostics(project_dir)
         push_diagnostics(qf)
         vim.notify(string.format("AL: analyze complete — %d error(s), %d warning(s)",
           #errors, #warnings), vim.log.levels.INFO)
+        if on_done then on_done(qf) end
       end)
     end,
   })
@@ -521,7 +528,8 @@ end
 M.compiler_prefix = compiler_prefix
 
 -- Pure internals exposed for tests/ only. Not API — do not call from plugin code.
-M._test = { line_stream = line_stream, parse_output = parse_output }
+M._test = { line_stream = line_stream, parse_output = parse_output,
+            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS }
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()

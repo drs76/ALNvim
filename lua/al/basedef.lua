@@ -322,6 +322,14 @@ function M.definition()
   end, bufnr)
 end
 
+-- Shared with lua/al/fixes.lua (create-procedure argument types, related-code
+-- navigation): the hover/object lookups gd already relies on.
+M.hover_text  = hover_text
+M.find_object = find_object
+M.parse_hover = parse_hover
+M.member_line = member_line
+M.target_at_cursor = target_at_cursor
+
 -- Internals reached by tests only — never call from plugin code.
 M._test = {
   parse_hover = parse_hover, target_at_cursor = target_at_cursor,

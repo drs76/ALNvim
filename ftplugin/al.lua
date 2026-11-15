@@ -233,6 +233,12 @@ vim.keymap.set("n", "<leader>acF", ca_server_only("source.fixAll", "fix all"),
   vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fixAll actions in file" }))
 vim.keymap.set("n", "<leader>acn", ca_server_only("source.organizeImports", "organise namespaces"),
   vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
+vim.keymap.set("n", "<leader>acx", "<cmd>ALFixCops<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Fix cops — apply all AA0137/AA0206/AA0008 fixes project-wide" }))
+vim.keymap.set("n", "<leader>acE", "<cmd>ALRefactorToEnum<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Convert Option field to enum" }))
+vim.keymap.set("n", "<leader>aF", "<cmd>ALFindRelated<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Find related — publisher / handler / table trigger" }))
 vim.keymap.set("n", "<leader>acu", "<cmd>ALAddUsings<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements (silent, no picker)" }))
 vim.keymap.set({ "n", "v" }, "<leader>acr", ca_pick("refactor"),
