@@ -1079,6 +1079,20 @@ vim.api.nvim_create_user_command("ALCreateHandler", function()
   require("al.refactor").create_handler()
 end, { desc = "AL: Create a missing handler function from [HandlerFunctions]" })
 
+vim.api.nvim_create_user_command("ALFixCops", function(o)
+  require("al.fixes").fix_cops(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil)
+end, { nargs = "?", complete = "dir",
+       desc = "AL: Analyze, then apply every AA0137/AA0206/AA0008 fix (unused var/assignment, missing ())" })
+
+vim.api.nvim_create_user_command("ALRefactorToEnum", function(o)
+  require("al.fixes").refactor_to_enum({ extensible = o.args:lower() == "extensible" })
+end, { nargs = "?", complete = function() return { "extensible" } end,
+       desc = "AL: Convert the Option field under cursor to a new enum object" })
+
+vim.api.nvim_create_user_command("ALFindRelated", function()
+  require("al.codeactions").run_only("navigate")
+end, { desc = "AL: Go to related code — event publisher, handler function, table trigger" })
+
 vim.api.nvim_create_user_command("ALCreateSnippet", function()
   require("al.snippets").create_from_selection()
 end, {

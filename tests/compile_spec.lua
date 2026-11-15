@@ -86,3 +86,26 @@ describe("compile.parse_output", function()
     eq({}, C.parse_output({ "Microsoft (R) AL Compiler", "", "Build succeeded." }))
   end)
 end)
+
+describe("compile.push_diagnostics", function()
+  it("sets code and source so quick fixes can key on the rule id", function()
+    -- lua/al/codeactions.lua offers fixes by `diagnostic.code`; alc's output
+    -- carries the id only at the start of the message text.
+    local file = vim.fn.tempname() .. ".al"
+    vim.fn.writefile({ "codeunit 1 X", "{", "}" }, file)
+    C.push_diagnostics({
+      { filename = file, lnum = 2, col = 3, type = "W", text = "AA0137: The variable 'X' is declared but never used." },
+      { filename = file, lnum = 1, col = 1, type = "E", text = "AL0118: The name 'Foo' does not exist" },
+    })
+    local bufnr = vim.fn.bufadd(file)
+    local diags = vim.diagnostic.get(bufnr)
+    table.sort(diags, function(a, b) return a.lnum < b.lnum end)
+    eq(2, #diags)
+    eq("AL0118", diags[1].code)
+    eq("AA0137", diags[2].code)
+    eq("alc", diags[1].source)
+    eq("AL0118: The name 'Foo' does not exist", diags[1].message)
+    vim.diagnostic.reset(C.DIAG_NS)
+    vim.fn.delete(file)
+  end)
+end)

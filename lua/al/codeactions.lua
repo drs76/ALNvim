@@ -7,6 +7,11 @@
 --
 --   M.register({ id, title, kind, applicable(ctx), run(ctx) })
 --   M.pick({ only = "refactor" | "quickfix" | "source" | "navigate" })
+--   M.run_only(kind)  — one applicable action of that kind runs at once, more
+--                       go to the picker
+--
+-- Quick fixes (by diagnostic code), the Option→enum refactor and navigation
+-- live in lua/al/fixes.lua; they are registered at the bottom of this file.
 --
 -- ctx = { bufnr, root, lines, row, col0, line, sel_start, sel_end, visual,
 --         bounds = find_proc_bounds(lines, row), diagnostics (cursor line) }
@@ -155,6 +160,15 @@ function M.pick(opts)
   end, ctx.bufnr)
 end
 
+-- Run the one applicable Lua action of `kind` at the cursor; with several,
+-- show the picker; with none, say so. Used by :ALFindRelated.
+function M.run_only(kind)
+  local ctx   = M.context()
+  local items = applicable_for(ctx, kind)
+  if #items == 1 then return items[1].run(ctx) end
+  show(items, ctx)
+end
+
 -- True when the attached AL client can answer textDocument/codeAction.
 function M.server_supported(bufnr)
   local client = require("al.lsp").client(bufnr or vim.api.nvim_get_current_buf())
@@ -235,7 +249,61 @@ M.register({
   run = function() refactor.promote_action_at_cursor() end,
 })
 
+-- ── Diagnostic quick fixes, enum refactor, navigation (lua/al/fixes.lua) ────
+
+local fixes = require("al.fixes")
+
+local function has_code(codes)
+  return function(ctx) return fixes.diag_with_code(ctx, codes) ~= nil end
+end
+
+M.register({
+  id = "create_procedure", kind = "quickfix", title = "Create procedure",
+  applicable = has_code({ AL0118 = true, AL0132 = true }),
+  run = function(ctx) fixes.create_procedure(ctx) end,
+})
+M.register({
+  id = "remove_unused_var", kind = "quickfix", title = "Remove unused variable (AA0137)",
+  applicable = has_code({ AA0137 = true }),
+  run = function(ctx) fixes.fix_cop_at_cursor(ctx, "AA0137") end,
+})
+M.register({
+  id = "remove_unused_assignment", kind = "quickfix", title = "Remove unused assignment (AA0206)",
+  applicable = has_code({ AA0206 = true }),
+  run = function(ctx) fixes.fix_cop_at_cursor(ctx, "AA0206") end,
+})
+M.register({
+  id = "add_parens", kind = "quickfix", title = "Add () to call (AA0008)",
+  applicable = has_code({ AA0008 = true }),
+  run = function(ctx) fixes.fix_cop_at_cursor(ctx, "AA0008") end,
+})
+M.register({
+  id = "option_to_enum", kind = "refactor.rewrite", title = "Convert Option field to enum",
+  applicable = fixes.in_option_field,
+  run = function() fixes.refactor_to_enum({ extensible = false }) end,
+})
+M.register({
+  id = "option_to_extensible_enum", kind = "refactor.rewrite", title = "Convert Option field to extensible enum",
+  applicable = fixes.in_option_field,
+  run = function() fixes.refactor_to_enum({ extensible = true }) end,
+})
+M.register({
+  id = "find_publisher", kind = "navigate", title = "Go to event publisher",
+  applicable = fixes.has_subscriber,
+  run = function(ctx) fixes.find_publisher(ctx) end,
+})
+M.register({
+  id = "find_handlers", kind = "navigate", title = "Go to handler function(s)",
+  applicable = fixes.has_handlers,
+  run = function(ctx) fixes.find_handlers(ctx) end,
+})
+M.register({
+  id = "find_trigger", kind = "navigate", title = "Go to table trigger (OnInsert/OnModify/…)",
+  applicable = fixes.has_record_call,
+  run = function(ctx) fixes.find_trigger(ctx) end,
+})
+
 -- Pure internals for tests/ only. Not API.
-M._test = { registry = registry, applicable_for = applicable_for }
+M._test = { registry = registry, applicable_for = applicable_for, fixes = fixes._test }
 
 return M

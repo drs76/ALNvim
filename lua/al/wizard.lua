@@ -1010,6 +1010,11 @@ function M.generate_permissionset(root)
 end
 
 -- Pure internals exposed for tests/ only. Not API.
+-- Shared with lua/al/fixes.lua (Option field → enum): the one path builder and
+-- writer, so generated files land where organise_file expects them.
+M.build_path     = build_path
+M.write_and_open = write_and_open
+
 M._test = { write_and_open = write_and_open }
 
 return M
