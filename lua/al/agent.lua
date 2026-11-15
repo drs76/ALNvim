@@ -25,7 +25,7 @@ local function open_term(cmd, title, env)
   vim.cmd("startinsert")
 end
 
--- Claude Code (Pro-sub quota; uses ~/.claude/settings.json al-mcp registered by al.mcp).
+-- Claude Code (Pro-sub quota; uses the al:<project> entry al.mcp writes to <project>/.claude/settings.json).
 function M.claude()
   open_term(require("al").config.agent.claude_cmd, "Claude Code")
 end

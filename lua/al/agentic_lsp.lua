@@ -120,6 +120,11 @@ function M.start(bufnr, root)
       if app then status.set_project(app.name, app.version, root) end
       status.set_lsp_ready()
 
+      if cfg.inlay_hints ~= false and client.server_capabilities.inlayHintProvider
+         and vim.lsp.inlay_hint then
+        pcall(vim.lsp.inlay_hint.enable, true, { bufnr = buf })
+      end
+
       -- Auto-configure the AL MCP server once per client (the EditorServices
       -- LspAttach path that normally does this is skipped in agentic mode).
       if cfg.auto_mcp and not client._al_mcp_configured then

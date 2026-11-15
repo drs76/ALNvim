@@ -5,7 +5,7 @@
 --   2. Enter object ID (pre-filled with next free ID from idRanges)
 --   3. Enter object name
 --   4. Type-specific extra prompts (DataClassification, PageType, extends, …)
---   5. Generate boilerplate, write to <root>/src/<id>.<Name>.<Type>.al, open it.
+--   5. Generate boilerplate, write to <root>/src/<type>/<Name>.<Type>.al (CRS, no ID), open it.
 
 local M   = {}
 local lsp = require("al.lsp")

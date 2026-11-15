@@ -67,7 +67,7 @@ M.defaults = {
   -- Side the compile results panel opens on: "left" or "right"
   compile_side = "left",
 
-  -- Automatically configure the AL MCP server in ~/.claude/settings.json
+  -- Automatically configure the AL MCP server in <project>/.claude/settings.json
   -- whenever the AL LSP attaches to a project. Set to false to manage manually
   -- via :ALMcpSetup / :ALMcpRemove.
   auto_mcp = true,
@@ -104,6 +104,12 @@ M.defaults = {
   -- straight to ready), symbol download still uses the EditorServices global-sources method,
   -- al-preview:// base-object browsing not available.
   experimental_lsp = false,
+
+  -- Enable LSP inlay hints on the agentic LSP when the server advertises
+  -- inlayHintProvider. `al launchlspserver` 30.0.42 does not (probed
+  -- 2026-11-15), so this is a no-op until a tool version adds them.
+  -- :ALInlayHints toggles per buffer.
+  inlay_hints = true,
 
   -- Automatically add missing `using` statements on save via source.organizeImports.
   -- Runs synchronously in BufWritePre, before the formatter, so the formatter also
