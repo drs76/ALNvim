@@ -175,6 +175,51 @@ describe("altool.connection_flags", function()
   end)
 end)
 
+describe("altool.connection_flags({ port = 'mcp' })", function()
+  -- The profiling/snapshot proxies connect to the BC API/OData port that the
+  -- MCP service shares (7047), not the dev endpoint (7049). The plain variant
+  -- emits the dev port; a proxy given that starts and then fails every call.
+  local onprem = { authentication = "UserPassword", server = "http://bc", serverInstance = "BC",
+                   port = 7049, tenant = "default" }
+
+  it("defaults the on-prem port to 7047 instead of the dev port", function()
+    eq({ "--authentication", "UserPassword", "--server", "http://bc",
+         "--serverinstance", "BC", "--port", "7047" },
+      altool.connection_flags(onprem, { port = "mcp" }))
+  end)
+
+  it("takes launch.json mcpServicePort when present", function()
+    local cfg = vim.tbl_extend("force", onprem, { mcpServicePort = 8047 })
+    eq("8047", altool.connection_flags(cfg, { port = "mcp" })[#altool.connection_flags(cfg, { port = "mcp" })])
+    eq(8047, altool.mcp_port(cfg))
+  end)
+
+  it("emits no port for cloud", function()
+    local flags = altool.connection_flags({ authentication = "MicrosoftEntraID", tenant = "contoso.com",
+      environmentType = "Sandbox", environmentName = "sandbox" }, { port = "mcp" })
+    ok(not vim.tbl_contains(flags, "--port"), vim.inspect(flags))
+    ok(not vim.tbl_contains(flags, "--server"))
+  end)
+
+  it("leaves the plain variant on the dev port", function()
+    eq("7049", altool.connection_flags(onprem)[#altool.connection_flags(onprem)])
+  end)
+end)
+
+describe("altool.mcp_tools cache", function()
+  it("answers from M._tools without spawning once a list is cached", function()
+    altool._tools["fakeproxy"] = { { name = "do_thing" } }
+    local got
+    altool.mcp_tools({ "fakeproxy" }, function(ok_, list) got = { ok_, list } end)
+    vim.wait(500, function() return got ~= nil end)
+    eq({ true, { { name = "do_thing" } } }, got)
+    eq(true,  altool.mcp_has_tool("fakeproxy", "do_thing"))
+    eq(false, altool.mcp_has_tool("fakeproxy", "other"))
+    eq(nil,   altool.mcp_has_tool("never-listed", "x"))
+    altool._tools["fakeproxy"] = nil
+  end)
+end)
+
 describe("symbols arguments", function()
   local S = require("al.symbols")._test
 

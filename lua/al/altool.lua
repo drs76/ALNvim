@@ -128,9 +128,25 @@ function M.cred_env(cfg)
   return nil
 end
 
+-- Port the profiling / snapshot MCP proxies connect to. Those proxies share
+-- the BC *API/OData* port (7047 by default), NOT the dev-endpoint port (7049)
+-- that every other tool command takes — `al launchprofilingmcpproxy --help`
+-- spells this out. launch.json may name it as `mcpServicePort`; cloud has none.
+local MCP_SERVICE_PORT = 7047
+function M.mcp_port(cfg)
+  if require("al.connection").is_cloud(cfg) then return nil end
+  local p = tonumber(cfg.mcpServicePort)
+  return p or MCP_SERVICE_PORT
+end
+
 -- The same fields as `al publishapp` / `al downloadsymbols` CLI flags.
-function M.connection_flags(cfg)
+--
+-- opts.port = "mcp" swaps the dev port for M.mcp_port(cfg): the port the
+-- profiling and snapshot MCP proxies need. Passing the dev port there makes the
+-- proxy start fine and then fail every tool call against the wrong service.
+function M.connection_flags(cfg, opts)
   local c = M.connection(cfg)
+  if opts and opts.port == "mcp" then c.port = M.mcp_port(cfg) end
   local out = {}
   for _, f in ipairs({
     { "--authentication",  c.authentication },
@@ -307,24 +323,21 @@ function M.close_later(win, ms)
   end, ms or 2500)
 end
 
--- One-shot MCP call: spawn `al launchmcpserver` for `root`, run the standard
--- initialize handshake, invoke `tool` with `args`, then kill the server.
--- MCP over stdio is newline-delimited JSON-RPC (no Content-Length framing).
---
--- cb(ok, text) is called on the main loop:
---   ok   — false on transport/tool error or result.isError
---   text — concatenated text content blocks, or an error message
--- opts.timeout_ms — default 600000 (symbol downloads can take minutes).
--- opts.env        — extra environment for the server process (credentials; see
---                   M.cred_env). Never put secrets in `args`: those are echoed
---                   back in tool errors.
-function M.mcp_call(root, tool, args, cb, opts)
+-- One-shot MCP request against any stdio MCP server the tool ships
+-- (`launchmcpserver`, `launchprofilingmcpproxy`, `launchsnapshotmcpproxy`):
+-- spawn `al <server_args>`, run the initialize handshake, send `request`
+-- (a { method, params } table), hand the raw JSON-RPC response to cb and kill
+-- the server. MCP over stdio is newline-delimited JSON-RPC (no Content-Length
+-- framing). cb(ok, result_or_errmsg) on the main loop; ok is false on
+-- transport error, timeout or a JSON-RPC error.
+local function mcp_request(server_args, request, cb, opts)
   opts = opts or {}
   local bin = M.binary()
   if vim.fn.executable(bin) == 0 then
     vim.schedule(function() cb(false, "al binary not found at " .. bin) end)
     return
   end
+  local label = "al " .. (server_args[1] or "")
 
   local job
   local carry    = ""
@@ -346,26 +359,22 @@ function M.mcp_call(root, tool, args, cb, opts)
 
   local function handle(msg)
     if msg.id == 1 then
-      -- initialize response → announce initialized, fire the tool call
+      -- initialize response → announce initialized, fire the request
       send({ jsonrpc = "2.0", method = "notifications/initialized" })
-      send({ jsonrpc = "2.0", id = 2, method = "tools/call",
-             params = { name = tool, arguments = args or vim.empty_dict() } })
+      send({ jsonrpc = "2.0", id = 2, method = request.method,
+             params = request.params or vim.empty_dict() })
     elseif msg.id == 2 then
       if msg.error then
         finish(false, msg.error.message or vim.fn.json_encode(msg.error))
         return
       end
-      local res   = msg.result or {}
-      local parts = {}
-      for _, c in ipairs(res.content or {}) do
-        if c.type == "text" and c.text then parts[#parts + 1] = c.text end
-      end
-      finish(res.isError ~= true, table.concat(parts, "\n"))
+      finish(true, msg.result or {})
     end
   end
 
-  job = vim.fn.jobstart(
-    { bin, "launchmcpserver", "--transport", "stdio", "--disableTelemetry", root },
+  local cmd = { bin }
+  vim.list_extend(cmd, server_args)
+  job = vim.fn.jobstart(cmd,
     {
       env = opts.env,
       on_stdout = function(_, data)
@@ -383,17 +392,18 @@ function M.mcp_call(root, tool, args, cb, opts)
         end
       end,
       on_exit = function(_, code)
-        finish(false, "al launchmcpserver exited (code " .. code .. ") before responding")
+        finish(false, label .. " exited (code " .. code .. ") before responding")
       end,
     })
 
   if job <= 0 then
-    finish(false, "failed to start al launchmcpserver")
+    finish(false, "failed to start " .. label)
     return
   end
 
   timeout:start(opts.timeout_ms or 600000, 0, vim.schedule_wrap(function()
-    finish(false, "timed out waiting for " .. tool)
+    finish(false, "timed out waiting for " .. request.method
+      .. (request.params and request.params.name and (" " .. request.params.name) or ""))
   end))
 
   send({ jsonrpc = "2.0", id = 1, method = "initialize", params = {
@@ -403,7 +413,75 @@ function M.mcp_call(root, tool, args, cb, opts)
   } })
 end
 
+-- Server argument vector for the project MCP server (`al launchmcpserver`).
+function M.mcp_server_args(root)
+  return { "launchmcpserver", "--transport", "stdio", "--disableTelemetry", root }
+end
+
+-- Call `tool` on the stdio MCP server started by `al <server_args>`.
+--
+-- cb(ok, text, result) is called on the main loop:
+--   ok     — false on transport/tool error or result.isError
+--   text   — concatenated text content blocks, or an error message
+--   result — the raw tools/call result (content blocks of every type), for
+--            callers that need non-text payloads: the profiling and snapshot
+--            proxies return base64 zip archives (profile.lua)
+-- opts.timeout_ms — default 600000 (symbol downloads can take minutes).
+-- opts.env        — extra environment for the server process (credentials; see
+--                   M.cred_env). Never put secrets in `args`: those are echoed
+--                   back in tool errors.
+function M.mcp_call_server(server_args, tool, args, cb, opts)
+  mcp_request(server_args,
+    { method = "tools/call", params = { name = tool, arguments = args or vim.empty_dict() } },
+    function(ok, res)
+      if not ok then cb(false, res); return end
+      local parts = {}
+      for _, c in ipairs(res.content or {}) do
+        if c.type == "text" and c.text then parts[#parts + 1] = c.text end
+      end
+      cb(res.isError ~= true, table.concat(parts, "\n"), res)
+    end, opts)
+end
+
+-- One-shot MCP call against the *project* server (`al launchmcpserver` for
+-- `root`). Same cb contract as M.mcp_call_server.
+function M.mcp_call(root, tool, args, cb, opts)
+  M.mcp_call_server(M.mcp_server_args(root), tool, args, cb, opts)
+end
+
+-- `tools/list` of the server started by `al <server_args>`, run once per
+-- server subcommand and cached in M._tools[subcommand] — the proxies' tool
+-- names are not documented anywhere, so the only way to know them is to ask.
+-- cb(ok, tools_or_errmsg); tools is the list of { name, description,
+-- inputSchema }. The list needs no BC connection: the proxy answers it before
+-- it ever talks to the server (verified on 30.0.42 with the server down).
+M._tools = {}
+function M.mcp_tools(server_args, cb, opts)
+  local key = server_args[1] or "?"
+  if M._tools[key] then
+    vim.schedule(function() cb(true, M._tools[key]) end)
+    return
+  end
+  opts = vim.tbl_extend("keep", opts or {}, { timeout_ms = 30000 })
+  mcp_request(server_args, { method = "tools/list" }, function(ok, res)
+    if not ok then cb(false, res); return end
+    M._tools[key] = res.tools or {}
+    cb(true, M._tools[key])
+  end, opts)
+end
+
+-- True when the cached tools/list for `subcommand` names `tool` (nil = unknown,
+-- list not fetched yet).
+function M.mcp_has_tool(subcommand, tool)
+  local list = M._tools[subcommand]
+  if not list then return nil end
+  for _, t in ipairs(list) do
+    if t.name == tool then return true end
+  end
+  return false
+end
+
 -- Internals reached by tests only — never call from plugin code.
-M._test = { candidates = candidates }
+M._test = { candidates = candidates, mcp_request = mcp_request }
 
 return M

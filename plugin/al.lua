@@ -599,6 +599,30 @@ vim.api.nvim_create_user_command("ALSnapshotFinish", function()
   require("al.debug").snapshot_finish()
 end, { desc = "Finish snapshot session and download the snapshot file" })
 
+-- Profiling / snapshot through the tool's MCP proxies (tool 30+). Both are
+-- two-phase: arm, reproduce in the BC client, collect.
+local function opt_dir(o) return o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil end
+vim.api.nvim_create_user_command("ALProfileCapture", function(o)
+  require("al.profile").capture(opt_dir(o))
+end, { nargs = "?", complete = "dir",
+       desc = "AL: Arm a CPU profiling schedule on a BC session (al launchprofilingmcpproxy)" })
+vim.api.nvim_create_user_command("ALProfileCollect", function(o)
+  require("al.profile").collect(opt_dir(o))
+end, { nargs = "?", complete = "dir",
+       desc = "AL: Stop the armed profiling schedule, save .alcpuprofile under .profiles, open viewer" })
+vim.api.nvim_create_user_command("ALProfileOpen", function(o)
+  require("al.profile").open(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p") or nil)
+end, { nargs = "?", complete = "file",
+       desc = "AL: Hot-function viewer for a .alcpuprofile (default: newest under .profiles)" })
+vim.api.nvim_create_user_command("ALSnapshotCapture", function(o)
+  require("al.profile").snapshot_capture(opt_dir(o))
+end, { nargs = "?", complete = "dir",
+       desc = "AL: Arm snapshot debugging through al launchsnapshotmcpproxy" })
+vim.api.nvim_create_user_command("ALSnapshotCollect", function(o)
+  require("al.profile").snapshot_collect(opt_dir(o))
+end, { nargs = "?", complete = "dir",
+       desc = "AL: Stop snapshot debugging, save the archive + summary under .snapshots" })
+
 vim.api.nvim_create_user_command("ALDebugSetup", function()
   require("al.debug").setup_dap()
 end, { desc = "Configure nvim-dap for AL live attach debugging" })
@@ -784,7 +808,12 @@ vim.api.nvim_create_user_command("ALInfo", function()
       "  MCP     : " .. route("launchmcpserver", "al launchmcpserver"),
       "  tests   : " .. route("runtests", "al runtests / al listtests (tool 30+)"),
       "  docs    : " .. route("doc", "al doc build (tool 30+)"),
+      "  profile : " .. route("launchprofilingmcpproxy", "al launchprofilingmcpproxy (tool 30+)"),
+      "  snapshot: " .. route("launchsnapshotmcpproxy", "al launchsnapshotmcpproxy (tool 30+)"),
     })
+    local mcp_opt = require("al").config.mcp or {}
+    table.insert(lines, "  MCP extras: profiling=" .. tostring(mcp_opt.profiling == true)
+      .. " snapshot=" .. tostring(mcp_opt.snapshot == true) .. "  (setup({ mcp = { … } }))")
   else
     vim.list_extend(lines, vim.split(altool.missing_msg("Compile, publish and symbols"), "\n"))
   end
@@ -801,6 +830,9 @@ vim.api.nvim_create_user_command("ALInfo", function()
     table.insert(lines, "  environmentType: " .. (cfg.environmentType or "(not set)"))
     table.insert(lines, "  authentication : " .. (cfg.authentication or "(not set)"))
     table.insert(lines, "  → dev base URL : " .. conn.base_url(cfg))
+    local mp = require("al.altool").mcp_port(cfg)
+    table.insert(lines, "  → MCP port     : " .. (mp and tostring(mp) .. (cfg.mcpServicePort and "" or " (default; set mcpServicePort to override)")
+      or "(cloud — none)"))
   end
   print(table.concat(lines, "\n"))
 end, { desc = "Show ALNvim / project information" })

@@ -118,6 +118,131 @@ describe("mcp.configure", function()
   end)
 end)
 
+-- Opt-in proxies beside al:<name>. Each needs a launch configuration for its
+-- connection flags; the project fixture gets one here.
+local ONPREM_LAUNCH = {
+  version = "0.2.0",
+  configurations = { { type = "al", name = "bc2", request = "launch", authentication = "UserPassword",
+    server = "http://bc2", serverInstance = "BC", port = 7049, tenant = "default",
+    environmentType = "OnPrem" } },
+}
+local CLOUD_LAUNCH = {
+  version = "0.2.0",
+  configurations = { { type = "al", name = "cloud", request = "launch", authentication = "MicrosoftEntraID",
+    environmentType = "Sandbox", environmentName = "Dev", tenant = "contoso.onmicrosoft.com" } },
+}
+
+local function project_with_launch(launch)
+  local root = project()
+  vim.fn.mkdir(root .. "/.vscode", "p")
+  require("al.json").write(root .. "/.vscode/launch.json", launch)
+  return root
+end
+
+-- Run fn with setup({ mcp = opts }) in force, restoring the previous config.
+local function with_mcp(opts, fn)
+  local al    = require("al")
+  local saved = al.config.mcp
+  al.config.mcp = opts
+  local okc, err = pcall(fn)
+  al.config.mcp = saved
+  if not okc then error(err, 0) end
+end
+
+local HAVE_PROXIES = HAVE_AL and require("al.altool").has("launchprofilingmcpproxy")
+
+describe("mcp proxy entries", function()
+  local MT = mcp._test
+
+  it("writes no proxy entry unless opted in (default off)", function()
+    local root = project_with_launch(ONPREM_LAUNCH)
+    with_mcp({ profiling = false, snapshot = false }, function()
+      eq({}, MT.proxy_entries(root))
+    end)
+    with_mcp(nil, function()
+      eq({}, MT.proxy_entries(root))
+    end)
+  end)
+
+  it("on-prem args carry the MCP service port 7047, not the dev port 7049", function()
+    local args = MT.proxy_args("profiling", "/p", ONPREM_LAUNCH.configurations[1])
+    eq("launchprofilingmcpproxy", args[1])
+    ok(vim.tbl_contains(args, "7047"), vim.inspect(args))
+    ok(not vim.tbl_contains(args, "7049"), "dev port leaked into proxy args: " .. vim.inspect(args))
+    eq("/p/.profiles", args[#args])
+  end)
+
+  it("cloud args have no --server and no --port", function()
+    local args = MT.proxy_args("snapshot", "/p", CLOUD_LAUNCH.configurations[1])
+    eq("launchsnapshotmcpproxy", args[1])
+    ok(not vim.tbl_contains(args, "--server"), vim.inspect(args))
+    ok(not vim.tbl_contains(args, "--port"), vim.inspect(args))
+    ok(vim.tbl_contains(args, "--environmentname"))
+  end)
+
+  it("references credentials through env variables, never values", function()
+    local env = MT.proxy_env(ONPREM_LAUNCH.configurations[1])
+    eq({ BC_SERVER_USERNAME = "${AL_BC_USERNAME}", BC_SERVER_PASSWORD = "${AL_BC_PASSWORD}" }, env)
+    eq(nil, MT.proxy_env(CLOUD_LAUNCH.configurations[1]))
+  end)
+
+  it("owns three keys per project", function()
+    local keys = MT.all_keys("/x/HTest")
+    eq({ "al:HTest", "al-profiling:HTest", "al-snapshot:HTest" }, keys)
+  end)
+
+  if not HAVE_PROXIES then
+    it("SKIPPED write-path — al tool with proxies not installed", function() end)
+    return
+  end
+
+  it("writes al-profiling:<name> beside al:<name> when opted in", function()
+    local root = project_with_launch(ONPREM_LAUNCH)
+    with_mcp({ profiling = true, snapshot = false }, function()
+      ok(mcp.configure(root))
+    end)
+    local name = vim.fn.fnamemodify(root, ":t")
+    local s = settings(root).mcpServers
+    ok(s["al:" .. name], "project server entry")
+    ok(s["al-profiling:" .. name], "profiling entry expected: " .. vim.inspect(vim.tbl_keys(s)))
+    eq(nil, s["al-snapshot:" .. name], "snapshot was not opted in")
+    eq("launchprofilingmcpproxy", s["al-profiling:" .. name].args[1])
+  end)
+
+  it("status lists the proxy entries and deconfigure removes all three", function()
+    local root = project_with_launch(ONPREM_LAUNCH)
+    with_mcp({ profiling = true, snapshot = true }, function()
+      mcp.configure(root)
+    end)
+    local proj = mcp.status(root)
+    local keys = {}
+    for _, e in ipairs(proj) do keys[#keys + 1] = e.key:match("^[^:]+") end
+    eq({ "al", "al-profiling", "al-snapshot" }, keys)
+
+    mcp.deconfigure(root)
+    local s = settings(root)
+    if s then
+      local name = vim.fn.fnamemodify(root, ":t")
+      for _, k in ipairs({ "al:", "al-profiling:", "al-snapshot:" }) do
+        eq(nil, (s.mcpServers or {})[k .. name], k .. " should be gone")
+      end
+    end
+  end)
+
+  it("is idempotent with proxies on — a second configure does not rewrite", function()
+    local root = project_with_launch(ONPREM_LAUNCH)
+    with_mcp({ profiling = true, snapshot = true }, function()
+      mcp.configure(root)
+      local p     = root .. "/.claude/settings.json"
+      local first = vim.fn.readfile(p)
+      local mtime = vim.uv.fs_stat(p).mtime.nsec
+      mcp.configure(root)
+      eq(first, vim.fn.readfile(p))
+      eq(mtime, vim.uv.fs_stat(p).mtime.nsec, "file should not have been rewritten")
+    end)
+  end)
+end)
+
 describe("mcp.deconfigure", function()
   if not HAVE_AL then
     it("SKIPPED — ~/.dotnet/tools/al not installed", function() end)
