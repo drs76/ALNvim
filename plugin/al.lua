@@ -954,27 +954,23 @@ vim.api.nvim_create_autocmd("VimEnter", {
     -- al/progressNotification handler already sends the second setActiveWorkspace.
     -- Calling it again here causes a third reindex cycle that the user sees as
     -- "LSP settling multiple times".
-    local polls  = 0
+    -- The poll lives in al.startup: a blocked main loop queues several
+    -- scheduled ticks that then all see "ready" and all close the timer, so
+    -- completion is claimed once there and the compile pass runs only on the
+    -- successful claim.
     local status = require("al.status")
-    local timer  = vim.uv.new_timer()
-    timer:start(2000, 1000, vim.schedule_wrap(function()
-      polls = polls + 1
-      if polls > 60 then
-        timer:stop()
-        timer:close()
-        return
-      end
-      local clients = vim.lsp.get_clients({ name = lsp_name })
-      if status.is_ready() and #clients >= #roots then
-        timer:stop()
-        timer:close()
+    require("al.startup").poll({
+      ready = function()
+        return status.is_ready() and #vim.lsp.get_clients({ name = lsp_name }) >= #roots
+      end,
+      on_ready = function()
         local compile = require("al.compile")
-        for _, client in ipairs(clients) do
+        for _, client in ipairs(vim.lsp.get_clients({ name = lsp_name })) do
           local root = client.root_dir or client.config.root_dir
           if root then compile.analyze_diagnostics(root) end
         end
-      end
-    end))
+      end,
+    })
   end,
 })
 

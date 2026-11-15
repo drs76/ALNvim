@@ -32,6 +32,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish) |
+| `lua/al/startup.lua` | `M.poll(opts)` — the VimEnter readiness poller behind the once-per-root background analysis; completion claimed exactly once |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
@@ -290,6 +291,22 @@ credentials go into the debug adapter's environment (see "BC dev API / DAP").
 
 **The FileType root is bounded** (`lsp.find_root_upward`, not `vim.fs.root`). For this
 backend the root is the workspace the server indexes.
+
+## Repeating timers with `vim.schedule_wrap` (`lua/al/startup.lua`)
+
+**A scheduled callback may run several times after the condition it polls for is already
+met.** The timer ticks in the libuv loop; `vim.schedule_wrap` only queues the callback,
+and the queue drains when the main loop is free. Any synchronous work at startup (an rg
+over the symbol cache, a package extraction, the user's own config) lets the 1s poll
+queue one callback per tick, and they then run back to back: each saw `is_ready()`, each
+called `timer:close()` — `plugin/al.lua: handle 0x… is already closing` — and each
+started another `analyze_diagnostics` per root. `startup.poll` claims completion once
+(`done` flag, one `finish()` guarded by `timer:is_closing()`, tick returns early when
+done) and runs `on_ready` only after the claim succeeded; the timeout path never runs it.
+Apply the same shape to any repeating timer whose callback closes its own handle —
+`timer:is_closing()` alone is not enough, because the second callback would still redo
+the work. Headless repro: `vim.wait(…, fast_only = true)` ticks timers without draining
+the schedule queue; the regression test in `tests/startup_spec.lua` uses exactly that.
 
 ## .NET assembly probing (`lsp.assembly_probing_paths(root)`)
 
