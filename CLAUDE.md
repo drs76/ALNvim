@@ -630,14 +630,17 @@ EditorServices protocol extension; the tool's CLI replaces it).
   flags>` through `altool.run` with `altool.cred_env(cfg)`, because AAD can stop for a device
   code. `--testmethods` is a `string[]` option: **repeat the flag per method**, do not
   comma-join. `altool.run` gained `opts.on_lines`, a tap on the cleaned output, so the parser
-  sees the same lines the user watches. The `--raw` summary format comes from decompiling
-  `TestRunService.FormatResponse` (bc2 was down during Phase 2, so it is **not verified
-  live**): `===== Codeunit N =====`, `  PASS|FAIL|SKIP Name (Nms)`, a 7-space-indented error
-  line under a FAIL, and `Test run completed: P passed, F failed, S skipped.` per codeunit
-  and again as the final total. **When anything failed the whole summary is written to
-  stderr behind `Test run failed: `**, so `parse_runtests` strips that prefix on every line
-  and takes the totals from the *last* summary line. Results map to quickfix by scanning
-  project files for `codeunit <id>` then `procedure <Method>(`.
+  sees the same lines the user watches. The `--raw` format, **verified live on BC 28.5
+  (pcp-dev2) 2026-11-15**: server log lines, then `===== Codeunit N =====`,
+  `Test run completed: P passed, F failed, S skipped.`, `Results:`, one `  PASS|FAIL|SKIP Name (Nms)`
+  per method, and the totals line again. A FAIL's output is a 7-space-indented error line
+  **followed by an unindented `AL Callstack:` block** (lines carry `\r`), so `parse_runtests`
+  attaches everything up to the next blank / result / summary line. **Every codeunit also
+  reports one nameless result** (`  FAIL  (40ms)`, the codeunit run mirroring its worst
+  method) which the tool counts in its totals — it is dropped and the counts recomputed over
+  methods. **When anything failed the whole summary goes to stderr behind `Test run failed: `**,
+  so the prefix is stripped on every line. Results map to quickfix by scanning project files
+  for `codeunit <id>` then `procedure <Method>(`.
 - **Cursor variant** (`:ALRunTests!`): codeunit from `wizard.find_obj_decl` (exported for
   this), method from `refactor.helpers.find_proc_bounds` and a walk up through the attribute
   lines (`[HandlerFunctions(...)]` may sit between `[Test]` and the header).
@@ -749,7 +752,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (256 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (257 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

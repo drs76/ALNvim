@@ -57,36 +57,44 @@ end
 -- `al runtests --raw` output lines → {
 --   results = { { codeunit = 50130, method = "X", status = "PASS"|"FAIL"|"SKIP",
 --                 ms = 3, output = "…" }, … },
---   passed = n, failed = n, skipped = n,   -- from the final summary line
+--   passed = n, failed = n, skipped = n,   -- counted over `results`
 -- }
+-- Verified live on BC 28.5 (pcp-dev2): a FAIL's output is the error text on a
+-- 7-space-indented line followed by an *unindented* "AL Callstack:" block, so
+-- everything up to the next blank / result / summary line belongs to it. Each
+-- codeunit also reports one nameless result (`  FAIL  (40ms)` — the codeunit
+-- run itself, mirroring its worst method) which the tool counts in its totals;
+-- it is dropped here and the counts are recomputed, so "1 failed" means one
+-- method.
 local function parse_runtests(lines)
   local res = { results = {}, passed = 0, failed = 0, skipped = 0 }
   local cu, last
+  local function stop_output() last = nil end
   for _, raw in ipairs(lines) do
     local l = raw:gsub("\r", "")
     l = l:gsub("^Test run failed: ", "")
     local id = l:match("^===== Codeunit (%d+) =====")
+    local status, name, ms = l:match("^  (%u%u%u%u?) (.-) %((%d+)ms%)%s*$")
     if id then
-      cu, last = tonumber(id), nil
-    else
-      local status, name, ms = l:match("^  (%u%u%u%u?) (.-) %((%d+)ms%)%s*$")
-      if status and (status == "PASS" or status == "FAIL" or status == "SKIP") then
-        last = { codeunit = cu, method = name, status = status, ms = tonumber(ms), output = nil }
-        res.results[#res.results + 1] = last
-      elseif last and l:match("^       %S") then
-        -- continuation: the failing test's error text, indented 7 spaces
-        local txt = vim.trim(l)
-        last.output = last.output and (last.output .. " " .. txt) or txt
+      cu = tonumber(id); stop_output()
+    elseif status and (status == "PASS" or status == "FAIL" or status == "SKIP") then
+      if name == "" then
+        stop_output()                       -- the codeunit-level phantom
       else
-        local p, f, s = l:match("^Test run completed: (%d+) passed, (%d+) failed, (%d+) skipped%.")
-        if p then
-          -- the per-codeunit and final lines share a format; the final one is
-          -- last, so overwriting each time leaves the totals
-          res.passed, res.failed, res.skipped = tonumber(p), tonumber(f), tonumber(s)
-        end
-        if not l:match("^%s") then last = nil end
+        last = { codeunit = cu, method = name, status = status, ms = tonumber(ms) }
+        res.results[#res.results + 1] = last
       end
+    elseif l:match("^Test run completed:") or l:match("^Results:%s*$") or l:match("^%s*$") then
+      stop_output()
+    elseif last and last.status == "FAIL" then
+      local txt = vim.trim(l)
+      last.output = last.output and (last.output .. " " .. txt) or txt
     end
+  end
+  for _, r in ipairs(res.results) do
+    if r.status == "PASS" then res.passed = res.passed + 1
+    elseif r.status == "FAIL" then res.failed = res.failed + 1
+    else res.skipped = res.skipped + 1 end
   end
   return res
 end

@@ -2,11 +2,8 @@
 -- parsers, the runtests argument builder and the web-client object URL.
 --
 -- The listtests fixture is the verbatim output of `al listtests --appfile` on a
--- two-codeunit test app, tool 30.0.42. The runtests fixture follows the
--- TestRunService formatter in the tool (Microsoft.Dynamics.Nav.LanguageModelTools
--- .dll, FormatResponse): "===== Codeunit N =====", "  PASS Name (Nms)", a
--- 7-space-indented error line under a FAIL, and the "Test run completed:"
--- totals — printed to stderr behind "Test run failed: " when anything failed.
+-- two-codeunit test app, tool 30.0.42. The runtests fixtures are verbatim
+-- `al runtests --raw` output from that app published to BC 28.5 (pcp-dev2).
 
 local T = require("tests.harness")
 local describe, it, eq, ok = T.describe, T.it, T.eq, T.ok
@@ -45,40 +42,66 @@ describe("tests.parse_listtests", function()
   end)
 end)
 
+-- Verbatim `al runtests 50130 --raw` against BC 28.5 (pcp-dev2): everything
+-- after the SignalR line arrived on stderr behind "Test run failed: ". The
+-- error text keeps its \r, the callstack lines are not indented, and the
+-- codeunit itself appears as a nameless FAIL that the tool counts.
 local RAW = {
   "Running tests in codeunit 50130...",
-  "MergeFromLaunchJson: Looking for launch.json in project: /p",
-  "Targeting server 'http://bc2' and server instance 'BC'.",
+  "Targeting server 'http://192.168.0.191', server instance 'BC' and tenant 'default'.",
+  "Test hub connected.",
+  "SignalR hub connection established with context [TKgp_xttVWtezRjt-wnptA]",
   "Test run failed: ===== Codeunit 50130 =====",
-  "Test run completed: 1 passed, 1 failed, 0 skipped.",
+  "Test run completed: 1 passed, 2 failed, 0 skipped.",
   "",
   "Results:",
-  "  PASS PassingTest (12ms)",
-  "  FAIL FailingTest (3ms)",
-  "       deliberate failure",
+  "  PASS PassingTest (14ms)",
+  "  FAIL FailingTest (26ms)",
+  "       deliberate failure\r",
+  "AL Callstack:\r",
+  '"My Tests"(CodeUnit 50130).FailingTest line 2 - ALTest by Default publisher version 1.0.0.0',
+  "  FAIL  (40ms)",
+  "       deliberate failure\r",
+  "AL Callstack:\r",
+  '"My Tests"(CodeUnit 50130).FailingTest line 2 - ALTest by Default publisher version 1.0.0.0',
   "",
+  "Test run completed: 1 passed, 2 failed, 0 skipped.",
+}
+
+-- `al runtests 50131 --raw --testmethods WithHandler`, all on stdout, exit 0.
+local RAW_OK = {
+  "SignalR hub connection established with context [-TYPCDq8URVlg6wmYg6PkA]",
   "===== Codeunit 50131 =====",
-  "Test run completed: 0 passed, 0 failed, 1 skipped.",
+  "Test run completed: 2 passed, 0 failed, 0 skipped.",
   "",
   "Results:",
-  "  SKIP WithHandler (0ms)",
+  "  PASS WithHandler (10ms)",
+  "  PASS  (10ms)",
   "",
-  "Test run completed: 1 passed, 1 failed, 1 skipped.",
+  "Test run completed: 2 passed, 0 failed, 0 skipped.",
 }
 
 describe("tests.parse_runtests", function()
-  it("collects every method result with its codeunit, status and duration", function()
+  it("collects each method result with codeunit, status and duration, dropping the codeunit phantom", function()
     local r = tests.parse_runtests(RAW)
-    eq({
-      { codeunit = 50130, method = "PassingTest", status = "PASS", ms = 12 },
-      { codeunit = 50130, method = "FailingTest", status = "FAIL", ms = 3, output = "deliberate failure" },
-      { codeunit = 50131, method = "WithHandler", status = "SKIP", ms = 0 },
-    }, r.results)
+    eq(2, #r.results)
+    eq({ codeunit = 50130, method = "PassingTest", status = "PASS", ms = 14 }, r.results[1])
+    eq({ 50130, "FailingTest", "FAIL", 26 },
+       { r.results[2].codeunit, r.results[2].method, r.results[2].status, r.results[2].ms })
   end)
 
-  it("takes the totals from the final summary line, not a per-codeunit one", function()
+  it("keeps the error text and the unindented callstack as the failure output, \\r stripped", function()
+    local out = tests.parse_runtests(RAW).results[2].output
+    eq('deliberate failure AL Callstack: "My Tests"(CodeUnit 50130).FailingTest line 2'
+       .. ' - ALTest by Default publisher version 1.0.0.0', out)
+  end)
+
+  it("counts methods, not the tool's totals (which include the phantom)", function()
     local r = tests.parse_runtests(RAW)
-    eq({ 1, 1, 1 }, { r.passed, r.failed, r.skipped })
+    eq({ 1, 1, 0 }, { r.passed, r.failed, r.skipped })
+    local o = tests.parse_runtests(RAW_OK)
+    eq({ 1, 0, 0 }, { o.passed, o.failed, o.skipped })
+    eq("WithHandler", o.results[1].method)
   end)
 
   it("strips the stderr 'Test run failed:' prefix from the first summary line", function()
@@ -91,13 +114,15 @@ describe("tests.parse_runtests", function()
     local r = tests.parse_runtests({ "Running tests in codeunit 1...", "  some indented log",
                                      "Test run completed successfully." })
     eq({}, r.results)
+    eq(0, r.failed)
   end)
 
-  it("reads a quoted method name and a multi-line failure message", function()
+  it("reads a quoted method name and does not attach output to a PASS", function()
     local r = tests.parse_runtests({ "===== Codeunit 1 =====", "Results:",
-      '  FAIL "Posting Date" (5ms)', "       Expected 1", "       Actual 2" })
+      '  FAIL "Posting Date" (5ms)', "       Expected 1", "  PASS Other (1ms)", "stray log" })
     eq('"Posting Date"', r.results[1].method)
-    eq("Expected 1 Actual 2", r.results[1].output)
+    eq("Expected 1", r.results[1].output)
+    eq(nil, r.results[2].output)
   end)
 end)
 
