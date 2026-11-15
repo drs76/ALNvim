@@ -16,7 +16,7 @@
 | `<Space>aP` | Publish existing `.app` to BC (skip compile) |
 | `<Space>as` | Download symbol packages into `.alpackages/` (server or NuGet/AppSource) |
 | `<Space>aA` | Silent analyze pass — refresh diagnostics without the panel |
-| `<Space>at` | Run tests — pick a test codeunit (from the built `.app`) then methods; pass/fail → quickfix |
+| `<Space>at` | Run tests — pick a test codeunit (from the built `.app`) then methods. Pass/fail → quickfix |
 | `<Space>aT` | Run the `[Test]` procedure under the cursor |
 | `<Space>ar` | Run object — open this page/report/table in the BC web client |
 | `<Space>ax` | Build reference docs with `al doc build` into `.aldoc/` |
@@ -137,7 +137,7 @@
 | `gr` | Find all references |
 | `<Space>rn` / `grn` | Rename (quoted identifiers project-wide) |
 | `<Space>aca` | AL code actions — see "Code Actions & Refactoring" above |
-| `:ALInlayHints` | Toggle inlay hints (only when the server advertises them; tool 30.0.42 does not) |
+| `:ALInlayHints` | Toggle inlay hints (only when the server advertises them. Tool 30.0.42 does not) |
 | `<Space>D` | Open diagnostic details float |
 | `[d` | Jump to previous diagnostic |
 | `]d` | Jump to next diagnostic |
@@ -164,7 +164,7 @@
 Loaded from the AL extension's own snippet files, then ALNvim's (`terror`,
 `tmessage`, `tconfirm`, `tfindset`, `tsetrange`, `ton*` triggers, `thttpclient`,
 `tjsonparse`), then yours (`:ALCreateSnippet`) — a later file wins on the same
-prefix. The MS snippets below need the extension installed; it also ships
+prefix. The MS snippets below need the extension installed. It also ships
 `treportext`, `tpagecust`, `tprofile`, `tpermissionset`, `tentitlement`,
 `tcontroladdin` and more.
 
@@ -336,7 +336,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALSnapshotCapture [dir]` / `:ALSnapshotCollect [dir]` | Snapshot debugging through `al launchsnapshotmcpproxy` |
 | `:ALProfileCapture [dir]` | Arm a profiling schedule on a BC session (prompts for session id and window) |
 | `:ALProfileCollect [dir]` | Stop it, save `.alcpuprofile`s under `.profiles/`, open the viewer |
-| `:ALProfileOpen [file]` | Hot-function viewer (self/total ms per frame; default newest profile) |
+| `:ALProfileOpen [file]` | Hot-function viewer (self/total ms per frame. Default newest profile) |
 | `:ALRunTests[!] [dir]` | `al runtests --raw` for a picked codeunit/methods (`!` = test under cursor); compiles first when no `.app` |
 | `:ALListTests [dir]` | Test codeunits and methods in the built `.app` (`al listtests --appfile`) |
 | `:ALDoc [dir]` | `al doc build` → `<root>/.aldoc` |
@@ -360,8 +360,8 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALSearch [dir]` | Live grep across AL files |
 | `:ALDiff [dir]` | Git diff explorer |
 | `:ALRenameObject` | Rename quoted identifier project-wide |
-| `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`); takes a range |
-| `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file; buffers edited, not written |
+| `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`). Takes a range |
+| `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file. Buffers edited, not written |
 | `:ALRefactorToEnum [extensible]` | Option field under cursor → new enum object (`ids.next_id`), field retyped `Enum "Name"` |
 | `:ALFindRelated` | Publisher / handler / table trigger for the cursor line → quickfix (jumps when there is one hit) |
 | `:ALRefactorValidate` / `:ALRefactorEvaluate` | `X := Y;` → `Validate(X, Y);` / `Evaluate(X, Y);` (range) |

@@ -1,94 +1,98 @@
 # ALNvim
 
-Business Central AL language support for Neovim 0.11+, built on the Microsoft AL
-language server that ships with the [AL VSCode extension](https://marketplace.visualstudio.com/items?itemName=ms-dynamics-smb.al).
+> Business Central AL development in Neovim 0.11+. The AL dotnet tool is the toolchain. No VS Code required.
 
-## Features
+| Read | For |
+|---|---|
+| [docs/handbook.md](docs/handbook.md) | Why the plugin has this shape, status, design, sharp edges, maintenance |
+| [docs/cheatsheet.md](docs/cheatsheet.md) | Every key and command |
+| [docs/pi-setup.md](docs/pi-setup.md) | Pi agent setup per machine |
+| [CLAUDE.md](CLAUDE.md) | Agent-facing rules, the densest reference |
 
-- Syntax highlighting derived from the official TextMate grammar
-- Full LSP integration — completions, go-to-definition, hover, diagnostics, rename, format on save
-- Code actions and quick fixes — quick fix, fix all, organise namespaces, refactor
-- Async compilation via `alc` with floating output panel and quickfix list
-- One-step publish to Business Central (compile → POST `.app` to BC dev endpoint)
-- Symbol package download from BC dev endpoint (all base + explicit dependencies)
-- Snapshot debugging and live attach debugging via nvim-dap + optional nvim-dap-ui panels
-- **AL MCP Server** — wires the Microsoft AL Development Tools MCP server into Claude Code so Claude can build, publish, search symbols, and debug BC from AI chat
-- AL Explorer — Telescope pickers for all objects across project + symbol packages, with live grep
-- AL Object Wizard — interactive new-object creation with ID suggestion and file organiser
-- Report Layout Wizard — generate Excel/Word/RDLC layouts from AL report datasets
-- Object ID completion from `app.json` idRanges in insert mode
-- 40+ LuaSnip snippets — object templates, control flow, events, HTTP, JSON
-- Two colour schemes: **bc_dark** (VS Code Business Central Dark) and **bc_yellow** (high-contrast)
-- Text objects for procedures/triggers and begin/end blocks
+NOTE: The [GitHub wiki](https://github.com/drs76/ALNvim/wiki) dates from 2026-04-10 and still describes the VS Code extension as the toolchain. The handbook replaces it.
 
-## Screenshots
+## What it does
 
-**AL Actions** — searchable picker for all 40+ commands with descriptions and keymaps
-
-![AL Actions](docs/images/ALActions.png)
-
-**AL Explorer** — Telescope object browser across project source and downloaded symbol packages, with live preview
-
-![AL Explorer](docs/images/ALExplorer.png)
-
-**AL Object Wizard** — interactive new-object creation with all 12 AL object types
-
-![AL Object Wizard](docs/images/ALNewObject.png)
-
-**Go-to-definition** — `gd` fetches `al-preview://` source and renders it in a read-only scratch buffer
-
-![Go-to-definition preview](docs/images/ALPreviewPage_HostCard.png)
-
-**LSP completions** — property value completions with type information
-
-![LSP completions](docs/images/ALActionImagePicker.png)
-
-**Code Cops** — toggle analyzers live without restarting the language server
-
-![Select Code Cops](docs/images/ALSelectCodeCops.png)
-
-**Download Symbols** — choose between server/sandbox/Docker (launch.json) or global NuGet/AppSource
-
-![Download Symbols picker](docs/images/DownloadSymbolsPicker.png)
-
-![Server download](docs/images/DownloadSymbolsServer.png)
-
-![Global download](docs/images/DownloadSymbolsGlobal.png)
+- Compiles, publishes, downloads symbols and runs tests through `al`, the Microsoft AL dotnet tool.
+- Attaches one of two language servers: the tool's own `al launchlspserver` or the VS Code extension's EditorServices.
+- Adds code actions, quick fixes and refactors in Lua, so they work when the server has none.
+- Jumps to definitions inside symbol packages when the server cannot answer.
+- Debugs on-prem and cloud through nvim-dap with the extension's adapter.
+- Captures CPU profiles and snapshots through the tool's MCP proxies.
+- Writes a per-project AL MCP entry for Claude Code and opens Claude Code or Pi in a split.
+- Scaffolds projects from the extension's templates and objects from an 18-type wizard with CRS file naming.
+- Browses objects across the project and every symbol package in Telescope.
+- Ships syntax highlighting from the official grammar, two colour schemes, text objects and snippets.
 
 ## Quick start
 
-```lua
-vim.pack.add({
-  { src = "/path/to/ALNvim" },
-}, { load = true })
+1. Install Neovim 0.11 or later and ripgrep.
+2. Install the AL dotnet tool:
 
-require("al").setup()
+   ```bash
+   dotnet tool install -g microsoft.dynamics.businesscentral.development.tools
+   ```
+
+3. Add the plugin to `init.lua`:
+
+   ```lua
+   vim.pack.add({ { src = "https://github.com/drs76/ALNvim" } }, { load = true })
+   require("al").setup({ experimental_lsp = true })
+   ```
+
+4. Open an `.al` file in a folder that has an `app.json`.
+5. Run `:ALDownloadSymbolsGlobal`, then `:ALCompile`.
+
+NOTE: Pass `{ load = true }`. Without it `vim.pack.add` does not source `plugin/` during `init.lua`.
+
+To use the extension's language server instead, leave `experimental_lsp` at `false` and run
+`:ALInstallExtension`. Debugging needs the extension in both modes.
+
+## Configuration
+
+All options with their defaults are in [lua/al/init.lua](lua/al/init.lua). The ones most users set:
+
+| Option | Default | Purpose |
+|---|---|---|
+| `experimental_lsp` | `false` | `true` uses the tool's LSP, no extension needed |
+| `colorscheme` | `"bc_dark"` | `false` keeps your own scheme |
+| `organise_dirs` | `{ "src" }` | Where saves move files into `src/<type>/` |
+| `assembly_probing_paths` | `nil` | .NET assembly folders for projects with a `dotnet` block |
+| `mcp` | `{ profiling = false, snapshot = false }` | Also write the proxy MCP entries |
+| `auto_mcp` | `true` | Write the project MCP entry on attach |
+| `browser` | `nil` | Browser for the web client, else the OS default |
+| `agent` | see file | Commands for `:ALClaude` and `:ALPi` |
+
+## Screenshots
+
+**AL Actions** — one picker for every command, with descriptions and keys
+
+![AL Actions](docs/images/ALActions.png)
+
+**AL Explorer** — objects across project source and symbol packages, with preview
+
+![AL Explorer](docs/images/ALExplorer.png)
+
+**AL Object Wizard**
+
+![AL Object Wizard](docs/images/ALNewObject.png)
+
+**Go to definition** into base-object source
+
+![Go-to-definition preview](docs/images/ALPreviewPage_HostCard.png)
+
+**Code Cops** — toggle analyzers live
+
+![Select Code Cops](docs/images/ALSelectCodeCops.png)
+
+**Download Symbols** — server from `launch.json`, or global NuGet and AppSource feeds
+
+![Download Symbols picker](docs/images/DownloadSymbolsPicker.png)
+
+## Tests
+
+```bash
+tests/run.sh
 ```
 
-See the **[Installation wiki page](https://github.com/drs76/ALNvim/wiki/Installation)**
-for requirements, all configuration options, and how to install the MS AL extension
-without VS Code.
-
-## Documentation
-
-Full documentation is in the [wiki](https://github.com/drs76/ALNvim/wiki):
-
-| Page | Contents |
-|---|---|
-| [Installation](https://github.com/drs76/ALNvim/wiki/Installation) | Requirements, setup, all config options |
-| [Architecture](https://github.com/drs76/ALNvim/wiki/Architecture) | Plugin structure, load sequence diagrams |
-| [LSP Integration](https://github.com/drs76/ALNvim/wiki/LSP-Integration) | Language server, keymaps, format on save, project root detection |
-| [Compilation](https://github.com/drs76/ALNvim/wiki/Compilation) | alc compiler, output panel, quickfix, rulesets |
-| [Downloading Symbols](https://github.com/drs76/ALNvim/wiki/Downloading-Symbols) | Fetching .app symbol packages, authentication |
-| [Publishing](https://github.com/drs76/ALNvim/wiki/Publishing) | Compile → publish workflow, schema modes, cloud vs on-prem |
-| [Debugging](https://github.com/drs76/ALNvim/wiki/Debugging) | Snapshot debugging, live attach, nvim-dap-ui panels, variable inspection |
-| [AL MCP Server](https://github.com/drs76/ALNvim/wiki/AL-MCP-Server) | Claude Code integration via Microsoft AL Development Tools |
-| [AL Explorer](https://github.com/drs76/ALNvim/wiki/AL-Explorer) | Object browser, procedure picker, live grep, AL Help, Git diff |
-| [AL Object Wizard](https://github.com/drs76/ALNvim/wiki/AL-Object-Wizard) | New-object creation, file organiser, ID completion |
-| [Report Layout Wizard](https://github.com/drs76/ALNvim/wiki/Report-Layout-Wizard) | Excel/Word/RDLC layout generation |
-| [Code Actions and Cops](https://github.com/drs76/ALNvim/wiki/Code-Actions-and-Cops) | Quick fixes, refactors, code analyzers, browser selection |
-| [Snippets](https://github.com/drs76/ALNvim/wiki/Snippets) | 40+ LuaSnip snippets reference |
-| [Colour Schemes](https://github.com/drs76/ALNvim/wiki/Colour-Schemes) | bc_dark and bc_yellow |
-| [Commands Reference](https://github.com/drs76/ALNvim/wiki/Commands-Reference) | All user commands and keymaps |
-| [Project Structure](https://github.com/drs76/ALNvim/wiki/Project-Structure) | app.json, launch.json, alnvim.json examples |
-| [Troubleshooting](https://github.com/drs76/ALNvim/wiki/Troubleshooting) | Common problems and fixes |
+356 cases, no dependencies, no network. See the handbook's [Testing](docs/handbook.md#testing) section.

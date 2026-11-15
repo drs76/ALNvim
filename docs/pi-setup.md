@@ -12,7 +12,7 @@ Replace `<OLLAMA_URL>` with your server's OpenAI-compatible base, e.g.
 > certificate that works in Windows is invisible to Pi (a Linux Node process) in WSL.
 
 ## 1. Node ≥ 22.19 (Pi requires it)
-`node --version`; if < 22, on Debian/Ubuntu (incl. WSL):
+Run `node --version`. If it is below 22, on Debian/Ubuntu (incl. WSL):
 ```sh
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
@@ -59,7 +59,7 @@ pi list                               # confirm it's listed
 ```
 Without this, the provider only loads when you pass `-e ~/.pi/ollama-provider.ts`,
 so a bare `pi` (and `:ALPi`) reports **"No models available"**. After `install`,
-both work; `-e <path>` still works as a one-off override.
+both work. `-e <path>` still works as a one-off override.
 
 ## 5. TLS (only if your Ollama URL is HTTPS with a self-signed / private-CA cert)
 Node uses its own CA bundle, not the OS/browser store, so a private-CA endpoint
@@ -105,5 +105,5 @@ large models will 504 on cold start. Then in an AL buffer: `<leader>ak`.
   add it to `/etc/hosts`, or fix DNS via `/etc/resolv.conf` / `wsl.conf`.
 - **`--use-system-ca` needs Node ≥ 22** (the required version) and reads the *WSL*
   CA store — install the private CA there (step 5), not just in Windows.
-- Clock skew inside a resumed WSL VM can break TLS ("certificate not yet valid");
-  if you see cert errors after the laptop sleeps, resync the WSL clock.
+- Clock skew inside a resumed WSL VM can break TLS ("certificate not yet valid").
+  If you see cert errors after the laptop sleeps, resync the WSL clock.
