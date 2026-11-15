@@ -9,8 +9,6 @@
 | [docs/pi-setup.md](docs/pi-setup.md) | Pi agent setup per machine |
 | [CLAUDE.md](CLAUDE.md) | Agent-facing rules, the densest reference |
 
-NOTE: The [GitHub wiki](https://github.com/drs76/ALNvim/wiki) dates from 2026-04-10 and still describes the VS Code extension as the toolchain. The handbook replaces it.
-
 ## What it does
 
 - Compiles, publishes, downloads symbols and runs tests through `al`, the Microsoft AL dotnet tool.

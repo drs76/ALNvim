@@ -36,7 +36,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Lua code actions on the agentic LSP | 🟢 live | 32 tests in `tests/codeactions_spec.lua` |
 | Inlay hints | 🟠 pending upstream | Tool 30.0.42 reports `inlayHintProvider = false` |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
-| GitHub wiki | 🔴 stale | Last commit 2026-04-10. It still describes the extension as the toolchain |
+| GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
 
 ## What ALNvim achieves
 
