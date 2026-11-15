@@ -152,3 +152,321 @@ describe("refactor.suggest_name", function()
     eq("MyLabelLbl", RT.suggest_name("!!! ???"))
   end)
 end)
+
+-- ── Pure refactors ────────────────────────────────────────────────────────────
+
+describe("refactor.to_validate", function()
+  it("rewrites a member assignment as Rec.Validate(member, value)", function()
+    eq({ '        Cust.Validate("No.", Code);' },
+       R.to_validate({ '        Cust."No." := Code;' }))
+  end)
+
+  it("rewrites a bare assignment as Validate(field, value)", function()
+    eq({ '    Validate("No.", Code);' }, R.to_validate({ '    "No." := Code;' }))
+  end)
+
+  it("ignores a `:=` inside a string literal", function()
+    -- The only real assignment is Rec.Name := …; the `:=` in the literal must
+    -- not be taken as the operator.
+    eq({ "    Rec.Validate(Name, 'a := b');" },
+       R.to_validate({ "    Rec.Name := 'a := b';" }))
+  end)
+
+  it("refuses a compound assignment", function()
+    local out, err = R.to_validate({ "    Qty += 1;" })
+    eq(nil, out)
+    ok(err:match("compound"), err)
+  end)
+
+  it("refuses a statement that continues on the next line", function()
+    local out, err = R.to_validate({ "    Rec.Name :=" })
+    eq(nil, out)
+    ok(err:match("multi%-line"), err)
+  end)
+
+  it("converts several lines at once", function()
+    eq({ "    Validate(A, 1);", "    Validate(B, 2);" },
+       R.to_validate({ "    A := 1;", "    B := 2;" }))
+  end)
+end)
+
+describe("refactor.to_evaluate", function()
+  it("rewrites X := Y; as Evaluate(X, Y);", function()
+    eq({ "    Evaluate(Amount, Txt);" }, R.to_evaluate({ "    Amount := Txt;" }))
+  end)
+end)
+
+-- Drive the shipped extract_label with stubbed prompts so the Label text the
+-- user actually gets is what is asserted on.
+local function run_extract_label(lines, cursor, scope, opts)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(0, buf)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_win_set_cursor(0, cursor)
+  local o_input, o_select = vim.ui.input, vim.ui.select
+  vim.ui.input  = function(_, cb) cb("MyLbl") end
+  vim.ui.select = function(items, _, cb)
+    for _, it in ipairs(items) do if it:match("^" .. scope) then cb(it) end end
+  end
+  R.extract_label(opts)
+  vim.wait(200, function() return false end)   -- flush vim.schedule
+  vim.ui.input, vim.ui.select = o_input, o_select
+  return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+end
+
+describe("refactor.extract_label Locked", function()
+  local src = {
+    'codeunit 50000 "X"',
+    '{',
+    '    procedure Run()',
+    '    begin',
+    "        Message('hello');",
+    '    end;',
+    '}',
+  }
+  local col = src[5]:find("hello") - 1
+
+  it("emits a translatable label by default (no Locked)", function()
+    -- Regression: `Locked = true` was emitted for every extracted label, so
+    -- the default silently removed strings from translation.
+    local out = run_extract_label(src, { 5, col }, "Local")
+    local decl
+    for _, l in ipairs(out) do if l:match("MyLbl: Label") then decl = l end end
+    ok(decl, "declaration present: " .. vim.inspect(out))
+    eq(nil, decl:match("Locked"), decl)
+    eq("        Message(MyLbl);", out[7])
+  end)
+
+  it("emits Locked = true only when asked", function()
+    local out = run_extract_label(src, { 5, col }, "Local", { locked = true })
+    local decl
+    for _, l in ipairs(out) do if l:match("MyLbl: Label") then decl = l end end
+    ok(decl and decl:match("Locked = true"), vim.inspect(out))
+  end)
+
+  it("creates a global var block before the first procedure", function()
+    local out = run_extract_label(src, { 5, col }, "Global")
+    eq({ 'codeunit 50000 "X"', '{', '', '    var', "        MyLbl: Label 'hello';",
+         '    procedure Run()' }, vim.list_slice(out, 1, 6))
+  end)
+end)
+
+describe("refactor.make_var_global", function()
+  it("drops a dangling `var` and creates the global block", function()
+    local src = {
+      'codeunit 1 "X"', '{',
+      '    procedure P()',
+      '    var',
+      '        Cust: Record Customer;',
+      '    begin',
+      '        Cust.Get();',
+      '    end;',
+      '}',
+    }
+    eq({
+      'codeunit 1 "X"', '{',
+      '',
+      '    var',
+      '        Cust: Record Customer;',
+      '    procedure P()',
+      '    begin',
+      '        Cust.Get();',
+      '    end;',
+      '}',
+    }, R.make_var_global(src, 5))
+  end)
+
+  it("appends to an existing global block and keeps a non-empty local block", function()
+    local src = {
+      'codeunit 1 "X"', '{',
+      '    var',
+      '        G: Integer;',
+      '',
+      '    procedure P()',
+      '    var',
+      '        A: Integer;',
+      '        B: Integer;',
+      '    begin',
+      '    end;',
+      '}',
+    }
+    local out = R.make_var_global(src, 9)
+    eq('        B: Integer;', out[5])
+    eq('    var', out[8])
+    eq('        A: Integer;', out[9])
+    eq('    begin', out[10])
+  end)
+
+  it("refuses a cursor outside the local var block", function()
+    local src = { 'codeunit 1 "X"', '{', '    procedure P()', '    var', '        A: Integer;',
+                  '    begin', '        A := 1;', '    end;', '}' }
+    local out, err = R.make_var_global(src, 7)
+    eq(nil, out); ok(err)
+  end)
+end)
+
+describe("refactor.add_publishers", function()
+  local src = {
+    'codeunit 1 "X"', '{',
+    '    procedure Post(var SalesHeader: Record "Sales Header"; Commit: Boolean)',
+    '    begin',
+    '        DoIt();',
+    '    end;',
+    '}',
+  }
+
+  it("keeps var params, adds IsHandled, early-exits after begin, publishers after end", function()
+    local out = R.add_publishers(src, 3, { publisher_var_params = true, initialize_is_handled = true })
+    eq({
+      'codeunit 1 "X"', '{',
+      '    procedure Post(var SalesHeader: Record "Sales Header"; Commit: Boolean)',
+      '    var',
+      '        IsHandled: Boolean;',
+      '    begin',
+      '        IsHandled := false;',
+      '        OnBeforePost(SalesHeader, Commit, IsHandled);',
+      '        if IsHandled then',
+      '            exit;',
+      '',
+      '        DoIt();',
+      '        OnAfterPost(SalesHeader, Commit);',
+      '    end;',
+      '',
+      '    [IntegrationEvent(false, false)]',
+      '    local procedure OnBeforePost(var SalesHeader: Record "Sales Header"; var Commit: Boolean; var IsHandled: Boolean)',
+      '    begin',
+      '    end;',
+      '',
+      '    [IntegrationEvent(false, false)]',
+      '    local procedure OnAfterPost(var SalesHeader: Record "Sales Header"; var Commit: Boolean)',
+      '    begin',
+      '    end;',
+      '}',
+    }, out)
+  end)
+
+  it("honours publisher_var_params=false and initialize_is_handled=false", function()
+    local out = R.add_publishers(src, 3, { publisher_var_params = false, initialize_is_handled = false })
+    eq('        OnBeforePost(SalesHeader, Commit, IsHandled);', out[7])
+    ok(vim.tbl_contains(out,
+      '    local procedure OnBeforePost(var SalesHeader: Record "Sales Header"; Commit: Boolean; var IsHandled: Boolean)'),
+      vim.inspect(out))
+  end)
+
+  it("refuses when OnBefore<Name> already exists", function()
+    local with = vim.deepcopy(src)
+    table.insert(with, 7, '    local procedure OnBeforePost(var IsHandled: Boolean) begin end;')
+    local out, err = R.add_publishers(with, 3)
+    eq(nil, out); ok(err:match("already exists"), err)
+  end)
+end)
+
+describe("refactor.promote_action", function()
+  it("creates area(Promoted) with a group when absent", function()
+    local src = {
+      'page 1 "X"', '{',
+      '    actions',
+      '    {',
+      '        area(Processing)',
+      '        {',
+      '            action(Post)',
+      '            {',
+      '            }',
+      '        }',
+      '    }',
+      '}',
+    }
+    local out = R.promote_action(src, 7)
+    eq({
+      '        area(Promoted)',
+      '        {',
+      '            group(Category_Process)',
+      '            {',
+      '                actionref(Post_Promoted; Post)',
+      '                {',
+      '                }',
+      '            }',
+      '        }',
+      '    }',
+    }, vim.list_slice(out, 11, 20))
+  end)
+
+  it("appends to the first existing group and sanitises quoted names", function()
+    local src = {
+      'page 1 "X"', '{',
+      '    actions',
+      '    {',
+      '        area(Processing)',
+      '        {',
+      '            action("Post Now")',
+      '            {',
+      '            }',
+      '        }',
+      '        area(Promoted)',
+      '        {',
+      '            group(Category_Process)',
+      '            {',
+      '                actionref(Other_Promoted; Other)',
+      '                {',
+      '                }',
+      '            }',
+      '        }',
+      '    }',
+      '}',
+    }
+    local out = R.promote_action(src, 7)
+    eq('                actionref(PostNow_Promoted; "Post Now")', out[18])
+    eq('            }', out[21])
+  end)
+
+  it("refuses an already promoted action", function()
+    local src = {
+      'page 1 "X"', '{', '    actions', '    {',
+      '        area(Processing)', '        {', '            action(Post)', '            {', '            }', '        }',
+      '        area(Promoted)', '        {', '            group(G)', '            {',
+      '                actionref(Post_Promoted; Post)', '                {', '                }',
+      '            }', '        }', '    }', '}',
+    }
+    local out, err = R.promote_action(src, 7)
+    eq(nil, out); ok(err:match("already promoted"), err)
+  end)
+end)
+
+describe("refactor.handlers", function()
+  local src = {
+    'codeunit 1 "T"', '{',
+    "    [Test]",
+    "    [HandlerFunctions('MsgHandler,ConfirmYes')]",
+    '    procedure Run()',
+    '    begin',
+    '    end;',
+    '',
+    '    [MessageHandler]',
+    '    procedure MsgHandler(Message: Text[1024])',
+    '    begin',
+    '    end;',
+    '}',
+  }
+
+  it("lists only the handlers that do not exist yet", function()
+    local info = R.missing_handlers(src, 4)
+    eq({ "ConfirmYes" }, info.missing)
+    eq(7, info.proc_fin)
+  end)
+
+  it("stubs a handler with the fixed signature after the test", function()
+    local out = R.create_handler_function(src, "ConfirmYes", "ConfirmHandler", 7, "    ")
+    eq({ '', '    [ConfirmHandler]',
+         '    procedure ConfirmYes(Question: Text[1024]; var Reply: Boolean)',
+         '    begin', '    end;' }, vim.list_slice(out, 8, 12))
+  end)
+end)
+
+describe("refactor.insert_var_decl", function()
+  it("appends after the last declaration of an existing local block", function()
+    local l = { 'codeunit 1 "X"', '{', '    procedure P()', '    var', '        A: Integer;',
+                '    begin', '    end;', '}' }
+    local out = RT.insert_var_decl(l, "local", "B: Integer;", RT.find_proc_bounds(l, 6))
+    eq('        B: Integer;', out[6])
+  end)
+end)

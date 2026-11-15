@@ -1039,6 +1039,46 @@ end, {
   desc = "AL: Extract visual selection into a new local procedure",
 })
 
+vim.api.nvim_create_user_command("ALExtractLockedLabel", function()
+  require("al.refactor").extract_label({ locked = true })
+end, {
+  desc = "AL: Extract single-quoted string under cursor to a locked Label variable",
+})
+
+vim.api.nvim_create_user_command("ALCodeAction", function(o)
+  local only = o.args ~= "" and o.args or nil
+  local range = o.range > 0 and { o.line1, o.line2 } or nil
+  require("al.codeactions").pick({ only = only, range = range })
+end, {
+  nargs = "?", range = true,
+  complete = function() return { "refactor", "quickfix", "source", "navigate" } end,
+  desc = "AL: Code actions (Lua actions + server actions when supported)",
+})
+
+vim.api.nvim_create_user_command("ALRefactorValidate", function(o)
+  require("al.refactor").convert_to_validate(o.line1, o.line2)
+end, { range = true, desc = "AL: Convert `X := Y;` to `Validate(X, Y);`" })
+
+vim.api.nvim_create_user_command("ALRefactorEvaluate", function(o)
+  require("al.refactor").convert_to_evaluate(o.line1, o.line2)
+end, { range = true, desc = "AL: Convert `X := Y;` to `Evaluate(X, Y);`" })
+
+vim.api.nvim_create_user_command("ALMakeVarGlobal", function()
+  require("al.refactor").make_var_global_at_cursor()
+end, { desc = "AL: Move local variable under cursor to the global var block" })
+
+vim.api.nvim_create_user_command("ALAddPublishers", function()
+  require("al.refactor").add_publishers_at_cursor()
+end, { desc = "AL: Add OnBefore/OnAfter IntegrationEvent publishers to the current procedure" })
+
+vim.api.nvim_create_user_command("ALPromoteAction", function()
+  require("al.refactor").promote_action_at_cursor()
+end, { desc = "AL: Add actionref for the action under cursor to area(Promoted)" })
+
+vim.api.nvim_create_user_command("ALCreateHandler", function()
+  require("al.refactor").create_handler()
+end, { desc = "AL: Create a missing handler function from [HandlerFunctions]" })
+
 vim.api.nvim_create_user_command("ALCreateSnippet", function()
   require("al.snippets").create_from_selection()
 end, {
