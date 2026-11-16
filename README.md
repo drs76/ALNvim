@@ -63,29 +63,43 @@ All options with their defaults are in [lua/al/init.lua](lua/al/init.lua). The o
 
 ## Screenshots
 
+Captured 2026-11-16 in the user's Catnip front end (Neovim 0.11, AL dotnet tool 30.0.42, agentic LSP).
+
 **AL Actions** — one picker for every command, with descriptions and keys
 
-![AL Actions](docs/images/ALActions.png)
+![AL Actions](docs/images/al-actions.png)
+
+**Catnip AL Commands** — the same commands grouped by category in a `vim.ui.select` front end
+
+![Catnip AL commands](docs/images/catnip-al-commands.png)
+
+**Compile** — `al compile` streams into the build panel, `<CR>` opens the diagnostic
+
+![Compile panel](docs/images/al-compile.png)
+
+**Code actions** — Lua actions that work without a `codeActionProvider`
+
+![Code actions](docs/images/al-code-actions.png)
+
+**Hover** — base-table fields from the symbol packages
+
+![Hover on Customer](docs/images/al-hover.png)
 
 **AL Explorer** — objects across project source and symbol packages, with preview
 
-![AL Explorer](docs/images/ALExplorer.png)
+![AL Explorer](docs/images/al-explorer.png)
 
-**AL Object Wizard**
+**AL Object Wizard** — 18 object types, CRS file naming
 
-![AL Object Wizard](docs/images/ALNewObject.png)
+![AL Object Wizard](docs/images/al-new-object.png)
 
-**Go to definition** into base-object source
+**Code Cops** — toggle analyzers
 
-![Go-to-definition preview](docs/images/ALPreviewPage_HostCard.png)
-
-**Code Cops** — toggle analyzers live
-
-![Select Code Cops](docs/images/ALSelectCodeCops.png)
+![Select Code Cops](docs/images/al-select-cops.png)
 
 **Download Symbols** — server from `launch.json`, or global NuGet and AppSource feeds
 
-![Download Symbols picker](docs/images/DownloadSymbolsPicker.png)
+![Download Symbols picker](docs/images/al-download-symbols.png)
 
 ## Tests
 
