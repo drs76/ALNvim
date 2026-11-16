@@ -109,7 +109,10 @@ local function run_pick(capabilities, opts, server_result)
   local o_client, o_root, o_select = lsp.client, lsp.get_root, vim.ui.select
   lsp.client   = function() return fake end
   lsp.get_root = function() return "/tmp" end
-  vim.ui.select = function(items, sopts) shown = vim.tbl_map(sopts.format_item, items) end
+  vim.ui.select = function(items, sopts)
+    shown = vim.tbl_map(sopts.format_item, items)
+    shown.kind = sopts.kind
+  end
   local okk, err = pcall(CA.pick, opts)
   lsp.client, lsp.get_root, vim.ui.select = o_client, o_root, o_select
   assert(okk, err)
@@ -129,6 +132,14 @@ describe("codeactions.pick", function()
     eq({ "textDocument/codeAction" }, calls)
     ok(vim.tbl_contains(shown, "[LSP] Fix it"), vim.inspect(shown))
     ok(vim.tbl_contains(shown, "Extract to Label"), vim.inspect(shown))
+  end)
+
+  it("does not call vim.ui.select with kind \"codeaction\"", function()
+    -- snacks.nvim's ui_select formats that kind as LSP items and indexes
+    -- item.ctx, so the picker crashed with "attempt to index local 'ctx'"
+    -- on any config using snacks (found 2026-11-16 under Catnip).
+    local _, shown = run_pick({}, nil)
+    ok(shown.kind ~= "codeaction", "kind must not be the LSP-reserved one")
   end)
 
   it("server_supported reflects codeActionProvider", function()

@@ -84,7 +84,7 @@ local function show(items, ctx)
   vim.ui.select(items, {
     prompt      = "AL code actions:",
     format_item = function(it) return it.title end,
-    kind        = "codeaction",
+    kind        = "al.codeaction",  -- not "codeaction": snacks.nvim ui_select reads item.ctx for that kind
   }, function(choice)
     if not choice then return end
     choice.run(ctx)
