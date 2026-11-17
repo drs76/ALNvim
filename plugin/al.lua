@@ -549,6 +549,11 @@ end, {
   desc  = "Compile the AL project (al compile — AL dotnet tool)",
 })
 
+-- Opt-in linked diagnostics; :ALCompile keeps its existing output panel.
+vim.api.nvim_create_user_command("ALCatnipDiagnostics", function()
+  require("al.compile").open_catnip_diagnostics()
+end, { desc = "Browse the last AL build diagnostics in Catnip" })
+
 vim.api.nvim_create_user_command("ALPublish", function(opts)
   -- `al publishapp` (AL dotnet tool) only — no extension fallback.
   require("al.publish").publish(opts.args ~= "" and opts.args or nil)

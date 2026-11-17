@@ -315,6 +315,8 @@ local function finish(buf, qf, exit_code, on_success, project_dir)
     buf_highlight(buf)
 
     require("al.status").set_compile_result(#errors, #warnings)
+    -- Retain the exact completed build diagnostics for optional Catnip navigation.
+    M._catnip_last_qf = vim.deepcopy(qf)
     vim.fn.setqflist(qf, "r")
     push_diagnostics(qf)
 
@@ -383,6 +385,8 @@ function M.compile(project_dir, extra_args, on_success)
     table.insert(cmd, arg)
   end
 
+  -- Never expose diagnostics from a previous build while a new one runs.
+  M._catnip_last_qf = nil
   local proj_name = vim.fn.fnamemodify(project_dir, ":t")
   local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir, build_cwd)
   buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
@@ -522,6 +526,16 @@ function M.open_app_json()
     return
   end
   vim.cmd("edit " .. vim.fn.fnameescape(root .. "/app.json"))
+end
+
+-- Opt-in Catnip view of the most recent *completed* build; legacy build panel
+-- and quickfix remain unchanged. Catnip is an optional host dependency.
+function M.open_catnip_diagnostics()
+  if not M._catnip_last_qf then
+    vim.notify('AL: Run :ALCompile and wait for it to finish first', vim.log.levels.INFO)
+    return false
+  end
+  return require('al.catnip_diagnostics').open(M._catnip_last_qf)
 end
 
 -- Expose the resolved compiler invocation (for :ALInfo / diagnostics).
