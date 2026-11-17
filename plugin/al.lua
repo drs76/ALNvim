@@ -542,11 +542,20 @@ vim.api.nvim_create_autocmd("LspDetach", {
 -- ── User commands ─────────────────────────────────────────────────────────────
 
 vim.api.nvim_create_user_command("ALCompile", function(opts)
+  require("al.compile").compile_catnip(opts.args ~= "" and opts.args or nil)
+end, {
+  nargs = "?",
+  complete = "dir",
+  desc = "Compile AL project with Catnip output",
+})
+
+-- Explicit fallback to the original build panel.
+vim.api.nvim_create_user_command("ALCompileLegacy", function(opts)
   require("al.compile").compile(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
   complete = "dir",
-  desc  = "Compile the AL project (al compile — AL dotnet tool)",
+  desc = "Compile AL project with legacy split",
 })
 
 -- Opt-in managed Catnip output. Existing ALCompile remains the default.
