@@ -297,7 +297,40 @@ local function clear_lsp_diagnostics(project_dir)
   end
 end
 
-local function finish(buf, qf, exit_code, on_success, project_dir)
+-- Optional per-build output sink. In legacy mode, retain the original split.
+-- In Catnip mode, the sink owns a persistent view; closing it never stops alc.
+local function build_output_sink(title, project_dir, build_cwd, catnip)
+  if catnip then
+    local ok, ui = pcall(require, 'catnip.ui')
+    if ok and type(ui.output) == 'function' then
+      local view = ui.output({ id = 'alnvim.build.output', title = title, lines = {} })
+      M._catnip_build_view = view
+      -- The compiler output retains the raw file(line,col): warning/error text.
+      -- Only diagnostic lines navigate; commands and summaries remain inert.
+      vim.keymap.set('n', '<CR>', function()
+        local text = vim.api.nvim_get_current_line()
+        local file, lnum, col = text:match('^(.+)%((%d+),(%d+)%)%s*:%s*[Ee][Rr][Rr][Oo][Rr]%s')
+        if not file then
+          file, lnum, col = text:match('^(.+)%((%d+),(%d+)%)%s*:%s*[Ww][Aa][Rr][Nn][Ii][Nn][Gg]%s')
+        end
+        if not file then return end
+        file = file:gsub('\\', '/')
+        if not (file:match('^[A-Za-z]:/') or file:match('^/')) then
+          file = (build_cwd or project_dir) .. '/' .. file
+        end
+        view:edit_file({ file = file, line = tonumber(lnum), col = tonumber(col) })
+      end, { buffer = view.buf, nowait = true, silent = true, desc = 'Edit build diagnostic' })
+      return view.buf, function(lines)
+        view:append(vim.tbl_filter(function(line) return line ~= '' end, lines))
+      end
+    end
+    vim.notify('AL: Catnip UI unavailable; using the legacy build panel', vim.log.levels.WARN)
+  end
+  local buf = open_build_win(title, project_dir, build_cwd)
+  return buf, function(lines) buf_append(buf, lines) end
+end
+
+local function finish(buf, qf, exit_code, on_success, project_dir, emit)
   vim.schedule(function()
     local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
     local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
@@ -311,7 +344,7 @@ local function finish(buf, qf, exit_code, on_success, project_dir)
     else
       summary = string.format("%d error(s), %d warning(s)", #errors, #warnings)
     end
-    buf_append(buf, { "", "── " .. summary .. " ──" })
+    (emit or function(lines) buf_append(buf, lines) end)({ "", "── " .. summary .. " ──" })
     buf_highlight(buf)
 
     require("al.status").set_compile_result(#errors, #warnings)
@@ -332,7 +365,7 @@ end
 -- @param project_dir  optional override; defaults to the directory of app.json
 -- @param extra_args   optional table of additional /flag:value strings
 -- @param on_success   optional function() called after a clean build (no errors)
-function M.compile(project_dir, extra_args, on_success)
+function M.compile(project_dir, extra_args, on_success, opts)
   project_dir = project_dir or lsp.get_root()
   if not project_dir then
     vim.notify("AL: Cannot find project root (no app.json found)", vim.log.levels.ERROR)
@@ -388,14 +421,15 @@ function M.compile(project_dir, extra_args, on_success)
   -- Never expose diagnostics from a previous build while a new one runs.
   M._catnip_last_qf = nil
   local proj_name = vim.fn.fnamemodify(project_dir, ":t")
-  local buf, _win = open_build_win("AL Build — " .. proj_name, project_dir, build_cwd)
-  buf_append(buf, { "$ " .. table.concat(cmd, " "), "" })
+  local buf, emit = build_output_sink("AL Build — " .. proj_name,
+    project_dir, build_cwd, opts and opts.catnip)
+  emit({ "$ " .. table.concat(cmd, " "), "" })
 
   local output = {}
   local function consume(lines)
     local clean = strip_cr(lines)
     vim.list_extend(output, clean)
-    vim.schedule(function() buf_append(buf, clean) end)
+    vim.schedule(function() emit(clean) end)
   end
   -- Separate carries: stdout and stderr are independent streams and interleaving
   -- their partial lines through one buffer would corrupt both.
@@ -408,7 +442,7 @@ function M.compile(project_dir, extra_args, on_success)
     on_exit = function(_, code)
       flush_out()
       flush_err()
-      finish(buf, parse_output(output, build_cwd), code, on_success, project_dir)
+      finish(buf, parse_output(output, build_cwd), code, on_success, project_dir, emit)
     end,
   })
 end
@@ -528,6 +562,21 @@ function M.open_app_json()
   vim.cmd("edit " .. vim.fn.fnameescape(root .. "/app.json"))
 end
 
+-- Opt-in Catnip build output. No changes to ordinary :ALCompile or its callers.
+function M.compile_catnip(project_dir)
+  return M.compile(project_dir, nil, nil, { catnip = true })
+end
+
+function M.open_catnip_build_output()
+  local view = M._catnip_build_view
+  if not view then
+    vim.notify('AL: No Catnip build output yet; run :ALCompileCatnip', vim.log.levels.INFO)
+    return false
+  end
+  view:open()
+  return true
+end
+
 -- Opt-in Catnip view of the most recent *completed* build; legacy build panel
 -- and quickfix remain unchanged. Catnip is an optional host dependency.
 function M.open_catnip_diagnostics()
@@ -543,7 +592,8 @@ M.compiler_prefix = compiler_prefix
 
 -- Pure internals exposed for tests/ only. Not API — do not call from plugin code.
 M._test = { line_stream = line_stream, parse_output = parse_output,
-            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS }
+            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS,
+            build_output_sink = build_output_sink }
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()

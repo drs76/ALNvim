@@ -549,6 +549,15 @@ end, {
   desc  = "Compile the AL project (al compile — AL dotnet tool)",
 })
 
+-- Opt-in managed Catnip output. Existing ALCompile remains the default.
+vim.api.nvim_create_user_command("ALCompileCatnip", function(opts)
+  require("al.compile").compile_catnip(opts.args ~= "" and opts.args or nil)
+end, { nargs = "?", complete = "dir", desc = "Compile with managed Catnip output" })
+
+vim.api.nvim_create_user_command("ALBuildOutput", function()
+  require("al.compile").open_catnip_build_output()
+end, { desc = "Reopen the last Catnip build output" })
+
 -- Opt-in linked diagnostics; :ALCompile keeps its existing output panel.
 vim.api.nvim_create_user_command("ALCatnipDiagnostics", function()
   require("al.compile").open_catnip_diagnostics()
