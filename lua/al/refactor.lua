@@ -340,11 +340,233 @@ end
 --   2. Prompts for the new name.
 --   3. Greps all .al files in the project for "Name" (literal) and replaces.
 -- Falls back to vim.lsp.buf.rename() when cursor is not inside a quoted identifier.
+-- ── Rename through references (agentic LSP) ────────────────────────────────
+--
+-- The AL tool's language server (al launchlspserver) advertises renameProvider
+-- but never answers textDocument/rename — no result, no error, after minutes —
+-- so vim.lsp.buf.rename() waited forever and nothing happened. Its
+-- textDocument/references is accurate for every kind of symbol (locals,
+-- parameters, fields through `Rec.`, procedures, objects, quoted names with the
+-- quotes inside the range), across files the editor never opened. So rename is
+-- built on it: every reference becomes an edit.
+--
+-- Two properties of its references matter:
+--   * includeDeclaration is ignored. The declaration is always in the result
+--     when it lives in the project, and absent when it lives in a symbol
+--     package. A rename with no declaration among the edits would rewrite the
+--     usages of a base-app or dependency symbol and break the build — refused.
+--   * Ranges cover the token exactly, including the quotes of "Quoted Name".
+
+-- Text to write over `orig` (the old token as it appears at one location).
+-- A quoted original stays quoted; a bare one gets quotes only when the new name
+-- is not a plain identifier. Embedded quotes are doubled, as AL escapes them.
+local function rename_text(orig, new)
+  local plain = new:match("^[%a_][%w_]*$") ~= nil
+  if orig:sub(1, 1) == '"' or not plain then
+    return '"' .. new:gsub('"', '""') .. '"'
+  end
+  return new
+end
+
+-- Keywords whose first argument names a member: `action(Post)`, `field(2; Amount; …)`.
+local MEMBER_KEYWORDS = {}
+for _, k in ipairs({ "field", "value", "key", "fieldgroup", "action", "area", "group",
+  "part", "systempart", "usercontrol", "repeater", "grid", "fixed", "cuegroup", "label",
+  "separator", "view", "dataitem", "column", "filter", "requestpage", "layout",
+  "actionref", "customaction", "fileuploadaction", "textattribute", "fieldattribute",
+  "tableelement", "textelement", "fieldelement", "schema" }) do
+  MEMBER_KEYWORDS[k] = true
+end
+
+-- Does the token at [s, e] (1-based, inclusive) on `line` declare a symbol?
+-- Covers object headers, table/page/report members written as `kind(…; Name`
+-- or `kind(Name)`, procedures/triggers, and variables/parameters `Name:`.
+local function is_declaration(line, s, e)
+  local before = line:sub(1, s - 1):lower()
+  local after  = line:sub(e + 1)
+  local objects = {
+    "table", "tableextension", "page", "pageextension", "pagecustomization", "codeunit",
+    "report", "reportextension", "query", "xmlport", "enum", "enumextension", "interface",
+    "permissionset", "permissionsetextension", "profile", "profileextension",
+    "controladdin", "entitlement",
+  }
+  for _, k in ipairs(objects) do
+    if before:match("^%s*" .. k .. "%s+%d*%s*$") then return true end
+  end
+  if before:match("procedure%s+$") or before:match("^%s*trigger%s+$") then return true end
+  -- field(1; Name; …), value(0; Name), key(PK; …), action(Post), dataitem(Name; …).
+  -- Only AL member keywords: `Helper(Total)` has the same shape and is a call.
+  local kw = before:match("^%s*(%a+)%s*%(%s*%d+%s*;%s*$") or before:match("^%s*(%a+)%s*%(%s*$")
+  if kw and MEMBER_KEYWORDS[kw] then
+    return after:match("^%s*[;%)]") ~= nil
+  end
+  -- Name: Type   /   a, Name: Type   /   (var Name: Type; …) — but not Name := …
+  if after:match("^%s*:") and not after:match("^%s*:=") then return true end
+  if after:match("^%s*,") and (before:match("^%s*$") or before:match(",%s*$")) then return true end
+  return false
+end
+
+-- Turn reference locations into a WorkspaceEdit. get_line(path, lnum0) returns
+-- that line's text; enc is the client's offset encoding. Returns
+-- (edit, count, files) or (nil, reason).
+local function plan_rename(locs, root, new, get_line, enc)
+  local changes, seen, count, files = {}, {}, 0, {}
+  local declared = false
+  local prefix = vim.fs.normalize(root) .. "/"
+  for _, loc in ipairs(locs or {}) do
+    local uri  = loc.uri or loc.targetUri
+    local rng  = loc.range or loc.targetSelectionRange
+    local path = uri and vim.fs.normalize(vim.uri_to_fname(uri))
+    if path and rng and path:sub(1, #prefix) == prefix then
+      local key = uri .. ":" .. rng.start.line .. ":" .. rng.start.character
+      local line = get_line(path, rng.start.line)
+      if line and not seen[key] then
+        seen[key] = true
+        local s = vim.str_byteindex(line, enc, rng.start.character, false) + 1
+        local e = vim.str_byteindex(line, enc, rng["end"].character, false)
+        local orig = line:sub(s, e)
+        if is_declaration(line, s, e) then declared = true end
+        changes[uri] = changes[uri] or {}
+        table.insert(changes[uri], { range = rng, newText = rename_text(orig, new) })
+        if not files[path] then files[path] = true; files[#files + 1] = path end
+        count = count + 1
+      end
+    end
+  end
+  if count == 0 then return nil, "no references in this project" end
+  if not declared then
+    return nil, "it is declared outside this project (base app or a dependency) — "
+      .. "rename it where it is declared"
+  end
+  return { changes = changes }, count, files
+end
+
+-- Read one line of `path`: from its buffer when loaded (unsaved edits are what
+-- the server sees), else from disk.
+local function line_of(path, lnum0)
+  local b = vim.fn.bufnr(path)
+  if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
+    return vim.api.nvim_buf_get_lines(b, lnum0, lnum0 + 1, false)[1]
+  end
+  local ok, lines = pcall(vim.fn.readfile, path, "", lnum0 + 1)
+  return ok and lines[lnum0 + 1] or nil
+end
+
+-- Defined below mask_strings, which it uses; declared here so
+-- rename_via_references can see it (a later `local` is not in scope above).
+local local_text_rename
+
+-- How long to wait for references before falling back. The server does not
+-- answer at all when the file has a syntax error at the symbol — e.g. a page
+-- variable named `Actions`, a reserved word there — and that broken file is
+-- exactly when people rename.
+local REFS_TIMEOUT_MS = 8000
+
+local function rename_via_references(client, bufnr, root)
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+  local t = require("al.basedef").target_at_cursor(line, col)
+  if not t then
+    vim.notify("AL rename: no identifier under the cursor", vim.log.levels.WARN)
+    return
+  end
+  -- Captured now: the prompt may move the cursor.
+  local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+  params.context = { includeDeclaration = true }
+
+  vim.ui.input({ prompt = 'Rename "' .. t.name .. '" to: ', default = t.name }, function(new)
+    new = new and vim.trim(new) or ""
+    if new:match('^".*"$') then new = new:sub(2, -2) end
+    if new == "" or new == t.name then return end
+
+    -- Fallback: rename a local variable or parameter by text inside its
+    -- procedure. Used when the server gives nothing usable.
+    local function fallback(why)
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local new_lines, count = local_text_rename(lines, row, t.name, new)
+      if not new_lines then
+        vim.notify(('AL rename: cannot rename "%s": %s; %s'):format(t.name, why, count),
+          vim.log.levels.WARN)
+        return
+      end
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+      vim.notify(('AL rename: "%s" → "%s", %d occurrence(s) in this procedure — renamed by '
+        .. 'text because %s'):format(t.name, new, count, why), vim.log.levels.WARN)
+    end
+
+    -- An error diagnostic on the symbol's own line usually means a parse error
+    -- there, and the server then never answers. Try the local rename first; if
+    -- it refuses (not a local), still ask the server.
+    if #vim.diagnostic.get(bufnr, { lnum = row - 1, severity = vim.diagnostic.severity.ERROR }) > 0 then
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local new_lines, count = local_text_rename(lines, row, t.name, new)
+      if new_lines then
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+        vim.notify(('AL rename: "%s" → "%s", %d occurrence(s) in this procedure — renamed by '
+          .. 'text because this line has an error'):format(t.name, new, count), vim.log.levels.WARN)
+        return
+      end
+    end
+
+    local finished, req_id = false, nil
+    local function finish() if finished then return false end; finished = true; return true end
+    vim.defer_fn(function()
+      if not finished then vim.notify("AL rename: finding references…", vim.log.levels.INFO) end
+    end, 1000)
+    vim.defer_fn(function()
+      if not finish() then return end
+      if req_id then pcall(client.cancel_request, client, req_id) end
+      fallback("the language server did not answer (syntax error in this file?)")
+    end, REFS_TIMEOUT_MS)
+
+    local ok_req
+    ok_req, req_id = client:request("textDocument/references", params, function(err, locs)
+      vim.schedule(function()
+        if not finish() then return end
+        if err then
+          fallback("references failed: " .. tostring(err.message or err))
+          return
+        end
+        local edit, count, files = plan_rename(locs, root, new, line_of, client.offset_encoding)
+        if not edit then
+          -- A symbol package's declaration is a real refusal; an empty result
+          -- on a declaration the user is standing on means the server could not
+          -- resolve it (usually a parse error), so try the local fallback.
+          if type(count) == "string" and count:find("declared outside", 1, true)
+            and #(locs or {}) > 0 then
+            vim.notify(('AL rename: cannot rename "%s": %s'):format(t.name, count),
+              vim.log.levels.WARN)
+          else
+            fallback("the language server found no references")
+          end
+          return
+        end
+        vim.lsp.util.apply_workspace_edit(edit, client.offset_encoding)
+        vim.notify(('AL rename: "%s" → "%s", %d reference(s) in %d file(s) — :wa to save all')
+          :format(t.name, new, count, #files), vim.log.levels.INFO)
+      end)
+    end, bufnr)
+    if not ok_req then
+      if finish() then fallback("the request could not be sent") end
+    end
+  end)
+end
+
 function M.rename_object()
   local root = lsp_mod.get_root()
   if not root then
     vim.notify('AL: no project root found', vim.log.levels.WARN)
     return
+  end
+
+  -- The tool's language server: references-based rename for every symbol,
+  -- quoted or not. The text search below renames every "Entry No." in the
+  -- project — every table's field of that name — where references renames
+  -- the one symbol under the cursor.
+  local bufnr = vim.api.nvim_get_current_buf()
+  local client = lsp_mod.client(bufnr)
+  if client and client.name == "al_agentic_lsp" then
+    return rename_via_references(client, bufnr, root)
   end
 
   local old_name = dquoted_id_at_cursor()
@@ -550,6 +772,68 @@ local function mask_strings(line)
     end
   end
   return table.concat(out)
+end
+
+-- Text rename of a local variable or parameter, inside its procedure only.
+--
+-- The fallback for rename_via_references when the server cannot resolve the
+-- file. Refuses anything that is not declared in the procedure's header or var
+-- block: by text, renaming a global, a field or a procedure would reach into
+-- other objects and same-named members. String literals and // comments are
+-- skipped — `Widget.Add('Actions', Actions)` keeps its JSON key — and so are
+-- quoted identifiers, since a bare `Actions` must not touch "Actions Setup".
+-- AL identifiers are case-insensitive, so matching is too.
+-- Returns (new_lines, count) or (nil, reason).
+local function strip_comment(masked)
+  local c = masked:find("//", 1, true)
+  return c and (masked:sub(1, c - 1) .. string.rep(" ", #masked - c + 1)) or masked
+end
+
+local function word_spans(masked, name)
+  local spans, low, pat = {}, masked:lower(), name:lower()
+  local i = 1
+  while true do
+    local s, e = low:find(pat, i, true)
+    if not s then break end
+    local b, a = masked:sub(s - 1, s - 1), masked:sub(e + 1, e + 1)
+    if not b:match("[%w_]") and not a:match("[%w_]") then spans[#spans + 1] = { s, e } end
+    i = e + 1
+  end
+  return spans
+end
+
+local_text_rename = function(lines, row, name, new)
+  if not name:match("^[%a_][%w_]*$") then
+    return nil, "text rename handles only plain (unquoted) local names"
+  end
+  local b = find_proc_bounds(lines, row)
+  if not b then return nil, "the cursor is not inside a procedure or trigger" end
+  if row > b.fin then return nil, "the cursor is not inside a procedure or trigger" end
+
+  local declared = false
+  for i = b.hdr, b.beg - 1 do
+    local masked = strip_comment(mask_strings(lines[i]))
+    for _, sp in ipairs(word_spans(masked, name)) do
+      if is_declaration(masked, sp[1], sp[2]) then declared = true end
+    end
+  end
+  if not declared then
+    return nil, "only a local variable or parameter can be renamed by text"
+  end
+
+  local out, count = vim.deepcopy(lines), 0
+  for i = b.hdr, b.fin do
+    local masked = strip_comment(mask_strings(lines[i]))
+    local spans = word_spans(masked, name)
+    local ln = lines[i]
+    for k = #spans, 1, -1 do        -- right to left keeps earlier columns valid
+      local s, e = spans[k][1], spans[k][2]
+      ln = ln:sub(1, s - 1) .. rename_text(ln:sub(s, e), new) .. ln:sub(e + 1)
+      count = count + 1
+    end
+    out[i] = ln
+  end
+  return out, count
 end
 
 -- Parse `X := Y;` on one line. Returns indent, lhs, rhs (all trimmed) or
@@ -1001,6 +1285,8 @@ M.helpers = {
 -- Pure internals exposed for tests/ only. Not API.
 M._test = { find_quoted_string = find_quoted_string, find_proc_bounds = find_proc_bounds,
             suggest_name = suggest_name, insert_var_decl = insert_var_decl,
-            label_decl = label_decl, parse_assignment = parse_assignment }
+            label_decl = label_decl, parse_assignment = parse_assignment,
+            rename_text = rename_text, is_declaration = is_declaration, plan_rename = plan_rename,
+            local_text_rename = function(...) return local_text_rename(...) end }
 
 return M

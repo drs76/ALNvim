@@ -264,6 +264,7 @@ dotnet tool: `al launchlspserver <root> --packagecachepath <root>/.alpackages`.
 | formatting (`documentFormattingProvider`; newText uses `\r\n`, which `vim.lsp.util` normalises) | `codeActionProvider` — `<leader>ac*`, organise-imports-on-save are no-ops |
 | base symbols from `.alpackages`: hover shows a base table's fields, completion on `Cust.` lists them, references | `textDocument/definition` for anything in a symbol package **and for local variables/parameters** |
 | definition of the project's own procedures | `al-preview://` documents |
+| `textDocument/references` — accurate, cross-file, quotes inside the range | `textDocument/rename` — advertised but **never answered** (no result, no error); `renameProvider` is cleared in `on_init` |
 
 This supersedes the earlier finding that it "does not load base symbols" — it does now.
 
@@ -680,6 +681,8 @@ PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` �
 
 ## AL Refactoring (`lua/al/refactor.lua`)
 
+**Rename on the agentic LSP is built from references** (`rename_via_references`, 2026-11-21). `grn` / `<leader>rn` / `:ALRenameObject` with an `al_agentic_lsp` client: `basedef.target_at_cursor` for the name (quoted or bare), `textDocument/references`, then `plan_rename` → one edit per location under the root → `vim.lsp.util.apply_workspace_edit`. Before this, bare names fell to `vim.lsp.buf.rename()`, which waited forever on the server; quoted names took the rg text path, which renames *every* `"Entry No."` in the project. The server ignores `includeDeclaration`: the declaration is always in the result when it is in the project and absent when it lives in a symbol package, so **a plan with no declaration among its locations is refused** (`is_declaration`: object headers, member keywords in `MEMBER_KEYWORDS` such as `field(`/`action(`, `procedure`/`trigger`, `Name:` but not `Name :=`) — otherwise renaming `Customer` would rewrite the usages of a base-app table and break the build. `rename_text` keeps a quoted original quoted and quotes a bare one only when the new name needs it. **Fallback for files the server cannot parse:** it then never answers references at all (a page variable named `Actions` — reserved there — stops parsing at its declaration, and that is exactly when people rename). An error diagnostic on the symbol's line → `local_text_rename` first, instantly; otherwise references with an 8s timeout (`REFS_TIMEOUT_MS`, request cancelled) or an empty result → the same fallback. It renames a **local variable or parameter only**, declared in the enclosing procedure's header or var block, whole words, case-insensitive, inside that procedure, skipping string literals, `//` comments and quoted identifiers (`Widget.Add('Actions', Actions)` keeps its JSON key). Anything else is refused with the reason. Verified on bc-dashboard Core `DashboardDemo.Page.al`: 3 occurrences, page compiles afterwards. The rg path below remains for EditorServices, whose rename tokenises quoted names by word. On `:w`, `wizard.organise_file` renames the object's file to match its new name.
+
 **Quote scanning pairs delimiters left to right.** Both `find_quoted_string` (single) and `dquoted_id_at_cursor` (double) walk from the start of the line pairing quotes, treating a doubled quote as an escape. Do not "scan left for the nearest quote" — a cursor on a *closing* quote then pairs it with the next string's opening quote, so `Cust.Get("Foo"); Other("Bar")` yields `); Other(` as the rename target.
 
 **`find_proc_bounds(lines, cursor_lnum)`** — all line numbers 1-based. Returns `{ hdr, var, beg, fin }`. `var` is nil if no var block. Used by both `extract_label` and `extract_to_procedure`.
@@ -876,7 +879,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (316 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (370 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
