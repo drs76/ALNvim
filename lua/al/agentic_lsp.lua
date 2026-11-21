@@ -78,6 +78,12 @@ function M.start(bufnr, root)
       -- so the server's classification doesn't override it (same reason as the
       -- EditorServices path).
       client.server_capabilities.semanticTokensProvider = nil
+      -- It advertises rename but never answers textDocument/rename, so any
+      -- vim.lsp.buf.rename() (a user's own mapping, a picker's action) waited
+      -- forever with no message. Unadvertised, Neovim says rename is not
+      -- supported instead; grn / :ALRenameObject rename through references
+      -- (refactor.rename_via_references).
+      client.server_capabilities.renameProvider = nil
       pcall(function()
         local pid = client.rpc.handle:get_pid()
         if pid and pid > 0 then M.pids[pid] = true end

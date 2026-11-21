@@ -6,7 +6,7 @@
 -- string's opening quote.
 
 local T = require("tests.harness")
-local describe, it, eq = T.describe, T.it, T.eq
+local describe, it, eq, ok = T.describe, T.it, T.eq, T.ok
 local R = require("al.refactor")
 local RT = R._test
 
@@ -468,5 +468,160 @@ describe("refactor.insert_var_decl", function()
                 '    begin', '    end;', '}' }
     local out = RT.insert_var_decl(l, "local", "B: Integer;", RT.find_proc_bounds(l, 6))
     eq('        B: Integer;', out[6])
+  end)
+end)
+
+-- Rename through references (agentic LSP). The tool's server never answers
+-- textDocument/rename, so ALRenameObject builds the edit from references.
+describe("refactor rename via references", function()
+  local RT2 = require("al.refactor")._test
+
+  it("keeps quoting consistent with the original token", function()
+    eq("Sum", RT2.rename_text("Total", "Sum"))
+    eq('"Line Amount"', RT2.rename_text("Amount", "Line Amount"))
+    eq('"Your Table"', RT2.rename_text('"My Table"', "Your Table"))
+    eq('"Plain"', RT2.rename_text('"Was Quoted"', "Plain"))
+    eq('"Say ""hi"""', RT2.rename_text("X", 'Say "hi"'))
+  end)
+
+  local function decl(line, tok)
+    local s = line:find(tok, 1, true)
+    return RT2.is_declaration(line, s, s + #tok - 1)
+  end
+
+  it("recognises declarations", function()
+    eq(true, decl('table 50100 "My Table"', '"My Table"'))
+    eq(true, decl("codeunit 50101 Worker", "Worker"))
+    eq(true, decl("interface IFoo", "IFoo"))
+    eq(true, decl('        field(2; Amount; Decimal) { }', "Amount"))
+    eq(true, decl('            action(Post)', "Post"))
+    eq(true, decl("    local procedure Helper(Value: Decimal)", "Helper"))
+    eq(true, decl("    local procedure Helper(Value: Decimal)", "Value"))
+    eq(true, decl("    procedure P(var Rec: Record Customer; Qty: Decimal)", "Rec"))
+    eq(true, decl("        Total: Decimal;", "Total"))
+    eq(true, decl("        a, b: Integer;", "a"))
+    eq(true, decl("        a, b: Integer;", "b"))
+  end)
+
+  it("does not mistake usages for declarations", function()
+    eq(false, decl("        Total := Rec.Amount;", "Total"))
+    eq(false, decl("        Total := Rec.Amount;", "Amount"))
+    eq(false, decl("        Helper(Total);", "Helper"))
+    eq(false, decl("        Helper(Total);", "Total"))
+    eq(false, decl("        Cust: Record Customer;", "Customer"))
+    eq(false, decl("        W.DoWork();", "DoWork"))
+  end)
+
+  local root = "/proj"
+  local files = {
+    ["/proj/src/W.al"] = { "codeunit 1 W", "    procedure DoWork()", "        DoWork();" },
+    ["/proj/src/B.al"] = { "        Cust: Record Customer;" },
+    -- Readable, so only the root check can keep it out of the edit.
+    ["/elsewhere/X.al"] = { "DoWork" },
+  }
+  local function get_line(path, l0) return (files[path] or {})[l0 + 1] end
+  local function loc(path, l0, s0, e0)
+    return { uri = vim.uri_from_fname(path),
+             range = { start = { line = l0, character = s0 }, ["end"] = { line = l0, character = e0 } } }
+  end
+
+  it("plans an edit per reference when the declaration is in the project", function()
+    local edit, count = RT2.plan_rename({
+      loc("/proj/src/W.al", 1, 14, 20),   -- procedure DoWork()  (declaration)
+      loc("/proj/src/W.al", 2, 8, 14),    -- DoWork();
+      loc("/proj/src/W.al", 2, 8, 14),    -- duplicate location
+      loc("/elsewhere/X.al", 0, 0, 6),    -- outside the project: ignored
+    }, root, "Process", get_line, "utf-16")
+    eq(2, count)
+    local e = edit.changes[vim.uri_from_fname("/proj/src/W.al")]
+    eq("Process", e[1].newText)
+    eq(2, #e)
+    eq(nil, edit.changes[vim.uri_from_fname("/elsewhere/X.al")], "edited a file outside the project")
+  end)
+
+  it("ALRenameObject renames through references on the agentic client", function()
+    -- The server never answers textDocument/rename; routing there is the bug.
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, buf)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "    procedure DoWork()" })
+    vim.api.nvim_win_set_cursor(0, { 1, 15 })
+    local lsp = require("al.lsp")
+    local requested = {}
+    local client = { name = "al_agentic_lsp", offset_encoding = "utf-16",
+      request = function(_, method) requested[#requested + 1] = method end }
+    local o_client, o_root, o_input, o_rename = lsp.client, lsp.get_root, vim.ui.input, vim.lsp.buf.rename
+    lsp.client   = function() return client end
+    lsp.get_root = function() return "/proj" end
+    vim.ui.input = function(_, cb) cb("Process") end
+    local fell_back = false
+    vim.lsp.buf.rename = function() fell_back = true end
+    local okc, err = pcall(require("al.refactor").rename_object)
+    lsp.client, lsp.get_root, vim.ui.input, vim.lsp.buf.rename = o_client, o_root, o_input, o_rename
+    if not okc then error(err, 0) end
+    eq(false, fell_back)
+    eq({ "textDocument/references" }, requested)
+  end)
+
+  it("refuses when no reference is the declaration (base-app symbol)", function()
+    local edit, reason = RT2.plan_rename({ loc("/proj/src/B.al", 0, 21, 29) },
+      root, "Client", get_line, "utf-16")
+    eq(nil, edit)
+    ok(reason:find("declared outside this project", 1, true), reason)
+  end)
+end)
+
+describe("refactor local text rename (fallback when the server cannot resolve)", function()
+  local RT3 = require("al.refactor")._test
+  -- The real case: `Actions` is reserved in a page, the file stops parsing at
+  -- the declaration, and the server never answers references.
+  local L = {
+    "page 50184 \"Dashboard Demo\"",                 -- 1
+    "{",                                            -- 2
+    "    local procedure SendDashboard()",          -- 3
+    "    var",                                      -- 4
+    "        Widget: JsonObject;",                  -- 5
+    "        Actions: JsonArray;",                  -- 6
+    "    begin",                                    -- 7
+    "        Clear(actions);",                      -- 8
+    "        Widget.Add('Actions', Actions); // Actions here too", -- 9
+    "        Message(\"Actions Setup\");",          -- 10
+    "    end;",                                     -- 11
+    "",                                             -- 12
+    "    local procedure Other()",                  -- 13
+    "    var",                                      -- 14
+    "        Actions: JsonArray;",                  -- 15
+    "    begin",                                    -- 16
+    "        Clear(Actions);",                      -- 17
+    "    end;",                                     -- 18
+    "}",
+  }
+
+  it("renames the local in its procedure, case-insensitively, and nothing else", function()
+    local out, n = RT3.local_text_rename(L, 8, "Actions", "WidgetActions")
+    eq(3, n)
+    eq("        WidgetActions: JsonArray;", out[6])
+    eq("        Clear(WidgetActions);", out[8])
+    -- JSON key (string literal) and the comment are untouched
+    eq("        Widget.Add('Actions', WidgetActions); // Actions here too", out[9])
+    -- a quoted identifier containing the word is untouched
+    eq(L[10], out[10])
+    -- the same name in another procedure is a different variable
+    eq(L[15], out[15]); eq(L[17], out[17])
+  end)
+
+  it("renames a parameter", function()
+    local P = { "    procedure P(Value: Decimal)", "    begin", "        Total := Value + OldValue + Value2;", "    end;" }
+    local out, n = RT3.local_text_rename(P, 3, "Value", "Amount")
+    eq(2, n)
+    eq("    procedure P(Amount: Decimal)", out[1])
+    -- whole words only: OldValue and Value2 are other identifiers
+    eq("        Total := Amount + OldValue + Value2;", out[3])
+  end)
+
+  it("refuses names not declared in the procedure", function()
+    local out, reason = RT3.local_text_rename(L, 8, "Widgets", "X")
+    eq(nil, out)
+    ok(reason:find("local variable or parameter", 1, true), reason)
+    eq(nil, (RT3.local_text_rename(L, 8, "Clear", "X")))
   end)
 end)
