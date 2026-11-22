@@ -543,6 +543,10 @@ vim.api.nvim_create_user_command("ALBuildOutput", function()
   require("al.compile").open_build_output()
 end, { desc = "Reopen this project's last build output" })
 
+vim.api.nvim_create_user_command("ALToolOutput", function()
+  require("al.altool").open_output()
+end, { desc = "Reopen this project's last AL tool output (publish, symbols, tests, doc)" })
+
 vim.api.nvim_create_user_command("ALCatnipDiagnostics", function()
   require("al.compile").open_build_diagnostics()
 end, { desc = "Browse the last build's diagnostics (navigator under Catnip, else quickfix)" })

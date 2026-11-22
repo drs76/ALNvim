@@ -20,7 +20,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
-| `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner, `M.connection(_flags)()`/`M.cred_env()` launch.json mapping (`connection_flags(cfg, { port = "mcp" })` = proxy port), `M.mcp_call()`/`M.mcp_call_server()` one-shot MCP client, `M.mcp_tools()` cached `tools/list` |
+| `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner into the host view `alnvim.tool:<root>` (`M.output_float(title, root)` → sink, log; `M.open_output` = `:ALToolOutput`; `M.close_later(sink, ms)`), `M.connection(_flags)()`/`M.cred_env()` launch.json mapping (`connection_flags(cfg, { port = "mcp" })` = proxy port), `M.mcp_call()`/`M.mcp_call_server()` one-shot MCP client, `M.mcp_tools()` cached `tools/list` |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
@@ -41,9 +41,9 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` / `<leader>acn` / code-action "Add missing using statements" — server-independent resolver (see below); `:ALChangeNamespace` — `plan_change`/`apply_change` move namespaces to a new prefix |
 | `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
 | `lua/al/update.lua` | `:ALUpdate` — `M.update(dir, { run, getenv })` fast-forwards the running checkout; refuses (no git mutation) on a dirty tree, a non-`master`/`main` branch, or `ALNVIM_DEV` set; every step's exit code checked, success only after `merge --ff-only` exits 0 |
-| `lua/al/install.lua` | `:ALInstallExtension` / `:ALUpdateExtension` (VSIX from vsassets.io), `:ALInstallDotnetTool` |
+| `lua/al/install.lua` | `:ALInstallExtension` / `:ALUpdateExtension` (VSIX from vsassets.io), `:ALInstallDotnetTool`; log in the host view `alnvim.install`, not focused, kept after close |
 | `lua/al/project.lua` | `:ALNewProject` — AL Go! scaffold, built-in Hello World or extension templates |
-| `lua/al/agent.lua` | `:ALClaude` / `:ALPi` — AI agent terminal split at the project root |
+| `lua/al/agent.lua` | `:ALClaude` / `:ALPi` — AI agent terminal at the project root, one per (command, root) in `M._terms`; float under Catnip (`host.float_for`), `botright vsplit` natively |
 | `lua/al/textobj.lua` | `af`/`if` procedure and `aF`/`iF` block text objects |
 | `lua/al/ghost.lua` | Inline FIM ghost completions from Ollama (`:ALGhostToggle`, `<M-l>` accept) |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
@@ -368,6 +368,15 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 
 **Detection is silent (D3).** `pcall(require, "catnip.ui")` once, cached; `setup()` resets it. `ui = "catnip"` with Catnip missing warns once, at `setup()`, never per command. Natively, split build panels open one per tab: a second root's panel replaces the first in that tab, as the single panel always did.
 
+**Every other output view is on the host too (W3).** `altool.run` streams into
+`alnvim.tool:<root>` (publish, symbols over both routes, tests, doc): opened without focus,
+stays open on failure, `close_later(2500)` on success, and the buffer outlives the window, so
+`:ALToolOutput` shows the last run again. The installer logs into `alnvim.install` without
+entering it (`:q` mid-download used to wipe the log). Natively both are the centred float they
+were. Left as they are: the DAP adapter output (`debug.lua`, already the right lifecycle), the
+az-login terminal, and the profile viewer / page preview (interactive floats; their "open
+source" still uses the current window — `host.edit` has no child tab without a Catnip view).
+
 Code analyzers from `alnvim.json` auto-included as `/analyzer:` flags. `ruleset_path` in `setup()` passes `/ruleset:<file>`. **Do not add `ruleSetPath` to `app.json`** — custom properties break AL validation.
 
 Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): error|warning ALxxxx: message`.
@@ -447,7 +456,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 Every `nvim_create_user_command` in `plugin/al.lua` (plus `:ALClaude`/`:ALPi`/`:ALOllamaChat` from `agent.lua`); `tests/actions_spec.lua` checks the ALActions table against this set. `docs/cheatsheet.md` carries the descriptions. `docs/handbook.md` is the engineering handbook (house style, STE wording, lint under 2.5 with `ste-lint.py`): update its Status table and Sharp edges when a fix here earns one.
 
-`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALUpdate`, `:ALUpdateExtension`
+`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALToolOutput`, `:ALUpdate`, `:ALUpdateExtension`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -821,6 +830,12 @@ EditorServices protocol extension; the tool's CLI replaces it).
 - **Cursor variant** (`:ALRunTests!`): codeunit from `wizard.find_obj_decl` (exported for
   this), method from `refactor.helpers.find_proc_bounds` and a walk up through the attribute
   lines (`[HandlerFunctions(...)]` may sit between `[Test]` and the header).
+  **`local kind, id = decl and parse_obj_header(decl)` was the bug that made it never run**:
+  `and` keeps only the first return value, so `id` was always nil (fixed 2026-11-22; guard in
+  `tests/views_spec.lua`). Use an `if` when a call returns several values.
+- **Failed runs go to `host.locations`**: quickfix as a new list (`action = " "`), then the
+  Catnip navigator or `:copen`. `fixes.lua` (`:ALFixCops`, multi-hit `:ALFindRelated`) does the
+  same; a single hit still jumps with `:cfirst`.
 - **`al doc build -s <app> -o <root>/.aldoc -c <cache>`** emits a docfx YAML tree
   (`reference/<app>/toc.yml`, one `.yml` per object) — no HTML. `:ALDoc` opens an
   `index.html` if one ever appears, else notifies the folder.
@@ -931,7 +946,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (429 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (437 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -973,7 +988,13 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
 
 ## AI agents (Claude Code / Pi)
 
-`lua/al/agent.lua` opens an AI coding agent in a terminal split at the project root:
+`lua/al/agent.lua` opens an AI coding agent in a terminal at the project root. **One per
+(command, root)**: a second `:ALClaude` focuses the window, or shows the buffer again when the
+window was closed, instead of adding a split and a second agent; closing the window never stops
+the agent (`bufhidden=hide`). A window open in another tab is moved here, not focused there
+(that would switch tab). Under Catnip the window is a float sized like an output view
+(`host.float_for`); natively `botright vsplit`. Catnip's own `<leader>cc` Claude terminal is
+separate and untouched.
 - `:ALClaude` / `<leader>ai` → **Claude Code** (`claude` CLI; uses the `al:<project>` MCP entry `al.mcp` writes to `<project>/.claude/settings.json`).
 - `:ALPi` / `<leader>ak` → **Pi** ([pi.dev](https://pi.dev)). Built as `{ pi, -e <pi_provider>, --model <pi_model> }` unless `agent.pi_cmd` is set.
 

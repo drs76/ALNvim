@@ -35,7 +35,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Profiling and snapshot MCP proxies | 🟡 experimental | Tool names from `tools/list`. Stop-response shapes not verified live |
 | Lua code actions on the agentic LSP | 🟢 live | 32 tests in `tests/codeactions_spec.lua` |
 | Inlay hints | 🟠 pending upstream | Tool 30.0.42 reports `inlayHintProvider = false` |
-| Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Other output floats, location lists and the agent split are not on the adapter yet (W3–W5) |
+| Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Tool output, installer log, location lists and the agent terminal are on it too (W3–W5). DAP output and the profile/preview floats are not |
 | Host options: `statusline`, `format_on_save`, per-root status, picker once per directory | 🟢 live | `tests/options_spec.lua`, 2026-11-22. Defaults unchanged; the Catnip config sets nothing yet (requests R1 and Q1) |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
 | GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
@@ -355,7 +355,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-429 cases across 31 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+437 cases across 32 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -393,6 +393,9 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 18. **No way to stop format on save.** The ftplugin formatted on every write. `setup({ format_on_save = false })` turns it off. Guard: `tests/options_spec.lua` "format_on_save = false sends no formatting request".
 19. **The project picker on every command.** With several projects under the cwd, `get_root` called `inputlist()` each time, and a headless start blocked on it. It now asks once per working directory and never without a UI. Guard: `tests/options_spec.lua` "(D8)".
 20. **Commands and docs drifted apart.** Commands were added without an entry in the command list or in ALActions, and aliases stayed after their reason was gone. A test now compares the CLAUDE.md list with the registered commands. Guard: `tests/actions_spec.lua` "CLAUDE.md lists exactly the registered :AL* commands".
+21. **`:ALRunTests!` never ran.** `local kind, id = decl and parse_obj_header(decl)` keeps only the first return value of the call, so `id` was always nil. Use an `if` when a call returns more than one value. Guard: `tests/views_spec.lua` "failed tests fill quickfix and open the navigator under Catnip".
+22. **The installer log was lost on `:q`.** The installer entered its float, and the float's buffer was wiped when it closed. It now uses a host view that keeps its buffer and does not take focus. Guard: `tests/views_spec.lua` ":ALInstallDotnetTool logs without entering the window".
+23. **One more agent per `:ALClaude`.** Each call added a split and started a new agent. One terminal is kept per command and project. Guard: `tests/views_spec.lua` "a second :ALClaude reuses the terminal".
 
 ## Worked example — a typical day on an on-prem project
 

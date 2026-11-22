@@ -160,56 +160,17 @@ local function summarize(ok, text)
   return false, "Failed: " .. msg
 end
 
--- Progress float for the MCP route: header + one status line.
--- Returns finish(ok, msg) which swaps the spinner for ✓/✗ and auto-closes on ok.
-local function progress_float(header)
-  local lines = {
-    "  " .. header .. "  ",
-    "",
-    "  …  Downloading symbols…",
-  }
-  local width = 0
-  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l) + 4) end
-  width = math.max(width, 52)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  local win = vim.api.nvim_open_win(buf, false, {
-    relative  = "editor",
-    width     = width,
-    height    = #lines,
-    row       = math.floor((vim.o.lines - #lines) / 2),
-    col       = math.floor((vim.o.columns - width) / 2),
-    style     = "minimal",
-    border    = "rounded",
-    title     = " AL: Downloading Symbols ",
-    title_pos = "center",
-    noautocmd = true,
-  })
-  vim.wo[win].wrap = false
-  local ns = vim.api.nvim_create_namespace("al_symbols")
-  vim.hl.range(buf, ns, "Comment", { 0, 0 }, { 0, -1 })
-
+-- Status for the MCP route (older tools: one result at the end, no stream),
+-- shown in the same tool view as the CLI route. Returns finish(ok, msg).
+local function progress_float(root, header)
+  local sink, log = require("al.altool").output_float("AL: Downloading Symbols", root)
+  log({ "  " .. header, "", "  …  Downloading symbols…" })
   return function(ok, msg)
-    if not vim.api.nvim_buf_is_valid(buf) then return end
-    local icon = ok and "✓" or "✗"
-    local hl   = ok and "DiagnosticOk" or "DiagnosticError"
-    -- Message may be multi-line; first line in the status row, the rest below.
     local parts = vim.split(msg, "\n", { plain = true, trimempty = true })
-    local rows  = { "  " .. icon .. "  " .. (parts[1] or "") }
+    local rows  = { "  " .. (ok and "✓" or "✗") .. "  " .. (parts[1] or "") }
     for i = 2, #parts do rows[#rows + 1] = "     " .. parts[i] end
-    vim.api.nvim_buf_set_lines(buf, 2, 3, false, rows)
-    vim.hl.range(buf, ns, hl, { 2, 0 }, { 2, -1 })
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_height(win, math.min(2 + #rows, 20))
-    end
-    if ok then
-      require("al.altool").close_later(win, 3000)
-    else
-      for _, k in ipairs({ "q", "<Esc>" }) do
-        vim.keymap.set("n", k, "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
-      end
-    end
+    log(rows)
+    if ok then require("al.altool").close_later(sink, 3000) end
   end
 end
 
@@ -259,7 +220,7 @@ local function run(root, source, cfg)
       .. "over MCP, which has no feed option) — they are ignored this time. "
       .. "Update with :ALInstallDotnetTool.", vim.log.levels.WARN)
   end
-  local finish = progress_float(label .. " — al tool")
+  local finish = progress_float(root, label .. " — al tool")
   altool.mcp_call(root, "al_downloadsymbols", mcp_args(root, source, cfg),
     function(ok, text) reload(ok); finish(summarize(ok, text)) end, { env = env })
 end

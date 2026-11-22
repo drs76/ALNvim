@@ -193,37 +193,33 @@ function M.line_stream(on_lines)
   return feed, flush
 end
 
--- Centered output float. Returns (buf, win, log) — log(lines) appends and
--- follows the tail, and is a no-op once the user has closed the window.
-function M.output_float(title)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
-  local w   = math.min(100, math.max(60, vim.o.columns - 8))
-  local h   = math.min(18, math.max(8, math.floor(vim.o.lines * 0.4)))
-  local win = vim.api.nvim_open_win(buf, false, {
-    relative  = "editor",
-    width     = w,
-    height    = h,
-    row       = math.floor((vim.o.lines - h) / 2),
-    col       = math.floor((vim.o.columns - w) / 2),
-    style     = "minimal",
-    border    = "rounded",
-    title     = " " .. title .. " ",
-    title_pos = "center",
-    noautocmd = true,
-  })
-  vim.wo[win].wrap = true
-  for _, k in ipairs({ "q", "<Esc>" }) do
-    vim.keymap.set("n", k, "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
+-- The tool output view of `root`: one per project (id "alnvim.tool:<root>"),
+-- from the host adapter — a Catnip view, or the centred native float. The
+-- buffer outlives the window, so :ALToolOutput can show the last run again
+-- and closing the window never stops the job.
+local function tool_id(root) return "alnvim.tool:" .. (root or vim.fn.getcwd()) end
+
+-- Clear and show the tool view of `root` without taking focus. Returns
+-- (sink, log); log(lines) appends and follows the tail.
+function M.output_float(title, root)
+  local sink = require("al.host").output({ id = tool_id(root), title = title })
+  sink.title = title
+  sink:clear()
+  sink:open({ focus = false })
+  M._tool_roots[root or vim.fn.getcwd()] = true
+  return sink, function(lines) sink:append(lines) end
+end
+M._tool_roots = {}
+
+-- Reopen the last tool output of `root` (default: the current project).
+function M.open_output(root)
+  root = root or require("al.lsp").get_root() or vim.fn.getcwd()
+  if not M._tool_roots[root] then
+    vim.notify("AL: no tool output for this project yet", vim.log.levels.INFO)
+    return false
   end
-  local function log(lines)
-    if not vim.api.nvim_buf_is_valid(buf) then return end
-    vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(buf), 0 })
-    end
-  end
-  return buf, win, log
+  require("al.host").output({ id = tool_id(root) }):open({ focus = true })
+  return true
 end
 
 -- Run `al <args>` with its output streamed live into a float.
@@ -232,15 +228,16 @@ end
 -- interactive sign-in instruction (device code / browser URL) for AAD, and a
 -- user who cannot see it just watches a job that never finishes.
 --
--- opts: title, cwd, env, on_lines(lines) — a per-batch tap on the cleaned output
--- for callers that parse it (tests.lua turns the pass/fail summary into quickfix)
--- while the user still watches it live. on_exit(ok, code, log, win) runs on the
--- main loop.
+-- opts: title, root (the view's project; default cwd), cwd, env,
+-- on_lines(lines) — a per-batch tap on the cleaned output for callers that
+-- parse it (tests.lua turns the pass/fail summary into quickfix) while the user
+-- still watches it live. on_exit(ok, code, log, sink) runs on the main loop;
+-- pass the sink to close_later.
 function M.run(args, opts, on_exit)
   opts = opts or {}
   local cmd = { M.binary() }
   vim.list_extend(cmd, args)
-  local _, win, log = M.output_float(opts.title or "AL tool")
+  local win, log = M.output_float(opts.title or "AL tool", opts.root or opts.cwd)
   log({ "$ al " .. table.concat(args, " "), "" })
 
   local function consume(lines)
@@ -315,11 +312,12 @@ function M.run_json(args, opts, cb)
   end
 end
 
--- Close an output float after a successful run; a failed one stays open so
--- the error is readable.
-function M.close_later(win, ms)
+-- Close an output view after a successful run; a failed one stays open so
+-- the error is readable. Takes the sink M.run hands to on_exit (or a window id).
+function M.close_later(sink, ms)
+  if type(sink) == "table" then return sink:close_later(ms or 2500) end
   vim.defer_fn(function()
-    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    if vim.api.nvim_win_is_valid(sink) then vim.api.nvim_win_close(sink, true) end
   end, ms or 2500)
 end
 

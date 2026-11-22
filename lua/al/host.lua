@@ -320,11 +320,12 @@ function NativeSink:open(opts)
   if self.native == "split" then
     -- The split is the old build panel: always reopened, always focused.
     self.win = self:_open_split()
-  elseif self:is_open() then
-    if focus and api.nvim_win_get_tabpage(self.win) == api.nvim_get_current_tabpage() then
-      api.nvim_set_current_win(self.win)
-    end
+  elseif self:is_open() and api.nvim_win_get_tabpage(self.win) == api.nvim_get_current_tabpage() then
+    if focus then api.nvim_set_current_win(self.win) end
   else
+    -- Open in another tab: move it here rather than focus it there (focusing
+    -- a window in another tabpage switches the user's tab).
+    if self:is_open() then self:close() end
     self.win = self:_open_float(focus)
   end
   set_buf_maps(self)
@@ -384,6 +385,23 @@ end
 
 -- ── Locations ────────────────────────────────────────────────────────────────
 
+-- A window for a buffer the caller owns (an agent terminal): under Catnip a
+-- centred float sized like an output view; natively nil, and the caller keeps
+-- its own split. Returns the window or nil.
+function M.float_for(buf, title)
+  if M.name() ~= "catnip" then return nil end
+  local w = math.min(vim.o.columns - 2, math.max(1, math.floor(vim.o.columns * 0.75)))
+  local h = math.min(vim.o.lines - vim.o.cmdheight - 3, math.max(1, math.floor(vim.o.lines * 0.55)))
+  return api.nvim_open_win(buf, true, {
+    relative = "editor", style = "minimal", border = "rounded",
+    title = " " .. (title or "") .. " ", title_pos = "center",
+    width = w, height = h,
+    row = math.max(0, math.floor((vim.o.lines - h - 2) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - w) / 2)),
+    zindex = 45,
+  })
+end
+
 -- Quickfix entries -> navigator items. Project-level entries (no file) cannot
 -- be navigated to and are counted instead.
 function M.to_items(qf)
@@ -406,9 +424,11 @@ end
 
 -- Fill quickfix with `items` (quickfix entries — users expect :cnext), then
 -- show them: Catnip's linked navigator, or :copen. Returns true when shown.
+-- opts.action is setqflist's action ("r" replaces the current list, " " adds
+-- a new one); default "r".
 function M.locations(opts)
   local qf = opts.items or {}
-  vim.fn.setqflist({}, "r", { title = opts.qf_title or opts.title, items = qf })
+  vim.fn.setqflist({}, opts.action or "r", { title = opts.qf_title or opts.title, items = qf })
   local nav = M.name() == "catnip" and catnip_navigator()
   if not nav then
     vim.cmd("copen")
