@@ -268,6 +268,16 @@ dotnet tool: `al launchlspserver <root> --packagecachepath <root>/.alpackages`.
 
 This supersedes the earlier finding that it "does not load base symbols" — it does now.
 
+**It reads `.alpackages` once, at startup** (probed 2026-11-22, tool 30.0.42): a package added or
+replaced later stays invisible to completion, hover and diagnostics, even after
+`workspace/didChangeWatchedFiles`. EditorServices reloaded by itself, so after switching backends a
+dependency's renamed table was "missing" in Neovim while VS Code offered it. `agentic_lsp.restart(root)`
+stops the client (waits for `is_stopped()`, max 5s) and starts a fresh one on the same buffers. It
+runs after a successful `:ALDownloadSymbols` (the watcher is `suspended[root]` during the download, so
+several packages are one restart), on `:ALReindex`, and from `watch_packages` — a `uv` fs_event on the
+package cache, `.app` names only, debounced `RELOAD_DEBOUNCE_MS` (3s). Explorer re-extraction deletes
+the old `src/` first, so a renamed object does not survive as a stale stub.
+
 **`gd` = `al.basedef.definition()`.** The server's answer when it has one; otherwise hover
 names the target and the fallback resolves it:
 
@@ -894,7 +904,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (391 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (396 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

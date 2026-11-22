@@ -347,7 +347,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALClaude` / `:ALPi` | AI agent in a terminal split at the project root (`:ALOllamaChat` = alias of `:ALClaude`) |
 | `:ALGhostToggle` | Toggle Ollama ghost completions |
 | `:ALInlayHints` | Toggle LSP inlay hints for this buffer |
-| `:ALReindex` | Re-send `al/setActiveWorkspace` (EditorServices) |
+| `:ALReindex` | Restart the tool's language server (re-reads `.alpackages`); EditorServices: re-send `al/setActiveWorkspace` |
 | `:ALClearCredentials` | Forget session-cached BC credentials |
 | `:ALNewObject [dir]` | Object wizard — 18 types incl. report/permission-set extensions, profile, page customization, control add-in, entitlement |
 | `:ALGeneratePermissionSet [dir]` | Scan objects → `.PermissionSet.al` |

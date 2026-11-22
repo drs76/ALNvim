@@ -65,6 +65,9 @@ local function ensure_extracted(app_path)
     return vim.fn.isdirectory(dir .. "/src") == 1 and dir or nil
   end
 
+  -- A replaced package (same file name, new build) must not keep the old
+  -- build's stubs: a renamed object would otherwise be found under both names.
+  vim.fn.delete(dir .. "/src", "rf")
   vim.fn.mkdir(dir, "p")
   platform.extract_zip(app_path, dir, { "src/*.al", "src/*.AL" })
 
