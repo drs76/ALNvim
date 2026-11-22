@@ -275,6 +275,7 @@ function M.start(bufnr, root)
     name     = "al_agentic_lsp",
     cmd      = cmd,
     root_dir = root,
+    capabilities = require("al.lsp").capabilities(),
     on_init  = function(client)
       -- vim syntax file (syntax/al.vim) owns highlighting; drop semantic tokens
       -- so the server's classification doesn't override it (same reason as the

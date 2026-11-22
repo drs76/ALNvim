@@ -4,6 +4,10 @@
 -- Accept: <M-l> (insert mode, buffer-local in AL files)
 
 local M = {}
+
+-- Lines sent as the FIM prefix, the cursor line included.
+M.PREFIX_LINES = 150
+
 local api = vim.api
 
 local _ns      = api.nvim_create_namespace("al_ghost")
@@ -91,9 +95,10 @@ local function request(bufnr)
 
   local all = api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-  -- Build prefix: everything up to cursor
+  -- Build prefix: at most PREFIX_LINES lines, ending at the cursor. The whole
+  -- file was sent, and the model server's prompt time grows with it.
   local pre = {}
-  for i = 1, row do pre[#pre + 1] = all[i] end
+  for i = math.max(1, row - M.PREFIX_LINES + 2), row do pre[#pre + 1] = all[i] end
   pre[#pre + 1] = (all[row + 1] or ""):sub(1, col)
 
   -- Build suffix: rest of cursor line + next 5 lines
@@ -192,7 +197,19 @@ end
 
 -- ── Autocmds ─────────────────────────────────────────────────────────────────
 
+-- nvim-cmp: clear the ghost when the menu opens. Checking cmp.visible() only
+-- when a suggestion arrived left both on screen when the menu opened later.
+local _cmp_hooked = false
+local function hook_cmp()
+  if _cmp_hooked then return end
+  local ok, cmp = pcall(require, "cmp")
+  if not ok or not cmp.event or type(cmp.event.on) ~= "function" then return end
+  cmp.event:on("menu_opened", function() clear() end)
+  _cmp_hooked = true
+end
+
 local function setup_autocmds()
+  hook_cmp()
   local grp = api.nvim_create_augroup("ALGhost", { clear = true })
   api.nvim_create_autocmd("TextChangedI", {
     group = grp, pattern = "*.al",
@@ -223,5 +240,15 @@ function M.toggle()
 end
 
 function M.is_enabled() return _enabled end
+
+-- Tests only.
+M._test = {
+  request     = request,
+  show        = show,
+  hook_cmp    = hook_cmp,
+  visible     = function() return _last ~= nil end,
+  reset       = function() _cmp_hooked = false end,
+  set_enabled = function(v) _enabled = v end,
+}
 
 return M

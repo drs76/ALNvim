@@ -37,6 +37,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Inlay hints | 🟠 pending upstream | Tool 30.0.42 reports `inlayHintProvider = false` |
 | Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Tool output, installer log, location lists and the agent terminal are on it too (W3–W5). DAP output and the profile/preview floats are not |
 | Host options: `statusline`, `format_on_save`, per-root status, picker once per directory | 🟢 live | `tests/options_spec.lua`, 2026-11-22. Defaults unchanged; the Catnip config sets nothing yet (requests R1 and Q1) |
+| Completion: `al_ids` cmp source, cmp sources set once, capabilities, ghost/cmp | 🟢 live | `tests/completion_spec.lua` against a fake cmp. With the real config (2026-11-22) the AL sources of Catnip win, so `al_ids` is not used there yet |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
 | GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
 
@@ -355,7 +356,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-437 cases across 32 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+446 cases across 33 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -396,6 +397,9 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 21. **`:ALRunTests!` never ran.** `local kind, id = decl and parse_obj_header(decl)` keeps only the first return value of the call, so `id` was always nil. Use an `if` when a call returns more than one value. Guard: `tests/views_spec.lua` "failed tests fill quickfix and open the navigator under Catnip".
 22. **The installer log was lost on `:q`.** The installer entered its float, and the float's buffer was wiped when it closed. It now uses a host view that keeps its buffer and does not take focus. Guard: `tests/views_spec.lua` ":ALInstallDotnetTool logs without entering the window".
 23. **One more agent per `:ALClaude`.** Each call added a split and started a new agent. One terminal is kept per command and project. Guard: `tests/views_spec.lua` "a second :ALClaude reuses the terminal".
+24. **The ftplugin overwrote the cmp setup of the user.** It called `cmp.setup.buffer` on each `FileType al`. The ftplugin also runs again on `:e`. The AL sources are now set once, in `setup()`. Set `configure_cmp = false` to stop this. Guard: `tests/completion_spec.lua` "the ftplugin never calls cmp.setup.buffer".
+25. **A completion source must not block or prompt.** `completefunc` ran `rg` on the main thread on the first call for each type. The cmp source uses `explorer.rg_async`, and it finds the root with the bounded upward walk, because `get_root()` can prompt. Guard: `tests/completion_spec.lua` "never runs rg synchronously".
+26. **Removing a key map can remove the feature.** Some hosts do not list `al_ids` in their cmp sources. If ALNvim drops `<C-Space>` there, nothing completes an ID. ALNvim drops the map only when the buffer sources list `al_ids`. Guard: `tests/completion_spec.lua` "drops its <C-Space> map only when al_ids is in this buffer's sources".
 
 ## Worked example — a typical day on an on-prem project
 

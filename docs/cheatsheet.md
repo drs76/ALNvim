@@ -57,7 +57,7 @@
 | `grn` / `<Space>rn` | Rename quoted identifier project-wide |
 | `af` / `if` | Text object: around / inside procedure or trigger |
 | `aF` / `iF` | Text object: around / inside `begin…end` block |
-| `<C-Space>` (insert) | Object ID completion on an object-type line |
+| `<C-Space>` (insert) | Object ID completion on an object-type line (with nvim-cmp and `al_ids` in the AL sources, IDs show in the normal menu instead) |
 
 ---
 
