@@ -254,4 +254,58 @@ function M.read_app_json(root)
   return ok and decoded or nil
 end
 
+-- ── Completion response patch ─────────────────────────────────────────────
+--
+-- Both AL servers (EditorServices and `al launchlspserver`) send `label` as an
+-- object, { label = "begin" }, instead of a string; nvim-cmp's matcher crashes
+-- on it ("bad argument to 'byte'"). nvim-cmp calls client:request directly,
+-- so vim.lsp.handlers never sees the response: the wrapper has to sit on
+-- client.request itself.
+--
+-- The tool's server also quotes every filterText, bare names included (label
+-- `Abs`, filterText `"Abs"`). cmp matches the typed text against filterText,
+-- so `Ab` scored 13.2 against `"Abs"` and 21.6 against `Abs`, and bare names
+-- sank below fuzzy hits. The quotes are dropped when the label is bare; a
+-- quoted label (`"Sales Header"`) keeps its filterText, because typing `"`
+-- there is how the user starts the name.
+
+-- Normalise one completion result in place: a CompletionItem[] or a
+-- CompletionList ({ items = ... }). Returns the result.
+function M.normalise_completion(result)
+  if type(result) ~= "table" then return result end
+  local items = result.items or result
+  if type(items) ~= "table" then return result end
+  for _, item in ipairs(items) do
+    if type(item) == "table" then
+      if type(item.label) == "table" then item.label = item.label.label or "" end
+      local label, ft = item.label, item.filterText
+      -- A quoted label ("Sales Header") never equals its filterText with one
+      -- more pair of quotes, so it is left alone by this same test.
+      if type(label) == "string" and type(ft) == "string"
+         and ft == '"' .. label .. '"' then
+        item.filterText = label
+      end
+    end
+  end
+  return result
+end
+
+-- Wrap client.request once so every textDocument/completion callback receives
+-- a normalised result. Safe to call repeatedly (guarded per client).
+function M.patch_completion(client)
+  if not client or client._al_completion_patched then return end
+  client._al_completion_patched = true
+  local orig = client.request
+  client.request = function(self, method, params, callback, bufnr)
+    if method == "textDocument/completion" and type(callback) == "function" then
+      local cb = callback
+      callback = function(err, result, ...)
+        if not err and result then M.normalise_completion(result) end
+        return cb(err, result, ...)
+      end
+    end
+    return orig(self, method, params, callback, bufnr)
+  end
+end
+
 return M

@@ -217,31 +217,9 @@ Server has `definitionProvider = false`. Override `gd` to use `al/gotodefinition
 
 ### Non-standard completion item labels
 
-AL server sends `label` as `{ label = "begin" }` (object) instead of a plain string — crashes nvim-cmp. `vim.lsp.handlers["textDocument/completion"]` and the `handlers` table in `vim.lsp.start` do **not** intercept this (nvim-cmp calls `client:request` directly). Fix: monkey-patch `client.request` in `LspAttach`:
+AL server sends `label` as `{ label = "begin" }` (object) instead of a plain string — crashes nvim-cmp. `vim.lsp.handlers["textDocument/completion"]` and the `handlers` table in `vim.lsp.start` do **not** intercept this (nvim-cmp calls `client:request` directly). Fix: **`require("al.lsp").patch_completion(client)`** wraps `client.request` once per client (`_al_completion_patched`); both the EditorServices `LspAttach` and `agentic_lsp` `on_attach` call it — never copy the wrapper inline again (it existed twice until 2026-11-22). The pure part is `lsp.normalise_completion(result)` (CompletionItem[] or `{ items = … }`).
 
-```lua
-if not client._al_completion_patched then
-  client._al_completion_patched = true
-  local _orig = client.request
-  client.request = function(self, method, params, callback, bufnr_)
-    if method == "textDocument/completion" and type(callback) == "function" then
-      local _cb = callback
-      callback = function(err, result, ...)
-        if not err and result then
-          local items = (type(result) == "table" and result.items) or result
-          if type(items) == "table" then
-            for _, item in ipairs(items) do
-              if type(item.label) == "table" then item.label = item.label.label or "" end
-            end
-          end
-        end
-        return _cb(err, result, ...)
-      end
-    end
-    return _orig(self, method, params, callback, bufnr_)
-  end
-end
-```
+**`filterText` quotes.** The tool's server quotes every filterText, bare names included (label `Abs`, filterText `"Abs"`); cmp scored `Ab` 13.2 against `"Abs"` vs 21.6 against `Abs`. The patch drops the quotes when filterText is exactly the label wrapped in `"`. A quoted label (`"Sales Header"`) never matches that test, so its filterText stays. The rename interception in `plugin/al.lua` is a separate wrapper with its own guard (`_al_rename_patched`). Guard: `tests/completion_patch_spec.lua`.
 
 ### Agentic LSP (`al launchlspserver`) — the user's backend since 2026-10-01
 
@@ -253,7 +231,8 @@ dotnet tool: `al launchlspserver <root> --packagecachepath <root>/.alpackages`.
   in `plugin/al.lua` is guarded on the `al_language_server` name, so none apply.
 - `lua/al/agentic_lsp.lua` — `M.start(bufnr, root)`, `M.available()`, `M.binary()`
   (delegates to `altool.binary()`), `M.pids` (VimLeavePre kills the tree). `on_attach` sets
-  the statusline + `set_lsp_ready()` (no progress/loaded events), configures MCP once, and
+  the project in the statusline, runs `M.warm` (ready only after the symbols load — see
+  below; no progress/loaded events), configures MCP once, and
   maps `gd` to `al.basedef.definition` (scheduled so it wins over user maps).
 - **Extension-independent**: needs only the tool and `.alpackages`.
 
@@ -267,6 +246,28 @@ dotnet tool: `al launchlspserver <root> --packagecachepath <root>/.alpackages`.
 | `textDocument/references` — accurate, cross-file, quotes inside the range | `textDocument/rename` — advertised but **never answered** (no result, no error); `renameProvider` is cleared in `on_init` |
 
 This supersedes the earlier finding that it "does not load base symbols" — it does now.
+
+**Warm-up on attach (`agentic_lsp.warm`, 2026-11-22).** The server answers `initialize` in
+~0.5s but loads symbols on the first semantic request (6–9s on tool 30.0.42). `on_attach` used to
+`set_lsp_ready()` at once, so the first `.` waited the whole load and nvim-cmp (fetching_timeout
+500) showed snippets only. Now, once per client: `set_lsp_loading()`, hover on the qualifier, then
+a **member** completion just after `X.`, results discarded; `set_lsp_ready()` on the completion's
+answer or after `WARM_CAP_MS` (30s), exactly once. `startup.poll` waits on `is_ready()`, so the
+VimEnter background analysis now waits for the real load (cap 30s < poll limit 60s). Restart goes
+through `M.start`, so it warms again. Probed on ALTest (BC 21 symbols), tool 30.0.42:
+
+- **Completion at (0,0)** loads the symbols but leaves the first `Cust.` at 1.0–1.5s. After a member
+  completion on *any* variable (`SH.`), `Cust.` answers in ~40ms. `warm_position(lines)` finds the
+  first member access (skips `namespace`/`using`, `1.5`, `1..9`, strings, `//` comments).
+- **A document not on disk gets empty answers (~80ms) and loads nothing** — including the VimEnter
+  anchor `_al_startup_.al`. So `warm_target(buf, root)` uses the attached buffer when it is on disk
+  and has a member access, else the first project `.al` file (`vim.fs.find`, 200 max) with one,
+  sent with a raw `didOpen`/`didClose` (no Neovim buffer; skipped when that file is already loaded,
+  since Neovim opened it), else the buffer at (0,0); nothing on disk → ready at once.
+- Measured after "ready": first completion in a file that the warm-up did not touch (`It.` on
+  `Record Item`) **56ms**; in the warmed file 20ms. Ready arrives ~6.8–7.9s after start.
+- **The server publishes no `textDocument/publishDiagnostics`** (none in 10s with a syntax error
+  in an open buffer). Diagnostics come from `compile.analyze_diagnostics` only.
 
 **It reads `.alpackages` once, at startup** (probed 2026-11-22, tool 30.0.42): a package added or
 replaced later stays invisible to completion, hover and diagnostics, even after
@@ -904,7 +905,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (396 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (408 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
