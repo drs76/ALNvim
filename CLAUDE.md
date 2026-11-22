@@ -31,6 +31,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
+| `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)` |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish) |
 | `lua/al/startup.lua` | `M.poll(opts)` — the VimEnter readiness poller behind the once-per-root background analysis; completion claimed exactly once |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
@@ -344,7 +345,13 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 
 ## Compiling
 
-`:ALCompile` runs `alc /project:<root> /packagecachepath:<root>/.alpackages` async. Full-width horizontal split (~30% height) streams output live. `<CR>` on diagnostic opens file at line/col. `q`/`<Esc>` closes panel. Quickfix also populated (`<leader>aq`).
+`:ALCompile` runs `al compile /project:<root> /packagecachepath:<root>/.alpackages` async. Output streams live into the build view the **host adapter** (`lua/al/host.lua`) picks: under Catnip an owned float (`catnip.ui` view `alnvim.build:<root>`), otherwise the full-width bottom split (~30% height) it always was. `<CR>` on a diagnostic opens file at line/col — a managed child tab under Catnip, the edit window the build started from natively. `q`/`<Esc>` closes the view, never the job. Quickfix also populated (`<leader>aq`). After a failed build under Catnip the summary line ends `d: browse` and `d` opens the linked navigator on that build's diagnostics. `:ALBuildOutput` reopens the current project's view; `:ALCatnipDiagnostics` browses its last finished build (quickfix natively). `:ALCompileLegacy` / `:ALCompileCatnip` are deprecated aliases of `:ALCompile`.
+
+**One build view per project root; the caller never picks the sink.** `compile.compile(root, args, on_success)` has no `opts` — `publish`, `tests` and `debug` compile through the same host sink, so none of them opens a bottom split under Catnip (D4). State lives in `M._builds[root] = { sink, qf, job, gen }`: a second compile of the same root `jobstop`s the first and bumps `gen`, so the stopped job's late output and `on_exit` are dropped (same guard as `analyze_diagnostics`). The old single id `alnvim.build.output` interleaved two projects in one buffer and wiped a running build (D2).
+
+**Never switch the user's tab (D1).** Catnip's `View:open` focuses a view already open in another tabpage, which switches tab. `CatnipSink:open` closes such a view first (close does not move focus when the view is not focused). Request R4 asks Catnip to fix the root cause; the guard stays either way.
+
+**Detection is silent (D3).** `pcall(require, "catnip.ui")` once, cached; `setup()` resets it. `ui = "catnip"` with Catnip missing warns once, at `setup()`, never per command. Natively, split build panels open one per tab: a second root's panel replaces the first in that tab, as the single panel always did.
 
 Code analyzers from `alnvim.json` auto-included as `/analyzer:` flags. `ruleset_path` in `setup()` passes `/ruleset:<file>`. **Do not add `ruleSetPath` to `app.json`** — custom properties break AL validation.
 
@@ -367,7 +374,7 @@ via PATH: clean build, `.app` produced.
 
 **`<CR>` path resolution** — `alc` inherits Neovim's cwd, which may differ from `project_dir` (e.g. cwd = parent of project). `build_cwd = vim.fn.getcwd()` captured at compile time; relative paths in `alc` output resolved against `build_cwd`, not `project_dir`. Same applies to `parse_output` (fixes quickfix/diagnostic filenames).
 
-**`<CR>` target window fallback chain**: (1) `file_win` captured at build open time, (2) any non-floating non-build window (e.g. alpha dashboard — reused rather than split), (3) new `aboveleft split` above build panel. `file_win` updated on fallback so subsequent `<CR>` presses reuse the same window.
+**`<CR>` target window fallback chain** (native, `host.edit` → `native_target`): (1) `origin_win` captured when the sink opened, (2) any edit window in the current tab, (3) any non-floating non-sink window (e.g. alpha dashboard — reused rather than split), (4) new `aboveleft split` above the sink. `origin_win` is updated so later `<CR>` presses reuse the same window.
 
 ## Keymaps
 
@@ -905,7 +912,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (408 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (419 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -930,6 +937,11 @@ Covers the parsing-level logic where regressions are silent: job-output line fra
   the first with no listeners at all. One fake per file, like the one real module.
 - **Run fake timers after the events, not inline.** Executing `vim.defer_fn` immediately
   fired the 5s browser fallback before the `al/openUri` that arrives 0.5s later.
+- **Absent means absent.** `-u NONE` still has `~/.config/nvim` on the runtimepath, so on
+  the author's machine `require("catnip.ui")` finds the *real* Catnip. `host_spec`'s
+  "without Catnip" tests install a failing `package.preload` entry; the "with Catnip"
+  tests install `tests/fakes/catnip/{ui,navigator}.lua` (real floats, every call recorded,
+  the real `View:open` tab switch kept so D1 can go red).
 - A mutation that is a pure reordering (swapping two mutually exclusive `if`
   branches) *should* stay green. Use one as a control: if it goes red, the test
   is asserting on something incidental.

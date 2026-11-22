@@ -528,36 +528,31 @@ vim.api.nvim_create_autocmd("LspDetach", {
 
 -- ── User commands ─────────────────────────────────────────────────────────────
 
+-- The build view comes from the host adapter (lua/al/host.lua): Catnip's owned
+-- view when Catnip is loaded, the bottom split otherwise. One view per project.
 vim.api.nvim_create_user_command("ALCompile", function(opts)
-  require("al.compile").compile_catnip(opts.args ~= "" and opts.args or nil)
-end, {
-  nargs = "?",
-  complete = "dir",
-  desc = "Compile AL project with Catnip output",
-})
-
--- Explicit fallback to the original build panel.
-vim.api.nvim_create_user_command("ALCompileLegacy", function(opts)
   require("al.compile").compile(opts.args ~= "" and opts.args or nil)
 end, {
   nargs = "?",
   complete = "dir",
-  desc = "Compile AL project with legacy split",
+  desc = "Compile the AL project (output view + quickfix)",
 })
 
--- Opt-in managed Catnip output. Existing ALCompile remains the default.
-vim.api.nvim_create_user_command("ALCompileCatnip", function(opts)
-  require("al.compile").compile_catnip(opts.args ~= "" and opts.args or nil)
-end, { nargs = "?", complete = "dir", desc = "Compile with managed Catnip output" })
+-- Deprecated aliases of :ALCompile — the caller no longer picks the output
+-- view. Removed in the D9 clean-up (docs/catnip-handover.md).
+for _, name in ipairs({ "ALCompileLegacy", "ALCompileCatnip" }) do
+  vim.api.nvim_create_user_command(name, function(opts)
+    require("al.compile").compile(opts.args ~= "" and opts.args or nil)
+  end, { nargs = "?", complete = "dir", desc = "Deprecated alias of :ALCompile" })
+end
 
 vim.api.nvim_create_user_command("ALBuildOutput", function()
-  require("al.compile").open_catnip_build_output()
-end, { desc = "Reopen the last Catnip build output" })
+  require("al.compile").open_build_output()
+end, { desc = "Reopen this project's last build output" })
 
--- Opt-in linked diagnostics; :ALCompile keeps its existing output panel.
 vim.api.nvim_create_user_command("ALCatnipDiagnostics", function()
-  require("al.compile").open_catnip_diagnostics()
-end, { desc = "Browse the last AL build diagnostics in Catnip" })
+  require("al.compile").open_build_diagnostics()
+end, { desc = "Browse the last build's diagnostics (navigator under Catnip, else quickfix)" })
 
 vim.api.nvim_create_user_command("ALPublish", function(opts)
   -- `al publishapp` (AL dotnet tool) only — no extension fallback.

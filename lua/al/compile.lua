@@ -104,9 +104,6 @@ local function parse_output(lines, project_dir)
   return qf
 end
 
--- Track the last build window so re-running compile closes the previous one first.
-local _build_win = nil
-
 -- Track the running silent-analyze job so repeated calls cancel the previous one.
 -- _analyze_gen is bumped per call so a cancelled job's late on_exit can identify
 -- itself as stale and stay out of the way of the job that replaced it.
@@ -119,121 +116,6 @@ local line_stream = require("al.altool").line_stream
 -- Strip \r so Windows \r\n output doesn't show ^M in the buffer or break parsing.
 local function strip_cr(lines)
   return vim.tbl_map(function(l) return (l:gsub("\r", "")) end, lines)
-end
-
--- Open a full-width horizontal split at the bottom for build output. Returns (buf, win).
--- The window above (where the file is) is used for <CR> jump-to-error.
-local function open_build_win(title, project_dir, build_cwd)
-  -- Close any existing build window before opening a new one.
-  if _build_win and vim.api.nvim_win_is_valid(_build_win) then
-    vim.api.nvim_win_close(_build_win, true)
-  end
-  _build_win = nil
-
-  -- Sidebar/plugin filetypes that should never be used as edit targets.
-  local _sidebar_ft = {
-    NvimTree = true, ["neo-tree"] = true, aerial = true,
-    Outline = true, undotree = true, oil = true, qf = true,
-    alpha = true, dashboard = true,
-  }
-
-  -- Returns true if w is a real editing window (not a sidebar, terminal, quickfix, …)
-  local function is_edit_win(w)
-    local buf = vim.api.nvim_win_get_buf(w)
-    local bt  = vim.bo[buf].buftype
-    if bt ~= "" and bt ~= "acwrite" then return false end
-    return not _sidebar_ft[vim.bo[buf].filetype]
-  end
-
-  -- Find the best non-floating editing window, excluding `exclude`.
-  local function find_edit_win(exclude)
-    for _, w in ipairs(vim.api.nvim_list_wins()) do
-      if w ~= exclude and vim.api.nvim_win_get_config(w).relative == "" and is_edit_win(w) then
-        return w
-      end
-    end
-  end
-
-  -- Remember the current window — the user ran :ALCompile from here.
-  -- Fall back if it's a sidebar or plugin window.
-  local cur = vim.api.nvim_get_current_win()
-  local file_win = is_edit_win(cur) and cur or find_edit_win(nil)  -- mutable: updated if we create a split
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
-
-  -- Full-width split pinned to the bottom of the screen.
-  local split_height = math.max(15, math.floor(vim.o.lines * 0.30))
-  vim.cmd("botright split")
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
-  vim.api.nvim_win_set_height(win, split_height)
-
-  vim.wo[win].wrap         = false
-  vim.wo[win].cursorline   = true
-  vim.wo[win].number       = false
-  vim.wo[win].signcolumn   = "no"
-  vim.wo[win].winfixheight = true
-  vim.wo[win].winbar       = "  " .. title .. "  (q to close, <CR> to open error)"
-
-  _build_win = win
-
-  vim.keymap.set("n", "q",     "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", "<cmd>close<cr>", { buffer = buf, nowait = true, silent = true })
-
-  -- <CR> on a diagnostic line: open file in the target pane, keep results visible.
-  vim.keymap.set("n", "<CR>", function()
-    local line = vim.api.nvim_get_current_line()
-    local file, lnum, col = line:match("^(.+)%((%d+),(%d+)%)%s*:")
-    if not file then return end
-    file = file:gsub("\\", "/")
-    if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
-      file = (build_cwd or project_dir) .. "/" .. file
-    end
-    local target = (file_win and vim.api.nvim_win_is_valid(file_win) and is_edit_win(file_win) and file_win)
-                   or find_edit_win(win)
-    if not target then
-      -- Fall back to any non-floating, non-build window (e.g. alpha dashboard).
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then
-          target = w
-          file_win = w
-          break
-        end
-      end
-    end
-    if not target then
-      -- Last resort: split above build window.
-      vim.api.nvim_win_call(win, function() vim.cmd("aboveleft split") end)
-      target = vim.api.nvim_get_current_win()
-      file_win = target
-    end
-    vim.api.nvim_win_call(target, function()
-      local ok, err = pcall(vim.cmd, "edit " .. vim.fn.fnameescape(file))
-      if not ok then
-        vim.notify("AL: cannot open " .. file .. "\n" .. tostring(err), vim.log.levels.ERROR)
-        return
-      end
-      pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), tonumber(col) - 1 })
-      vim.cmd("normal! zz")
-    end)
-    vim.api.nvim_set_current_win(target)
-  end, { buffer = buf, nowait = true, silent = true })
-
-  return buf, win
-end
-
--- Append non-empty lines to a buffer and scroll to the bottom.
-local function buf_append(buf, lines)
-  if not vim.api.nvim_buf_is_valid(buf) then return end
-  local nonempty = vim.tbl_filter(function(l) return l ~= "" end, lines)
-  if #nonempty == 0 then return end
-  vim.api.nvim_buf_set_lines(buf, -1, -1, false, nonempty)
-  -- Scroll every window showing this buffer to the last line
-  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
-    local last = vim.api.nvim_buf_line_count(buf)
-    vim.api.nvim_win_set_cursor(w, { last, 0 })
-  end
 end
 
 -- Add simple highlight passes over the finished buffer.
@@ -297,45 +179,42 @@ local function clear_lsp_diagnostics(project_dir)
   end
 end
 
--- Optional per-build output sink. In legacy mode, retain the original split.
--- In Catnip mode, the sink owns a persistent view; closing it never stops alc.
-local function build_output_sink(title, project_dir, build_cwd, catnip)
-  if catnip then
-    local ok, ui = pcall(require, 'catnip.ui')
-    if ok and type(ui.output) == 'function' then
-      local view = ui.output({ id = 'alnvim.build.output', title = title, lines = {} })
-      M._catnip_build_view = view
-      -- The compiler output retains the raw file(line,col): warning/error text.
-      -- Only diagnostic lines navigate; commands and summaries remain inert.
-      vim.keymap.set('n', '<CR>', function()
-        local text = vim.api.nvim_get_current_line()
-        local file, lnum, col = text:match('^(.+)%((%d+),(%d+)%)%s*:%s*[Ee][Rr][Rr][Oo][Rr]%s')
-        if not file then
-          file, lnum, col = text:match('^(.+)%((%d+),(%d+)%)%s*:%s*[Ww][Aa][Rr][Nn][Ii][Nn][Gg]%s')
-        end
-        if not file then return end
-        file = file:gsub('\\', '/')
-        if not (file:match('^[A-Za-z]:/') or file:match('^/')) then
-          file = (build_cwd or project_dir) .. '/' .. file
-        end
-        view:edit_file({ file = file, line = tonumber(lnum), col = tonumber(col) })
-      end, { buffer = view.buf, nowait = true, silent = true, desc = 'Edit build diagnostic' })
-      return view.buf, function(lines)
-        view:append(vim.tbl_filter(function(line) return line ~= '' end, lines))
-      end
-    end
-    vim.notify('AL: Catnip UI unavailable; using the legacy build panel', vim.log.levels.WARN)
-  end
-  local buf = open_build_win(title, project_dir, build_cwd)
-  return buf, function(lines) buf_append(buf, lines) end
+-- Per-root build state: { sink, qf, job, gen }. One build view per project
+-- root (id "alnvim.build:<root>"), so two projects — two Catnip workspace tabs —
+-- never share or wipe each other's output. `gen` is bumped per compile so a
+-- stopped job's late output and on_exit stay out of the build that replaced it.
+M._builds = {}
+
+local function build_state(root)
+  local b = M._builds[root]
+  if not b then b = { gen = 0 }; M._builds[root] = b end
+  return b
 end
 
-local function finish(buf, qf, exit_code, on_success, project_dir, emit)
+-- Open the navigator (Catnip) or quickfix (native) on a build's diagnostics.
+local function browse(root, qf)
+  return require("al.host").locations({
+    id       = "alnvim.build.diagnostics:" .. root,
+    title    = "AL Build Diagnostics — " .. vim.fn.fnamemodify(root, ":t"),
+    qf_title = "AL Build",
+    items    = qf,
+  })
+end
+
+local function nonempty(lines)
+  return vim.tbl_filter(function(l) return l ~= "" end, lines)
+end
+
+local function finish(b, gen, qf, exit_code, on_success, project_dir)
   vim.schedule(function()
+    if b.gen ~= gen then return end
+    b.job = nil
+    local sink     = b.sink
     local errors   = vim.tbl_filter(function(e) return e.type == "E" end, qf)
     local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
+    local ok = exit_code == 0 and #errors == 0
     local summary
-    if exit_code == 0 and #errors == 0 then
+    if ok then
       if #warnings > 0 then
         summary = string.format("Build succeeded  (%d warning(s))", #warnings)
       else
@@ -344,28 +223,38 @@ local function finish(buf, qf, exit_code, on_success, project_dir, emit)
     else
       summary = string.format("%d error(s), %d warning(s)", #errors, #warnings)
     end
-    (emit or function(lines) buf_append(buf, lines) end)({ "", "── " .. summary .. " ──" })
-    buf_highlight(buf)
+    local line = "── " .. summary .. " ──"
+    -- Under Catnip a failed build gets `d` in its view: the linked navigator on
+    -- this build's diagnostics. Natively quickfix is already filled (<leader>aq).
+    local navigable = not ok and sink.host == "catnip"
+      and #(require("al.host").to_items(qf)) > 0
+    if navigable then
+      line = line .. "  d: browse"
+      local snapshot = vim.deepcopy(qf)
+      sink:map("d", function() browse(project_dir, snapshot) end, "Browse build diagnostics")
+    end
+    sink:append(nonempty({ "", line }))
+    buf_highlight(sink.buf)
 
     require("al.status").set_compile_result(#errors, #warnings)
-    -- Retain the exact completed build diagnostics for optional Catnip navigation.
-    M._catnip_last_qf = vim.deepcopy(qf)
+    b.qf = vim.deepcopy(qf)
     vim.fn.setqflist(qf, "r")
     push_diagnostics(qf)
 
-    if exit_code == 0 and #errors == 0 then
+    if ok then
       if project_dir then clear_lsp_diagnostics(project_dir) end
       if on_success then on_success() end
     end
   end)
 end
 
--- Run alc asynchronously, stream output into a floating window,
--- and populate the quickfix list with parsed errors/warnings.
+-- Run alc asynchronously, stream output into the host's build view (Catnip
+-- view or native bottom split, one per root), and populate the quickfix list
+-- with parsed errors/warnings.
 -- @param project_dir  optional override; defaults to the directory of app.json
 -- @param extra_args   optional table of additional /flag:value strings
 -- @param on_success   optional function() called after a clean build (no errors)
-function M.compile(project_dir, extra_args, on_success, opts)
+function M.compile(project_dir, extra_args, on_success)
   project_dir = project_dir or lsp.get_root()
   if not project_dir then
     vim.notify("AL: Cannot find project root (no app.json found)", vim.log.levels.ERROR)
@@ -418,11 +307,46 @@ function M.compile(project_dir, extra_args, on_success, opts)
     table.insert(cmd, arg)
   end
 
+  -- One build per root: a second compile of the same project stops the first
+  -- before clearing its view (the generation guard drops its late output).
+  local b = build_state(project_dir)
+  if b.job then pcall(vim.fn.jobstop, b.job) end
+  b.job = nil
+  b.gen = b.gen + 1
+  local gen = b.gen
   -- Never expose diagnostics from a previous build while a new one runs.
-  M._catnip_last_qf = nil
+  b.qf = nil
+
+  -- The host picks the sink (Catnip view or the native bottom split); callers
+  -- — :ALCompile, publish, tests, debug — never choose it.
   local proj_name = vim.fn.fnamemodify(project_dir, ":t")
-  local buf, emit = build_output_sink("AL Build — " .. proj_name,
-    project_dir, build_cwd, opts and opts.catnip)
+  local sink = require("al.host").output({
+    id     = "alnvim.build:" .. project_dir,
+    title  = "AL Build — " .. proj_name,
+    hint   = "q to close, <CR> to open error",
+    native = "split",
+  })
+  b.sink = sink
+  sink:unmap("d") -- the previous build's navigator key
+  sink:clear()
+  sink:open({ focus = true })
+  -- <CR> on a diagnostic line opens it: a managed child tab under Catnip, the
+  -- edit window the build was started from natively. Commands and the summary
+  -- line are inert.
+  sink:on_enter(function(text)
+    local file, lnum, col = text:match("^(.+)%((%d+),(%d+)%)%s*:%s*(%a+)%s")
+    if not file then return end
+    file = file:gsub("\\", "/")
+    if not (file:match("^[A-Za-z]:/") or file:match("^/")) then
+      file = (build_cwd or project_dir) .. "/" .. file
+    end
+    require("al.host").edit(file, tonumber(lnum), tonumber(col), { from = sink })
+  end)
+
+  local function emit(lines)
+    if b.gen ~= gen then return end
+    sink:append(nonempty(lines))
+  end
   emit({ "$ " .. table.concat(cmd, " "), "" })
 
   local output = {}
@@ -436,13 +360,14 @@ function M.compile(project_dir, extra_args, on_success, opts)
   local feed_out, flush_out = line_stream(consume)
   local feed_err, flush_err = line_stream(consume)
 
-  vim.fn.jobstart(cmd, {
+  b.job = vim.fn.jobstart(cmd, {
     on_stdout = function(_, data) feed_out(data) end,
     on_stderr = function(_, data) feed_err(data) end,
     on_exit = function(_, code)
       flush_out()
       flush_err()
-      finish(buf, parse_output(output, build_cwd), code, on_success, project_dir, emit)
+      if b.gen ~= gen then return end
+      finish(b, gen, parse_output(output, build_cwd), code, on_success, project_dir)
     end,
   })
 end
@@ -562,29 +487,27 @@ function M.open_app_json()
   vim.cmd("edit " .. vim.fn.fnameescape(root .. "/app.json"))
 end
 
--- Opt-in Catnip build output. No changes to ordinary :ALCompile or its callers.
-function M.compile_catnip(project_dir)
-  return M.compile(project_dir, nil, nil, { catnip = true })
-end
-
-function M.open_catnip_build_output()
-  local view = M._catnip_build_view
-  if not view then
-    vim.notify('AL: No Catnip build output yet; run :ALCompileCatnip', vim.log.levels.INFO)
+-- Reopen the build view of `root` (default: the current project).
+function M.open_build_output(root)
+  root = root or lsp.get_root()
+  local b = root and M._builds[root]
+  if not (b and b.sink) then
+    vim.notify("AL: no build output for this project yet; run :ALCompile", vim.log.levels.INFO)
     return false
   end
-  view:open()
+  b.sink:open({ focus = true })
   return true
 end
 
--- Opt-in Catnip view of the most recent *completed* build; legacy build panel
--- and quickfix remain unchanged. Catnip is an optional host dependency.
-function M.open_catnip_diagnostics()
-  if not M._catnip_last_qf then
-    vim.notify('AL: Run :ALCompile and wait for it to finish first', vim.log.levels.INFO)
+-- Browse the diagnostics of the last *finished* build of `root`.
+function M.open_build_diagnostics(root)
+  root = root or lsp.get_root()
+  local b = root and M._builds[root]
+  if not (b and b.qf) then
+    vim.notify("AL: run :ALCompile and wait for it to finish first", vim.log.levels.INFO)
     return false
   end
-  return require('al.catnip_diagnostics').open(M._catnip_last_qf)
+  return browse(root, b.qf)
 end
 
 -- Expose the resolved compiler invocation (for :ALInfo / diagnostics).
@@ -592,8 +515,7 @@ M.compiler_prefix = compiler_prefix
 
 -- Pure internals exposed for tests/ only. Not API — do not call from plugin code.
 M._test = { line_stream = line_stream, parse_output = parse_output,
-            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS,
-            build_output_sink = build_output_sink }
+            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS }
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()
