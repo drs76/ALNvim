@@ -64,6 +64,14 @@ M.defaults = {
   -- brings it back by hand either way.
   explorer_return = true,
 
+  -- Set ALNvim's window-local statusline in AL windows. false sets nothing, for
+  -- a host with its own global line (laststatus=3): embed
+  -- %{v:lua.require('al.status').get()} there instead.
+  statusline = true,
+
+  -- Format AL buffers with the language server on :w. false: format by hand.
+  format_on_save = true,
+
   -- Front end ALNvim draws its output views in: "auto" | "catnip" | "native".
   -- "auto" uses Catnip's owned views when Catnip is loaded and the native
   -- windows otherwise, without a word. "catnip" warns once at setup when it is

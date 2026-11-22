@@ -64,3 +64,35 @@ describe("actions.ACTIONS", function()
     end
   end)
 end)
+
+-- The reverse direction: CLAUDE.md's command list is the inventory the docs
+-- and the ALActions table are kept against. Commands added without being
+-- listed (:ALBuildOutput, :ALCatnipDiagnostics) and aliases left behind after
+-- removal (:ALCompileLegacy) both drifted until 2026-11-22.
+describe("command inventory", function()
+  it("CLAUDE.md lists exactly the registered :AL* commands", function()
+    local md = table.concat(vim.fn.readfile("CLAUDE.md"), "\n")
+    local line = md:match("\n(`:ALActions`[^\n]+)")
+    ok(line, "command list line not found in CLAUDE.md")
+    local listed = {}
+    for name in line:gmatch("`:(AL%w+)`") do listed[#listed + 1] = name end
+    table.sort(listed)
+    local registered = {}
+    for name in pairs(vim.api.nvim_get_commands({})) do
+      if name:match("^AL") then registered[#registered + 1] = name end
+    end
+    table.sort(registered)
+    eq(registered, listed)
+  end)
+
+  it("every build command has an ALActions entry", function()
+    local seen = {}
+    for _, a in ipairs(ACTIONS) do
+      local c = captured_command(a.run)
+      seen[(c or ""):match("^%s*([%w]+)") or ""] = true
+    end
+    for _, name in ipairs({ "ALCompile", "ALBuildOutput", "ALCatnipDiagnostics" }) do
+      ok(seen[name], name .. " has no ALActions entry")
+    end
+  end)
+end)

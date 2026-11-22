@@ -70,13 +70,13 @@ end
 -- Publish via `al publishapp`, streaming output into a float.
 local function publish_dotnet(root, cfg, app_file, on_success)
   local altool = require("al.altool")
-  require("al.status").set_publishing()
+  require("al.status").set_publishing(root)
   altool.run(publishapp_args(root, cfg, app_file), {
     title = "AL: Publishing (al publishapp)",
     cwd   = root,
     env   = altool.cred_env(cfg),
   }, function(ok, code, log, win)
-    require("al.status").set_publish_result(ok)
+    require("al.status").set_publish_result(ok, root)
     if not ok then
       log({ "", "── Publish failed (exit " .. code .. ") ──" })
       vim.notify("AL: Publish failed (al publishapp exit " .. code .. ") — see float",

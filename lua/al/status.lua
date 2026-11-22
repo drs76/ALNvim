@@ -1,6 +1,7 @@
 -- AL statusline state store.
 -- Aggregates LSP loading state, project identity, and compile/publish results
--- into a single string for display via vim.wo.statusline in AL windows.
+-- into a single string, per project root, for display in the statusline
+-- (ALNvim's window-local one, or a host's own via get()).
 --
 -- State is updated by:
 --   plugin/al.lua  → set_lsp_*, set_project
@@ -9,17 +10,36 @@
 
 local M = {}
 
-local _s = {
-  lsp      = nil,   -- nil | "starting" | "loading" | "ready"
-  pct      = nil,   -- number 0-100 while lsp == "loading"
-  compile  = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
-  publish  = nil,   -- nil | "publishing" | { ok=bool }
-  project  = nil,   -- nil | { name=string, version=string }
-  cops     = nil,   -- nil | token list e.g. {"${CodeCop}", ...}
-  root     = nil,   -- project root path (for git HEAD lookup)
-  branch   = nil,   -- cached branch name
-  branch_t = 0,    -- vim.uv.now() when branch was last read
-}
+-- One state per project root. With two AL projects open (two Catnip workspace
+-- tabs) a single table showed whichever project attached last, in both.
+--
+-- Every setter takes an optional trailing `root`. A call without one goes to
+-- the root updated most recently (`_cur`) — the old single-table behaviour,
+-- which is still right for a session with one project.
+local function new_state()
+  return {
+    lsp      = nil,   -- nil | "starting" | "loading" | "ready"
+    pct      = nil,   -- number 0-100 while lsp == "loading"
+    compile  = nil,   -- nil | "building" | { ok=bool, errors=N, warnings=N }
+    publish  = nil,   -- nil | "publishing" | { ok=bool }
+    project  = nil,   -- nil | { name=string, version=string }
+    cops     = nil,   -- nil | token list e.g. {"${CodeCop}", ...}
+    root     = nil,   -- project root path (for git HEAD lookup)
+    branch   = nil,   -- cached branch name
+    branch_t = 0,     -- vim.uv.now() when branch was last read
+  }
+end
+
+local _states = {}   -- key: root, or "" before any root is known
+local _cur    = ""   -- key of the state updated most recently
+
+local function state(root)
+  if root and root ~= "" then _cur = root end
+  local k = (root and root ~= "") and root or _cur
+  local st = _states[k]
+  if not st then st = new_state(); st.root = (k ~= "") and k or nil; _states[k] = st end
+  return st
+end
 
 -- Read the current git branch by parsing .git/HEAD directly (no subprocess).
 -- Walks upward from root to find the git repo. Returns nil if not in a repo.
@@ -40,13 +60,13 @@ local function read_branch(root)
 end
 
 -- Return cached branch, refreshing if the cache is older than 2 seconds.
-local function branch()
+local function branch(st)
   local now = vim.uv.now()
-  if now - _s.branch_t > 2000 then
-    _s.branch   = read_branch(_s.root)
-    _s.branch_t = now
+  if now - st.branch_t > 2000 then
+    st.branch   = read_branch(st.root)
+    st.branch_t = now
   end
-  return _s.branch
+  return st.branch
 end
 
 -- Composed-string cache. M.get() is called from a %{} statusline expression, so
@@ -54,7 +74,7 @@ end
 -- and it walks up to 8 directories looking for .git/HEAD and re-joins the cop
 -- list each time. A short TTL collapses that to a few times a second while
 -- staying visually immediate.
-local _str, _str_t = nil, 0
+local _str = {}   -- per state key: { s = string, t = ms }
 local STR_TTL_MS = 250
 
 -- redrawstatus! forces a full statusline redraw. al/progressNotification
@@ -66,7 +86,7 @@ local _pending, _last_draw = false, 0
 local DRAW_MS = 100
 
 local function redraw()
-  _str = nil  -- state changed: drop the composed-string cache
+  _str = {}  -- state changed: drop the composed-string caches
   if _pending then return end
   _pending = true
   local wait = math.max(0, DRAW_MS - (vim.uv.now() - _last_draw))
@@ -78,81 +98,106 @@ local function redraw()
 end
 
 function M.set_project(name, ver, root)
-  _s.project  = { name = name, version = ver }
-  _s.root     = root
-  _s.branch_t = 0   -- force refresh on next get()
+  local st = state(root)
+  st.project  = { name = name, version = ver }
+  st.root     = root or st.root
+  st.branch_t = 0   -- force refresh on next get()
   redraw()
 end
 
-function M.set_lsp_starting()
-  _s.lsp = "starting"
-  _s.pct = nil
+function M.set_lsp_starting(root)
+  local st = state(root)
+  st.lsp, st.pct = "starting", nil
   redraw()
 end
 
-function M.set_lsp_loading(pct)
-  _s.lsp = "loading"
-  _s.pct = pct
+function M.set_lsp_loading(pct, root)
+  local st = state(root)
+  st.lsp, st.pct = "loading", pct
   redraw()
 end
 
-function M.set_lsp_ready()
-  _s.lsp = "ready"
-  _s.pct = nil
+function M.set_lsp_ready(root)
+  local st = state(root)
+  st.lsp, st.pct = "ready", nil
   redraw()
 end
 
-function M.set_lsp_off()
-  _s.lsp = nil
-  _s.pct = nil
+function M.set_lsp_off(root)
+  local st = state(root)
+  st.lsp, st.pct = nil, nil
   redraw()
 end
 
-function M.is_loading()
-  return _s.lsp == "loading"
+-- Without `root`: the root updated most recently.
+function M.is_loading(root)
+  local k = (root and root ~= "") and root or _cur
+  return _states[k] ~= nil and _states[k].lsp == "loading"
 end
 
-function M.is_ready()
-  return _s.lsp == "ready"
+function M.is_ready(root)
+  local k = (root and root ~= "") and root or _cur
+  return _states[k] ~= nil and _states[k].lsp == "ready"
 end
 
-function M.set_compiling()
-  _s.compile = "building"
+function M.set_compiling(root)
+  state(root).compile = "building"
   redraw()
 end
 
-function M.set_compile_result(errors, warnings)
-  _s.compile = { ok = (errors == 0 and warnings == 0), errors = errors, warnings = warnings }
+function M.set_compile_result(errors, warnings, root)
+  state(root).compile = { ok = (errors == 0 and warnings == 0), errors = errors, warnings = warnings }
   redraw()
 end
 
-function M.set_publishing()
-  _s.publish = "publishing"
+function M.set_publishing(root)
+  state(root).publish = "publishing"
   redraw()
 end
 
-function M.set_cops(tokens)
-  _s.cops = tokens
+function M.set_cops(tokens, root)
+  state(root).cops = tokens
   redraw()
 end
 
-function M.set_publish_result(ok)
-  _s.publish = { ok = ok }
+function M.set_publish_result(ok, root)
+  local st = state(root)
+  st.publish = { ok = ok }
   redraw()
   -- Clear the publish result after 5 seconds so it doesn't linger
   vim.defer_fn(function()
-    if type(_s.publish) == "table" then
-      _s.publish = nil
+    if type(st.publish) == "table" then
+      st.publish = nil
       redraw()
     end
   end, 5000)
+end
+
+-- The state the statusline shows: the current buffer's project when it has
+-- one, else the root updated most recently. The buffer -> root lookup is a
+-- bounded upward walk, cached per buffer and name (get() runs every redraw).
+local _buf_root = {}
+local function shown_key()
+  local buf = vim.api.nvim_get_current_buf()
+  local name = vim.api.nvim_buf_get_name(buf)
+  local c = _buf_root[buf]
+  if not c or c.name ~= name then
+    local root = name ~= "" and require("al.lsp").find_root_upward(name) or nil
+    c = { name = name, root = root or false }
+    _buf_root[buf] = c
+  end
+  if c.root and _states[c.root] then return c.root end
+  return _cur
 end
 
 -- Returns a formatted string suitable for embedding in vim.wo.statusline via
 -- %{v:lua.require('al.status').get()}
 function M.get()
   local now = vim.uv.now()
-  if _str and (now - _str_t) < STR_TTL_MS then return _str end
+  local key = shown_key()
+  local cached = _str[key]
+  if cached and (now - cached.t) < STR_TTL_MS then return cached.s end
+  local _s = _states[key] or new_state()
 
   local parts = {}
 
@@ -160,7 +205,7 @@ function M.get()
     parts[#parts + 1] = _s.project.name .. " " .. _s.project.version
   end
 
-  local br = branch()
+  local br = _states[key] and branch(_s) or nil
   if br then parts[#parts + 1] = " " .. br end
 
   if _s.lsp == "starting" then
@@ -194,9 +239,12 @@ function M.get()
     parts[#parts + 1] = require("al.cops").short_names(_s.cops)
   end
 
-  _str   = #parts > 0 and table.concat(parts, "  ") or ""
-  _str_t = now
-  return _str
+  local out = #parts > 0 and table.concat(parts, "  ") or ""
+  _str[key] = { s = out, t = now }
+  return out
 end
+
+-- Tests only — never call from plugin code.
+M._test = { reset = function() _states, _cur, _str, _buf_root = {}, "", {}, {} end }
 
 return M

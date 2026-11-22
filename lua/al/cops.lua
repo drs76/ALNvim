@@ -122,7 +122,7 @@ function M.apply(root, cops, silent)
     local names = vim.tbl_map(function(t) return t:match("%{(.-)%}") or t end, cops)
     vim.notify("AL cops: " .. (#cops > 0 and table.concat(names, ", ") or "none"), vim.log.levels.INFO)
   end
-  require("al.status").set_cops(cops)
+  require("al.status").set_cops(cops, root)
 end
 
 -- ── Pickers ────────────────────────────────────────────────────────────────

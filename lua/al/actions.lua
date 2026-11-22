@@ -5,8 +5,12 @@ local M = {}
 -- key = "" means no dedicated keymap binding.
 local ACTIONS = {
   -- Build & Deploy -------------------------------------------------------
-  { name = "Compile",                  key = "<leader>ab",  desc = "Build project with al compile (AL dotnet tool); stream output to panel",
+  { name = "Compile",                  key = "<leader>ab",  desc = "Build project with al compile (AL dotnet tool); stream output to the build view",
     run = function() vim.cmd("ALCompile") end },
+  { name = "Build Output",             key = "",            desc = "Reopen this project's last build output",
+    run = function() vim.cmd("ALBuildOutput") end },
+  { name = "Build Diagnostics",        key = "",            desc = "Browse the last build's diagnostics (navigator under Catnip, else quickfix)",
+    run = function() vim.cmd("ALCatnipDiagnostics") end },
   { name = "Publish",                  key = "<leader>ap",  desc = "Compile then publish with al publishapp (AL dotnet tool)",
     run = function() vim.cmd("ALPublish") end },
   { name = "Publish Only",             key = "<leader>aP",  desc = "Publish existing .app with al publishapp, without recompiling",
