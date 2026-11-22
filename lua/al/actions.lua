@@ -11,6 +11,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALBuildOutput") end },
   { name = "Build Diagnostics",        key = "",            desc = "Browse the last build's diagnostics (navigator under Catnip, else quickfix)",
     run = function() vim.cmd("ALCatnipDiagnostics") end },
+  { name = "Tool Output",              key = "",            desc = "Reopen this project's last AL tool output (publish, symbols, tests, doc)",
+    run = function() vim.cmd("ALToolOutput") end },
   { name = "Publish",                  key = "<leader>ap",  desc = "Compile then publish with al publishapp (AL dotnet tool)",
     run = function() vim.cmd("ALPublish") end },
   { name = "Publish Only",             key = "<leader>aP",  desc = "Publish existing .app with al publishapp, without recompiling",

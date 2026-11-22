@@ -507,8 +507,8 @@ function M.fix_cops(root)
       vim.notify("AL: no fixable cop warnings (AA0137/AA0206/AA0008)", vim.log.levels.INFO)
       return
     end
-    vim.fn.setqflist({}, "r", { title = "AL: cop fixes applied", items = changed })
-    vim.cmd("copen")
+    require("al.host").locations({ id = "alnvim.copfixes:" .. root,
+      title = "AL: cop fixes applied", items = changed })
     vim.notify(("AL: applied %d cop fix(es) in %d file(s) — review and :wa"):format(
       #changed, vim.tbl_count(by_file)), vim.log.levels.INFO)
   end)
@@ -708,12 +708,13 @@ local function rg_to_qf(cmd, label, title, cb)
       vim.notify("AL: no " .. title .. " found for " .. label, vim.log.levels.INFO)
       return
     end
-    vim.fn.setqflist({}, "r", { title = "AL: " .. title .. " — " .. label, items = items })
     if #items == 1 then
+      vim.fn.setqflist({}, "r", { title = "AL: " .. title .. " — " .. label, items = items })
       vim.cmd("normal! m'")
       vim.cmd("cfirst")
     else
-      vim.cmd("copen")
+      require("al.host").locations({ id = "alnvim.related", items = items,
+        title = "AL: " .. title .. " — " .. label })
     end
   end, label)
 end
@@ -740,8 +741,13 @@ function M.find_publisher(ctx)
       vim.notify("AL: no publisher found for " .. sub.event, vim.log.levels.INFO)
       return
     end
-    vim.fn.setqflist({}, "r", { title = "AL: publisher — " .. sub.event, items = procs })
-    if #procs == 1 then vim.cmd("normal! m'"); vim.cmd("cfirst") else vim.cmd("copen") end
+    if #procs == 1 then
+      vim.fn.setqflist({}, "r", { title = "AL: publisher — " .. sub.event, items = procs })
+      vim.cmd("normal! m'"); vim.cmd("cfirst")
+    else
+      require("al.host").locations({ id = "alnvim.related", items = procs,
+        title = "AL: publisher — " .. sub.event })
+    end
   end)
 end
 

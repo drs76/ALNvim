@@ -270,58 +270,34 @@ end
 
 -- ── Shared UI ─────────────────────────────────────────────────────────────────
 
+-- The installer log: the host's output view "alnvim.install" (a Catnip view,
+-- or the centred native float), opened without taking focus. It used to be a
+-- focused float whose buffer was wiped on close, so :q before the download
+-- finished lost the log; the buffer now outlives the window.
 local function make_window(title)
-  local buf    = vim.api.nvim_create_buf(false, true)
-  local width  = math.min(90, vim.o.columns - 4)
-  local height = math.min(22, vim.o.lines - 4)
-  local win    = vim.api.nvim_open_win(buf, true, {
-    relative  = "editor",
-    width     = width,
-    height    = height,
-    row       = math.floor((vim.o.lines   - height) / 2),
-    col       = math.floor((vim.o.columns - width)  / 2),
-    style     = "minimal",
-    border    = "rounded",
-    title     = " " .. title .. " ",
-    title_pos = "center",
-  })
-  vim.bo[buf].buftype    = "nofile"
-  vim.bo[buf].bufhidden  = "wipe"
-  vim.bo[buf].modifiable = false
+  local sink  = require("al.host").output({ id = "alnvim.install", title = title })
+  sink.title  = title
+  sink:clear()
+  sink:open({ focus = false })
+  local width = math.min(100, math.max(60, vim.o.columns - 8))
 
   local function log(line)
-    vim.schedule(function()
-      if not vim.api.nvim_buf_is_valid(buf) then return end
-      vim.bo[buf].modifiable = true
-      vim.api.nvim_buf_set_lines(buf, -1, -1, false, { tostring(line) })
-      vim.bo[buf].modifiable = false
-      if vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(buf), 0 })
-      end
-    end)
+    vim.schedule(function() sink:append({ tostring(line) }) end)
   end
 
   local function done(success, msg)
     vim.schedule(function()
       local text = success and (msg or "Done.")
         or ("FAILED — " .. (msg or "see messages above."))
-      -- The buffer is bufhidden=wipe, so closing the window during a download
-      -- destroys it. log() already guards; vim.keymap.set does not, and would
-      -- throw "Invalid buffer id" when the job finally finished. Report to
-      -- :messages instead so the outcome is not lost.
-      if not vim.api.nvim_buf_is_valid(buf) then
+      sink:append({ "", text })
+      -- Closed before the end: say how it went, the log is still there.
+      if not sink:is_open() then
         vim.notify("AL: " .. text, success and vim.log.levels.INFO or vim.log.levels.ERROR)
-        return
-      end
-      log("")
-      log(text)
-      for _, key in ipairs({ "q", "<Esc>" }) do
-        vim.keymap.set("n", key, "<cmd>bdelete!<CR>", { buffer = buf, silent = true })
       end
     end)
   end
 
-  return buf, win, log, done, width
+  return sink.buf, sink.win, log, done, width
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────

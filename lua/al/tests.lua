@@ -315,14 +315,18 @@ local function run_tests(root, codeunit_id, methods)
     }, function(ok, _, _, win)
       local parsed = parse_runtests(lines)
       local qf     = results_to_qf(root, parsed)
-      vim.fn.setqflist({}, " ", { title = "AL tests " .. what, items = qf })
+      if not (#parsed.results > 0 and parsed.failed > 0) then
+        vim.fn.setqflist({}, " ", { title = "AL tests " .. what, items = qf })
+      end
       if #parsed.results > 0 then
         local msg = ("AL tests: %d passed, %d failed, %d skipped"):format(
           parsed.passed, parsed.failed, parsed.skipped)
         if parsed.failed > 0 then
           require("al.status").set_compile_result(parsed.failed, 0, root)
           vim.notify(msg, vim.log.levels.ERROR)
-          vim.cmd("copen")
+          -- Fills quickfix too (:cnext); the navigator under Catnip, else :copen.
+          require("al.host").locations({ id = "alnvim.tests:" .. root, action = " ",
+            title = "AL tests " .. what, items = qf })
         else
           require("al.status").set_compile_result(0, 0, root)
           vim.notify(msg, vim.log.levels.INFO)
@@ -350,7 +354,10 @@ function M.run(root, opts)
   if opts.cursor then
     local bufnr = vim.api.nvim_get_current_buf()
     local _, decl = require("al.wizard").find_obj_decl(bufnr)
-    local kind, id = decl and parse_obj_header(decl)
+    -- Not `decl and parse_obj_header(decl)`: `and` keeps only the first
+    -- return value, so `id` was always nil and :ALRunTests! never ran.
+    local kind, id
+    if decl then kind, id = parse_obj_header(decl) end
     if kind ~= "codeunit" then
       vim.notify("AL: the current buffer does not declare a codeunit", vim.log.levels.WARN)
       return

@@ -325,6 +325,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALCompile [dir]` | Compile with `al compile` → build view (Catnip view, else bottom split; one per project) + quickfix |
 | `:ALBuildOutput` | Reopen this project's last build output |
 | `:ALCatnipDiagnostics` | Browse the last build's diagnostics (Catnip navigator, else quickfix) |
+| `:ALToolOutput` | Reopen this project's last AL tool output (publish, symbols, tests, doc) |
 | `:ALAnalyze` | Silent compile pass → diagnostics only |
 | `:ALPublish [dir]` | Compile + publish to BC (`al publishapp`) |
 | `:ALPublishOnly [dir]` | Publish without recompiling |
