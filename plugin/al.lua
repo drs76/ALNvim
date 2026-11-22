@@ -1072,6 +1072,14 @@ end, {
   desc     = "AL: Add namespace declaration to all source files and fix using statements",
 })
 
+vim.api.nvim_create_user_command("ALChangeNamespace", function(opts)
+  local a = opts.fargs
+  require("al.namespace").change(nil, a[1], a[2])
+end, {
+  nargs = "*",
+  desc  = "AL: Move the project's namespaces from one prefix to another (namespace, using, qualified references)",
+})
+
 vim.api.nvim_create_user_command("ALAddUsings", function()
   require("al.namespace").add_usings()
 end, {
