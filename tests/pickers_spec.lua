@@ -109,6 +109,16 @@ describe("actions.list (W6)", function()
     end
   end)
 
+  it("gives every entry the group of its section", function()
+    local seen, order = {}, {}
+    for _, a in ipairs(actions.list()) do
+      ok(type(a.group) == "string" and a.group ~= "", a.name .. " has no group")
+      if not seen[a.group] then seen[a.group] = true; order[#order + 1] = a.group end
+    end
+    eq("Build & Deploy", order[1])
+    ok(seen["Debug"] and seen["Help"], vim.inspect(order))
+  end)
+
   it("keeps arguments in the command and returns copies", function()
     local list = actions.list()
     local found

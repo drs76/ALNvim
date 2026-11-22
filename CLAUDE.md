@@ -38,7 +38,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, **cmd**; `run` derived from `cmd`); `M.list()` → `{ name, command, key, desc }` for a host's own palette; Telescope or `vim.ui.select` per `host.use_telescope()`. `tests/actions_spec.lua` checks every entry runs an existing command |
+| `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (group, name, key, desc, **cmd**; `run` derived from `cmd`); `M.list()` → `{ group, name, command, key, desc }` for a host's own palette; Telescope or `vim.ui.select` per `host.use_telescope()`. `tests/actions_spec.lua` checks every entry runs an existing command |
 | `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` / `<leader>acn` / code-action "Add missing using statements" — server-independent resolver (see below); `:ALChangeNamespace` — `plan_change`/`apply_change` move namespaces to a new prefix |
 | `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
 | `lua/al/update.lua` | `:ALUpdate` — `M.update(dir, { run, getenv })` fast-forwards the running checkout; refuses (no git mutation) on a dirty tree, a non-`master`/`main` branch, or `ALNVIM_DEV` set; every step's exit code checked, success only after `merge --ff-only` exits 0 |
@@ -977,7 +977,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (452 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (453 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
