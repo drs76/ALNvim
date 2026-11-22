@@ -826,7 +826,7 @@ extra_prompts.page = function(data, cb)
         end
 
         -- 4. Multi-select field picker; skip if Telescope unavailable
-        if not pcall(require, "telescope") then
+        if not require("al.host").use_telescope() then
           cb(data)
           return
         end

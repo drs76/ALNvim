@@ -254,7 +254,7 @@ end
 -- methods" entry. cb(methods) — empty table means the whole codeunit.
 local function pick_methods(cu, cb)
   if #cu.methods <= 1 then cb({}); return end
-  if pcall(require, "telescope") then
+  if require("al.host").use_telescope() then
     local pickers      = require("telescope.pickers")
     local finders      = require("telescope.finders")
     local conf         = require("telescope.config").values

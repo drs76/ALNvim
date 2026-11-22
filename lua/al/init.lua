@@ -81,6 +81,12 @@ M.defaults = {
   -- loads, else blink.cmp's, else Neovim's defaults.
   capabilities = nil,
 
+  -- Simple pickers (actions, wizard fields, cops, test methods, layout types):
+  -- "auto" = Telescope when installed, "telescope", or "select" for
+  -- vim.ui.select (one look with a host's own select UI). Explorer, grep and
+  -- diff stay on Telescope (they need a preview).
+  picker = "auto",
+
   -- Front end ALNvim draws its output views in: "auto" | "catnip" | "native".
   -- "auto" uses Catnip's owned views when Catnip is loaded and the native
   -- windows otherwise, without a word. "catnip" warns once at setup when it is
