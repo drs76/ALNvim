@@ -11,7 +11,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/ext.lua` | Auto-detects newest MS AL VSCode extension (cached) |
 | `lua/al/lsp.lua` | Project root detection, `app.json` reading |
 | `lua/al/connection.lua` | BC connection utils: parse launch.json, build URLs, `curl_auth` (sync), `get_auth` (async) |
-| `lua/al/compile.lua` | Async `alc` compiler — output panel + quickfix |
+| `lua/al/compile.lua` | Async `al compile` — build view from `host.output` (one per root) + quickfix |
 | `lua/al/symbols.lua` | Download `.app` symbol packages (server or global) via the AL dotnet tool |
 | `lua/al/publish.lua` | Compile then publish `.app` with `al publishapp` |
 | `lua/al/debug.lua` | Snapshot debugging + nvim-dap adapter config |
@@ -32,7 +32,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
 | `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)` |
-| `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish) |
+| `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish), **one state per project root**; every setter takes an optional trailing `root` (without: the root updated last); `M.get()` shows the current buffer's project; `M.is_ready(root)` |
 | `lua/al/startup.lua` | `M.poll(opts)` — the VimEnter readiness poller behind the once-per-root background analysis; completion claimed exactly once |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
@@ -315,6 +315,21 @@ only, so switching backends silently stopped formatting. Organise-imports and
 `compile.clear_lsp_diagnostics` go through the same list; `cops.apply` (an EditorServices
 `al/setActiveWorkspace` re-send) tells an agentic user the cops apply at compile instead.
 
+**Two switches for hosts with their own rules** (both default `true`, unchanged for everyone
+else): `setup({ format_on_save = false })` stops the ftplugin's `BufWritePre` format (Catnip
+formats by hand, `:Format`); `setup({ statusline = false })` sets no window-local
+`statusline`. With `laststatus=3` the current window's local value is the one drawn, so the
+ALNvim line replaced the host's global one in every AL buffer. A host embeds
+`%{v:lua.require('al.status').get()}` in its own line instead.
+
+**Status is per root.** `status.lua` held one table for the session, so with two AL projects in
+two tabs both showed whichever attached last. State is keyed by root; callers that know their
+root pass it (`compile`, `publish`, `tests`, `agentic_lsp`, the EditorServices handlers via
+`client.root_dir`, `cops.apply`). `get()` resolves the current buffer's root with
+`find_root_upward`, cached per buffer and name, and keeps the 250 ms string cache per root. A
+call without a root targets the root updated last — the old behaviour for one project.
+`ftplugin` checks `is_ready(<buffer's root>)` before organise-imports and the debounced analyze.
+
 **On-prem UserPassword debugging does not depend on either language server** — the
 credentials go into the debug adapter's environment (see "BC dev API / DAP").
 
@@ -345,7 +360,7 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 
 ## Compiling
 
-`:ALCompile` runs `al compile /project:<root> /packagecachepath:<root>/.alpackages` async. Output streams live into the build view the **host adapter** (`lua/al/host.lua`) picks: under Catnip an owned float (`catnip.ui` view `alnvim.build:<root>`), otherwise the full-width bottom split (~30% height) it always was. `<CR>` on a diagnostic opens file at line/col — a managed child tab under Catnip, the edit window the build started from natively. `q`/`<Esc>` closes the view, never the job. Quickfix also populated (`<leader>aq`). After a failed build under Catnip the summary line ends `d: browse` and `d` opens the linked navigator on that build's diagnostics. `:ALBuildOutput` reopens the current project's view; `:ALCatnipDiagnostics` browses its last finished build (quickfix natively). `:ALCompileLegacy` / `:ALCompileCatnip` are deprecated aliases of `:ALCompile`.
+`:ALCompile` runs `al compile /project:<root> /packagecachepath:<root>/.alpackages` async. Output streams live into the build view the **host adapter** (`lua/al/host.lua`) picks: under Catnip an owned float (`catnip.ui` view `alnvim.build:<root>`), otherwise the full-width bottom split (~30% height) it always was. `<CR>` on a diagnostic opens file at line/col — a managed child tab under Catnip, the edit window the build started from natively. `q`/`<Esc>` closes the view, never the job. Quickfix also populated (`<leader>aq`). After a failed build under Catnip the summary line ends `d: browse` and `d` opens the linked navigator on that build's diagnostics. `:ALBuildOutput` reopens the current project's view; `:ALCatnipDiagnostics` browses its last finished build (quickfix natively). (`:ALCompileLegacy` / `:ALCompileCatnip` were removed 2026-11-22: the caller no longer picks the view.)
 
 **One build view per project root; the caller never picks the sink.** `compile.compile(root, args, on_success)` has no `opts` — `publish`, `tests` and `debug` compile through the same host sink, so none of them opens a bottom split under Catnip (D4). State lives in `M._builds[root] = { sink, qf, job, gen }`: a second compile of the same root `jobstop`s the first and bumps `gen`, so the stopped job's late output and `on_exit` are dropped (same guard as `analyze_diagnostics`). The old single id `alnvim.build.output` interleaved two projects in one buffer and wiped a running build (D2).
 
@@ -432,13 +447,17 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 Every `nvim_create_user_command` in `plugin/al.lua` (plus `:ALClaude`/`:ALPi`/`:ALOllamaChat` from `agent.lua`); `tests/actions_spec.lua` checks the ALActions table against this set. `docs/cheatsheet.md` carries the descriptions. `docs/handbook.md` is the engineering handbook (house style, STE wording, lint under 2.5 with `ste-lint.py`): update its Status table and Sharp edges when a fix here earns one.
 
-`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALUpdate`, `:ALUpdateExtension`
+`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALUpdate`, `:ALUpdateExtension`
 
 ## Project root detection (`lsp.get_root()`)
 
 1. Search upward from current buffer for `app.json` — **bounded** (`find_root_upward`)
 2. Scan downward from `vim.fn.getcwd()` for all `app.json` files
-3. One found → use it; multiple → `vim.fn.inputlist` prompt
+3. One found → use it; multiple → `vim.fn.inputlist` prompt, **once per working directory**
+   (`M._picked[getcwd()]`; `getcwd()` is tab-aware, so once per Catnip workspace), and
+   **never** while `vim.v.vim_did_enter == 0` or with no UI attached — then it returns nil.
+   `get_root` stays synchronous: it has dozens of callers. The prompt used to come back on
+   every command, and a headless start blocked on it.
 
 All commands use `lsp.get_root()` — `compile.lua` has no separate `find_project_root()`.
 
@@ -912,7 +931,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (419 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (429 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

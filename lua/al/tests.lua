@@ -308,7 +308,7 @@ local function run_tests(root, codeunit_id, methods)
     local args  = build_runtests_args(root, codeunit_id, methods, cfg)
     local lines = {}
     local what  = #methods > 0 and (codeunit_id .. " " .. table.concat(methods, ",")) or tostring(codeunit_id)
-    require("al.status").set_compiling()
+    require("al.status").set_compiling(root)
     altool.run(args, {
       title = "AL runtests " .. what, cwd = root, env = altool.cred_env(cfg),
       on_lines = function(batch) vim.list_extend(lines, batch) end,
@@ -320,16 +320,16 @@ local function run_tests(root, codeunit_id, methods)
         local msg = ("AL tests: %d passed, %d failed, %d skipped"):format(
           parsed.passed, parsed.failed, parsed.skipped)
         if parsed.failed > 0 then
-          require("al.status").set_compile_result(parsed.failed, 0)
+          require("al.status").set_compile_result(parsed.failed, 0, root)
           vim.notify(msg, vim.log.levels.ERROR)
           vim.cmd("copen")
         else
-          require("al.status").set_compile_result(0, 0)
+          require("al.status").set_compile_result(0, 0, root)
           vim.notify(msg, vim.log.levels.INFO)
           altool.close_later(win)
         end
       else
-        require("al.status").set_compile_result(ok and 0 or 1, 0)
+        require("al.status").set_compile_result(ok and 0 or 1, 0, root)
         if ok then
           vim.notify("AL tests: run finished with no results", vim.log.levels.WARN)
         else

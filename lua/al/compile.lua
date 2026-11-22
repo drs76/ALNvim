@@ -236,7 +236,7 @@ local function finish(b, gen, qf, exit_code, on_success, project_dir)
     sink:append(nonempty({ "", line }))
     buf_highlight(sink.buf)
 
-    require("al.status").set_compile_result(#errors, #warnings)
+    require("al.status").set_compile_result(#errors, #warnings, project_dir)
     b.qf = vim.deepcopy(qf)
     vim.fn.setqflist(qf, "r")
     push_diagnostics(qf)
@@ -267,7 +267,7 @@ function M.compile(project_dir, extra_args, on_success)
     vim.notify(require("al.altool").missing_msg("Compiling"), vim.log.levels.ERROR)
     return
   end
-  require("al.status").set_compiling()
+  require("al.status").set_compiling(project_dir)
 
   local cfg          = require("al").config
   local packagecache = project_dir .. "/" .. (cfg.packagecachepath or ".alpackages")

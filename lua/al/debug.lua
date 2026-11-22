@@ -429,7 +429,7 @@ local function register_al_dap_events(dap)
   -- Fired by the adapter after a successful publish on all environment types
   -- (the publish step of :ALLaunch); here we just update the status.
   dap.listeners.before["event_al/refreshExplorerObjects"]["alnvim"] = function()
-    require("al.status").set_publish_result(true)
+    require("al.status").set_publish_result(true, _current_root)
   end
 
   dap.listeners.before["event_al/deviceLogin"]["alnvim"] = function(_, body)

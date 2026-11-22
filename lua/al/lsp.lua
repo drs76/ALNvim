@@ -59,6 +59,9 @@ function M.client(bufnr)
   return nil
 end
 
+-- The project picked per working directory when several were found (D8).
+M._picked = {}
+
 -- Return the AL project root for the given buffer (directory containing app.json).
 -- Falls back to scanning downward from cwd when the buffer is outside a project
 -- (e.g. a workspace root buffer). Prompts to pick if multiple projects are found.
@@ -88,7 +91,16 @@ function M.get_root(bufnr)
   if #hits == 0 then return nil end
   if #hits == 1 then return vim.fs.dirname(hits[1]) end
 
-  -- Multiple projects: prompt user to pick
+  -- Multiple projects: ask once per working directory. getcwd() is tab-aware
+  -- (:tcd), so under a workspace-per-tab host this is once per workspace —
+  -- not once per command, as it was.
+  local memo = M._picked[cwd]
+  if memo and vim.fn.filereadable(memo .. "/app.json") == 1 then return memo end
+
+  -- Never prompt before the UI is up or without one: inputlist() blocks on the
+  -- message area, and a headless start waited on it forever.
+  if vim.v.vim_did_enter == 0 or #vim.api.nvim_list_uis() == 0 then return nil end
+
   local choices = {}
   for _, h in ipairs(hits) do
     table.insert(choices, vim.fs.dirname(h))
@@ -97,8 +109,9 @@ function M.get_root(bufnr)
   for i, v in ipairs(choices) do
     table.insert(items, i .. ". " .. v)
   end
-  local choice = vim.fn.inputlist(items)
-  return choices[choice] or nil
+  local choice = choices[vim.fn.inputlist(items)]
+  if choice then M._picked[cwd] = choice end
+  return choice
 end
 
 -- Return the path of the first *.code-workspace file in dir, or nil.

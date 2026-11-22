@@ -201,13 +201,13 @@ function M.warm(client, buf, root)
   if client._al_warm then return end
   client._al_warm = true
   local status = require("al.status")
-  status.set_lsp_loading()
+  status.set_lsp_loading(nil, root)
 
   local done = false
   local function finish()
     if done then return end
     done = true
-    status.set_lsp_ready()
+    status.set_lsp_ready(root)
   end
 
   local target = M.warm_target(buf, root)

@@ -196,7 +196,7 @@ vim.lsp.handlers["al/activeProjectLoaded"] = function(err, result, ctx)
   if not err then
     local client = vim.lsp.get_client_by_id(ctx.client_id)
     if client then client._al_last_active = vim.uv.now() end
-    require("al.status").set_lsp_ready()
+    require("al.status").set_lsp_ready(client and client.root_dir)
   end
   return vim.NIL  -- server-initiated request: must respond with null
 end
@@ -212,12 +212,13 @@ vim.lsp.handlers["al/progressNotification"] = function(err, result, ctx)
       if result.percent > 0 then client._al_seen_loading = true end
     end
     local status = require("al.status")
-    status.set_lsp_loading(result.percent)
+    local proot  = client and client.root_dir
+    status.set_lsp_loading(result.percent, proot)
     if result.percent >= 100 then
       -- Some server versions don't send al/activeProjectLoaded after reaching 100%.
       -- Fall back: if still in "loading" state 3 seconds after hitting 100%, mark ready.
       vim.defer_fn(function()
-        if status.is_loading() then status.set_lsp_ready() end
+        if status.is_loading(proot) then status.set_lsp_ready(proot) end
       end, 3000)
       -- The AL server only fully activates language features (including the formatter)
       -- after a second al/setActiveWorkspace following the initial load cycle.
@@ -344,7 +345,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       client._al_keepalive = vim.uv.new_timer()
       client._al_keepalive:start(CHECK_MS, CHECK_MS, vim.schedule_wrap(function()
         if not client._al_last_active then return end
-        if require("al.status").is_loading() then return end
+        if require("al.status").is_loading(client.root_dir) then return end
         if vim.uv.now() - client._al_last_active < IDLE_MS then return end
         -- Reset timestamp before waking so we don't retry every 2 min if truly dead.
         client._al_last_active = vim.uv.now()
@@ -361,11 +362,11 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- attachments should not clobber the "ready" state that was already reached.
     local status = require("al.status")
     if not client._al_workspace_set then
-      status.set_lsp_starting()
+      status.set_lsp_starting(root)
     end
     local _app = require("al.lsp").read_app_json(root)
     if _app then status.set_project(_app.name, _app.version, root) end
-    status.set_cops(require("al.cops").get_active(root))
+    status.set_cops(require("al.cops").get_active(root), root)
 
     -- assemblyProbingPaths must be a non-null JSON array (omitting it crashes the server).
     local al_cfg = require("al").config
@@ -517,7 +518,7 @@ vim.api.nvim_create_autocmd("LspDetach", {
     for buf in pairs(client.attached_buffers or {}) do
       if buf ~= args.buf and vim.api.nvim_buf_is_loaded(buf) then return end
     end
-    require("al.status").set_lsp_off()
+    require("al.status").set_lsp_off(client.root_dir)
     if client._al_keepalive then
       client._al_keepalive:stop()
       client._al_keepalive:close()
@@ -537,14 +538,6 @@ end, {
   complete = "dir",
   desc = "Compile the AL project (output view + quickfix)",
 })
-
--- Deprecated aliases of :ALCompile — the caller no longer picks the output
--- view. Removed in the D9 clean-up (docs/catnip-handover.md).
-for _, name in ipairs({ "ALCompileLegacy", "ALCompileCatnip" }) do
-  vim.api.nvim_create_user_command(name, function(opts)
-    require("al.compile").compile(opts.args ~= "" and opts.args or nil)
-  end, { nargs = "?", complete = "dir", desc = "Deprecated alias of :ALCompile" })
-end
 
 vim.api.nvim_create_user_command("ALBuildOutput", function()
   require("al.compile").open_build_output()
@@ -1035,7 +1028,7 @@ vim.api.nvim_create_user_command("ALReindex", function()
   -- The tool's server has no re-index request: restart it (re-reads .alpackages).
   if require("al.agentic_lsp").restart(root, "re-index") then return end
   local cops = require("al.cops")
-  require("al.status").set_lsp_loading(0)
+  require("al.status").set_lsp_loading(0, root)
   cops.apply(root, cops.get_active(root))
   vim.notify("AL: Re-indexing project…", vim.log.levels.INFO)
 end, { desc = "AL: Re-index — restart the tool's language server, or al/setActiveWorkspace on EditorServices (use after adding deps/changing symbols)" })

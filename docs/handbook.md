@@ -36,6 +36,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Lua code actions on the agentic LSP | 🟢 live | 32 tests in `tests/codeactions_spec.lua` |
 | Inlay hints | 🟠 pending upstream | Tool 30.0.42 reports `inlayHintProvider = false` |
 | Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Other output floats, location lists and the agent split are not on the adapter yet (W3–W5) |
+| Host options: `statusline`, `format_on_save`, per-root status, picker once per directory | 🟢 live | `tests/options_spec.lua`, 2026-11-22. Defaults unchanged; the Catnip config sets nothing yet (requests R1 and Q1) |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
 | GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
 
@@ -174,7 +175,7 @@ sequenceDiagram
   T-->>C: stdout chunks
   C->>C: line_stream joins partial lines
   C->>Q: parse_output → file(line,col): error ALxxxx
-  C-->>U: panel + quickfix, on_success on exit 0
+  C-->>U: build view (host.output) + quickfix, on_success on exit 0
 ```
 
 *Figure 2 — A build. Line framing happens before parsing, see EN-6. `publish.lua` chains `al publishapp` on `on_success`.*
@@ -354,7 +355,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-419 cases across 30 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+429 cases across 31 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -388,6 +389,10 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 14. **Compile moved the user to another tab.** The build view had one id. Catnip's `View:open` focuses a view that is already open, and when that view is in another tab the focus switches the tab. Close the view in the other tab first. Guard: `tests/host_spec.lua` "compiling from tab B while the view is open in tab A stays in tab B".
 15. **Two builds in one view.** The same id served every project, so a second build cleared the first while its job still ran. Key the view and the state by root, and stop the old job of the same root. Guard: `tests/host_spec.lua` "two roots compile into two views; neither clear hits the other".
 16. **A private front end in a public default.** `:ALCompile` warned about a missing Catnip on every build for every other user, and publish, tests and debug still opened the bottom split under Catnip. The host adapter now selects the view, detects Catnip once and says nothing. Guard: `tests/host_spec.lua` ":ALCompile without Catnip (D3)" and the three "(D4)" cases.
+17. **The host's statusline disappeared in AL buffers.** The ftplugin set a window-local `statusline`. With one global line (`laststatus=3`) the current window's local value is the one drawn, so the host's line was replaced. `setup({ statusline = false })` sets nothing. The status itself was one table for the session, so two projects showed the same one. It is now keyed by root. Guard: `tests/options_spec.lua` "statusline = false leaves the window-local statusline empty" and "each buffer shows its own project's state".
+18. **No way to stop format on save.** The ftplugin formatted on every write. `setup({ format_on_save = false })` turns it off. Guard: `tests/options_spec.lua` "format_on_save = false sends no formatting request".
+19. **The project picker on every command.** With several projects under the cwd, `get_root` called `inputlist()` each time, and a headless start blocked on it. It now asks once per working directory and never without a UI. Guard: `tests/options_spec.lua` "(D8)".
+20. **Commands and docs drifted apart.** Commands were added without an entry in the command list or in ALActions, and aliases stayed after their reason was gone. A test now compares the CLAUDE.md list with the registered commands. Guard: `tests/actions_spec.lua` "CLAUDE.md lists exactly the registered :AL* commands".
 
 ## Worked example — a typical day on an on-prem project
 

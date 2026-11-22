@@ -28,22 +28,34 @@ local _ft_grp = vim.api.nvim_create_augroup(
 
 -- AL statusline: show project name/version, LSP loading state, compile/publish result.
 -- Save and restore around focus changes so other buffers get their default statusline back.
-local _AL_STL = " %f %m  │  %{v:lua.require('al.status').get()}  %=  %l:%c  %P "
-local _prev_stl = vim.wo.statusline
--- Reloading in the same window would capture the AL statusline as "previous";
--- fall back to empty (= global 'statusline') instead.
-if _prev_stl == _AL_STL then _prev_stl = "" end
-vim.wo.statusline = _AL_STL
-vim.api.nvim_create_autocmd("BufLeave", {
-  group    = _ft_grp,
-  buffer   = 0,
-  callback = function() vim.wo.statusline = _prev_stl end,
-})
-vim.api.nvim_create_autocmd("BufEnter", {
-  group    = _ft_grp,
-  buffer   = 0,
-  callback = function() vim.wo.statusline = _AL_STL end,
-})
+--
+-- setup({ statusline = false }) sets nothing: a window-local 'statusline'
+-- replaces a host's global one (Catnip: laststatus=3, one line for all
+-- windows), so in AL buffers the host's line disappeared. A host embeds
+-- %{v:lua.require('al.status').get()} in its own line instead.
+if require("al").config.statusline ~= false then
+  local _AL_STL = " %f %m  │  %{v:lua.require('al.status').get()}  %=  %l:%c  %P "
+  local _prev_stl = vim.wo.statusline
+  -- Reloading in the same window would capture the AL statusline as "previous";
+  -- fall back to empty (= global 'statusline') instead.
+  if _prev_stl == _AL_STL then _prev_stl = "" end
+  vim.wo.statusline = _AL_STL
+  vim.api.nvim_create_autocmd("BufLeave", {
+    group    = _ft_grp,
+    buffer   = 0,
+    callback = function() vim.wo.statusline = _prev_stl end,
+  })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group    = _ft_grp,
+    buffer   = 0,
+    callback = function() vim.wo.statusline = _AL_STL end,
+  })
+end
+
+-- This buffer's project root (bounded upward walk), for per-root status checks.
+local function _buf_root()
+  return (require("al.lsp").find_root_upward(vim.api.nvim_buf_get_name(0)))
+end
 -- Add missing `using` statements on save via source.organizeImports.
 -- Runs synchronously in BufWritePre (before format) so using lines are also formatted.
 --
@@ -60,7 +72,7 @@ vim.api.nvim_create_autocmd("BufWritePre", {
     if require("al").config.organize_imports_on_save == false then return end
     -- Skip when LSP is still indexing; codeAction during indexing can trigger
     -- project-wide re-analysis and send diagnostics with inconsistent positions.
-    if not require("al.status").is_ready() then return end
+    if not require("al.status").is_ready(_buf_root()) then return end
     local bufnr  = vim.api.nvim_get_current_buf()
     -- Either backend, as long as it offers code actions (the dotnet tool's
     -- launchlspserver does not yet, so this is a no-op there).
@@ -129,10 +141,12 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 -- This used to look only for the EditorServices client, so switching to the
 -- dotnet tool's server (experimental_lsp) silently stopped formatting — though
 -- that server formats too.
+-- setup({ format_on_save = false }) turns it off (manual :Format / gq only).
 vim.api.nvim_create_autocmd("BufWritePre", {
   group    = _ft_grp,
   buffer   = 0,
   callback = function()
+    if require("al").config.format_on_save == false then return end
     local bufnr  = vim.api.nvim_get_current_buf()
     local client = require("al.lsp").client(bufnr)
     if not client or not client.server_capabilities.documentFormattingProvider then return end
@@ -160,7 +174,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
     -- where the ids.lua used-ID cache is dropped.
     require("al.ids").invalidate()
     require("al.explorer").invalidate()
-    if not require("al.status").is_ready() then return end
+    if not require("al.status").is_ready(_buf_root()) then return end
     local root = require("al.lsp").get_root()
     if root then require("al.compile").analyze_soon(root) end
   end,

@@ -11,7 +11,7 @@
 | Key | Action |
 |---|---|
 | `<Space>aa` | **ALActions** — picker of every AL command with descriptions (global, any buffer) |
-| `<Space>ab` | Compile project with `al compile` → output panel + quickfix |
+| `<Space>ab` | Compile project with `al compile` → build view + quickfix |
 | `<Space>ap` | Compile **then** publish `.app` to Business Central (`al publishapp`) |
 | `<Space>aP` | Publish existing `.app` to BC (skip compile) |
 | `<Space>as` | Download symbol packages into `.alpackages/` (server or NuGet/AppSource) |
@@ -322,7 +322,9 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALInstallExtension` / `:ALUpdateExtension` | Install / update the MS AL VS Code extension (VSIX) |
 | `:ALInstallDotnetTool` | Install or update the AL dotnet tool |
 | `:ALNewProject` | New project from the built-in Hello World or an extension template (Agent, Copilot, …) |
-| `:ALCompile [dir]` | Compile with `al compile` → panel + quickfix |
+| `:ALCompile [dir]` | Compile with `al compile` → build view (Catnip view, else bottom split; one per project) + quickfix |
+| `:ALBuildOutput` | Reopen this project's last build output |
+| `:ALCatnipDiagnostics` | Browse the last build's diagnostics (Catnip navigator, else quickfix) |
 | `:ALAnalyze` | Silent compile pass → diagnostics only |
 | `:ALPublish [dir]` | Compile + publish to BC (`al publishapp`) |
 | `:ALPublishOnly [dir]` | Publish without recompiling |
