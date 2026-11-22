@@ -336,7 +336,7 @@ function M.picker()
   local active_set = {}
   for _, t in ipairs(active) do active_set[t] = true end
 
-  if pcall(require, "telescope") then
+  if require("al.host").use_telescope() then
     telescope_picker(root, active_set)
   else
     simple_picker(root, active_set)

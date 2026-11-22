@@ -38,6 +38,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Tool output, installer log, location lists and the agent terminal are on it too (W3–W5). DAP output and the profile/preview floats are not |
 | Host options: `statusline`, `format_on_save`, per-root status, picker once per directory | 🟢 live | `tests/options_spec.lua`, 2026-11-22. Defaults unchanged; the Catnip config sets nothing yet (requests R1 and Q1) |
 | Completion: `al_ids` cmp source, cmp sources set once, capabilities, ghost/cmp | 🟢 live | `tests/completion_spec.lua` against a fake cmp. With the real config (2026-11-22) the AL sources of Catnip win, so `al_ids` is not used there yet |
+| Pickers: `picker` option, `actions.list()` | 🟢 live | `tests/pickers_spec.lua`, 2026-11-22. Explorer, grep and diff stay on Telescope |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
 | GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
 
@@ -356,7 +357,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-446 cases across 33 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+452 cases across 34 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 

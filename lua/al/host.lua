@@ -67,6 +67,19 @@ function M.setup(mode)
   end
 end
 
+-- Simple pickers (actions, wizard fields, cops, test methods, layout types):
+-- Telescope, or the vim.ui.select fallback each one already has.
+-- setup({ picker = "auto" | "telescope" | "select" }); "auto" = Telescope when
+-- it loads. "select" gives a host whose vim.ui.select is its own look (Catnip:
+-- dressing.nvim) one look for these. The explorer, grep and diff pickers need a
+-- preview and extra keys, and stay on Telescope.
+function M.use_telescope()
+  local al = package.loaded["al"]
+  local mode = al and al.config and al.config.picker or "auto"
+  if mode == "select" then return false end
+  return (pcall(require, "telescope"))
+end
+
 -- ── Edit windows (native) ────────────────────────────────────────────────────
 
 -- Sidebar/plugin filetypes that are never edit targets.

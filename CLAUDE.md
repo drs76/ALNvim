@@ -32,13 +32,13 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
-| `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)` |
+| `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)`, `M.use_telescope()` (`setup({ picker = "auto"\|"telescope"\|"select" })` for the simple pickers) |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish), **one state per project root**; every setter takes an optional trailing `root` (without: the root updated last); `M.get()` shows the current buffer's project; `M.is_ready(root)` |
 | `lua/al/startup.lua` | `M.poll(opts)` — the VimEnter readiness poller behind the once-per-root background analysis; completion claimed exactly once |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
-| `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, run); Telescope or `vim.ui.select` fallback. `tests/actions_spec.lua` checks every entry runs an existing command |
+| `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, **cmd**; `run` derived from `cmd`); `M.list()` → `{ name, command, key, desc }` for a host's own palette; Telescope or `vim.ui.select` per `host.use_telescope()`. `tests/actions_spec.lua` checks every entry runs an existing command |
 | `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` / `<leader>acn` / code-action "Add missing using statements" — server-independent resolver (see below); `:ALChangeNamespace` — `plan_change`/`apply_change` move namespaces to a new prefix |
 | `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
 | `lua/al/update.lua` | `:ALUpdate` — `M.update(dir, { run, getenv })` fast-forwards the running checkout; refuses (no git mutation) on a dirty tree, a non-`master`/`main` branch, or `ALNVIM_DEV` set; every step's exit code checked, success only after `merge --ff-only` exits 0 |
@@ -368,6 +368,14 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 **Never switch the user's tab (D1).** Catnip's `View:open` focuses a view already open in another tabpage, which switches tab. `CatnipSink:open` closes such a view first (close does not move focus when the view is not focused). Request R4 asks Catnip to fix the root cause; the guard stays either way.
 
 **Detection is silent (D3).** `pcall(require, "catnip.ui")` once, cached; `setup()` resets it. `ui = "catnip"` with Catnip missing warns once, at `setup()`, never per command. Natively, split build panels open one per tab: a second root's panel replaces the first in that tab, as the single panel always did.
+
+**Pickers (W6).** `host.use_telescope()` decides for the simple pickers — ALActions, the
+wizard's field multi-select, `:ALSelectCops`, `:ALRunTests` methods, the layout types: Telescope
+under `picker = "auto"` when it loads or `"telescope"`, their existing `vim.ui.select` fallback
+under `"select"` (Catnip's `vim.ui.select` is dressing.nvim, so that is one look). Explorer,
+procedures, grep and diff keep Telescope: they need a preview and extra keys, and a Snacks
+backend is a separate task. `actions.list()` exports the table for a host's own palette
+(Catnip's hard-coded one listed `ALGoto` and `ALInlineHints`, which do not exist — request R2).
 
 **Every other output view is on the host too (W3).** `altool.run` streams into
 `alnvim.tool:<root>` (publish, symbols over both routes, tests, doc): opened without focus,
@@ -969,7 +977,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (446 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (452 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

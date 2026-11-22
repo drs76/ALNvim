@@ -557,7 +557,7 @@ function M.generate()
     vim.log.levels.INFO)
 
   local function run_picker(cb)
-    if pcall(require, "telescope") then telescope_layout_picker(cb)
+    if require("al.host").use_telescope() then telescope_layout_picker(cb)
     else simple_layout_picker(cb) end
   end
 
