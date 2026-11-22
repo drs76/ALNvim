@@ -231,8 +231,10 @@ vim.keymap.set("n", "<leader>acf", ca_pick("quickfix"),
   vim.tbl_extend("force", opts, { desc = "AL: Quick fixes for diagnostics on cursor line" }))
 vim.keymap.set("n", "<leader>acF", ca_server_only("source.fixAll", "fix all"),
   vim.tbl_extend("force", opts, { desc = "AL: Fix all — apply all source.fixAll actions in file" }))
-vim.keymap.set("n", "<leader>acn", ca_server_only("source.organizeImports", "organise namespaces"),
-  vim.tbl_extend("force", opts, { desc = "AL: Organise namespaces / using statements" }))
+-- Organise namespaces: the server's organizeImports where it has code actions
+-- (EditorServices), else ALNvim's own resolver — the AL tool's server has none.
+vim.keymap.set("n", "<leader>acn", function() require("al.namespace").add_usings(0) end,
+  vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements" }))
 vim.keymap.set("n", "<leader>acx", "<cmd>ALFixCops<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Fix cops — apply all AA0137/AA0206/AA0008 fixes project-wide" }))
 vim.keymap.set("n", "<leader>acE", "<cmd>ALRefactorToEnum<CR>",

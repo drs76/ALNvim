@@ -95,6 +95,18 @@ function M.extract_zip(src, dst, files_glob)
   end
 end
 
+-- Read one member of a ZIP archive (a .app included — its 40-byte NAVX header
+-- is tolerated by both tools) to a string, without extracting to disk.
+-- Returns the bytes, or nil.
+function M.zip_member(src, member)
+  local cmd = M.is_windows
+    and { "tar", "-xOf", src, member }      -- bsdtar: -O writes the member to stdout
+    or  { "unzip", "-p", src, member }      -- exits 1 on the NAVX header warning, output intact
+  local ok, res = pcall(function() return vim.system(cmd, { text = false }):wait() end)
+  if not ok or not res or not res.stdout or res.stdout == "" then return nil end
+  return res.stdout
+end
+
 -- Create a ZIP archive from the contents of src_dir, writing to dst_file.
 -- Uses Python3's built-in zipfile module — works on Linux, macOS, and Windows
 -- (where the 'zip' CLI is absent but python3 is always available with AL tooling).

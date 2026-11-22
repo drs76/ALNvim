@@ -193,6 +193,13 @@ local function has_assignment(ctx)
 end
 
 M.register({
+  -- Server-independent: on the AL tool's language server there is no
+  -- organizeImports to offer, so this is the only way it appears in the menu.
+  id = "add_usings", kind = "source.organizeImports", title = "Add missing using statements",
+  applicable = function(ctx) return ctx.root ~= nil end,
+  run = function(ctx) require("al.namespace").add_usings(ctx.bufnr) end,
+})
+M.register({
   id = "extract_label", kind = "refactor.extract", title = "Extract to Label",
   applicable = function(ctx) return in_body(ctx) and H.find_quoted_string(ctx.line, ctx.col0) ~= nil end,
   run = function() refactor.extract_label() end,
