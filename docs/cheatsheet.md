@@ -353,6 +353,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALGeneratePermissionSet [dir]` | Scan objects → `.PermissionSet.al` |
 | `:ALNextId` | Notify the next free object IDs for the type on the current line |
 | `:ALAddNamespace [dir]` | Add `namespace` to every source file |
+| `:ALChangeNamespace [old new]` | Move the project's namespaces from `old` to `new` (prefix): `namespace`, `using`, qualified references |
 | `:ALAddUsings` | Add missing `using` statements (server-only) |
 | `:ALPreviewPage` | Preview page layout |
 | `:ALReportLayout` / `:ALOpenLayout` | Report Layout Wizard / open existing layout |

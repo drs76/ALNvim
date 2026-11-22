@@ -476,6 +476,262 @@ function M.fix_usings(files, on_done)
   if on_done then on_done() end
 end
 
+-- ── Change namespace (POC → PTE) ───────────────────────────────────────────
+--
+-- Moves every project namespace under an old prefix to a new one:
+-- `Demo.Sales` → `Contoso.Sales` for old `Demo`, new `Contoso`. Rewrites
+--   * `namespace P;` declarations under the old prefix,
+--   * `using P;` lines and qualified references `P."Name"` / `P.Name` — but
+--     only when P is a namespace the PROJECT declares. A dependency may share
+--     the prefix (an app that depends on `Contoso.Core` while being renamed out
+--     of `Contoso`); its usings must survive, or the build breaks.
+-- Qualified references are matched only for namespaces of two or more
+-- segments: `Demo.Run()` is more likely a codeunit variable named Demo than a
+-- reference into namespace `Demo`. Strings and comments are skipped.
+
+local function valid_ns(s)
+  if type(s) ~= "string" or s == "" then return false end
+  for _, seg in ipairs(vim.split(s, ".", { plain = true })) do
+    if not seg:match("^[%a_][%w_]*$") then return false end
+  end
+  return true
+end
+
+-- Is `ns` equal to `old` or below it? (AL names are case-insensitive.)
+local function under(ns, old)
+  local a, b = ns:lower(), old:lower()
+  return a == b or a:sub(1, #b + 1) == b .. "."
+end
+
+local function moved(ns, old, new) return new .. ns:sub(#old + 1) end
+
+-- Pure: rewrite one file's lines. `known` = { [lower ns] = true } for the
+-- namespaces the project declares. Returns new lines (or nil when unchanged)
+-- and counts { decl, using, ref }.
+local function change_ns_lines(lines, old, new, known)
+  local n = { decl = 0, using = 0, ref = 0 }
+  local out, changed = {}, false
+  for i, line in ipairs(lines) do
+    local res = line
+    local pre, ns, post = line:match("^(%s*namespace%s+)([%w_%.]+)(%s*;.*)$")
+    if ns and under(ns, old) then
+      res, n.decl = pre .. moved(ns, old, new) .. post, n.decl + 1
+    else
+      pre, ns, post = line:match("^(%s*using%s+)([%w_%.]+)(%s*;.*)$")
+      if ns then
+        if known[ns:lower()] and under(ns, old) then
+          res, n.using = pre .. moved(ns, old, new) .. post, n.using + 1
+        end
+      else
+        -- Qualified references. Scan the masked line for dotted bare paths;
+        -- positions line up because mask_code keeps the length.
+        local masked = mask_code(line)
+        local parts, last, pos = {}, 1, 1
+        while true do
+          local s, e = masked:find("[%a_][%w_]*%.[%a_][%w_%.]*", pos)
+          if not s then break end
+          local prev = s > 1 and masked:sub(s - 1, s - 1) or ""
+          local tok = masked:sub(s, e):gsub("%.+$", "")
+          e = s + #tok - 1
+          local hit
+          if not prev:match('[%w_%."]') then
+            -- longest declared namespace that the token starts with, followed
+            -- by "." (inside the token or right after it)
+            local low = tok:lower()
+            local segs = {}
+            for seg in low:gmatch("[^%.]+") do segs[#segs + 1] = seg end
+            for k = #segs, 2, -1 do
+              local cand = table.concat(segs, ".", 1, k)
+              local follows = (k < #segs) or masked:sub(e + 1, e + 1) == "."
+              if follows and known[cand] and under(cand, old) then hit = #cand; break end
+            end
+          end
+          if hit then
+            parts[#parts + 1] = line:sub(last, s - 1)
+            parts[#parts + 1] = moved(line:sub(s, s + hit - 1), old, new)
+            last = s + hit
+            n.ref = n.ref + 1
+          end
+          pos = e + 1
+        end
+        if #parts > 0 then
+          parts[#parts + 1] = line:sub(last)
+          res = table.concat(parts)
+        end
+      end
+    end
+    if res ~= line then changed = true end
+    out[i] = res
+  end
+  return changed and out or nil, n
+end
+
+-- Read a file as lines, remembering its BOM, line ending and final newline so
+-- the rewrite changes nothing but the namespaces.
+local function read_lines(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local s = f:read("*a")
+  f:close()
+  local bom = s:sub(1, 3) == "\239\187\191" and "\239\187\191" or ""
+  s = s:sub(#bom + 1)
+  local eol = s:find("\r\n", 1, true) and "\r\n" or "\n"
+  local final = s:sub(-1) == "\n"
+  local lines = vim.split(s, "\n", { plain = true })
+  if final then table.remove(lines) end
+  for i, l in ipairs(lines) do lines[i] = l:gsub("\r$", "") end
+  return lines, { bom = bom, eol = eol, final = final }
+end
+
+local function write_lines(path, lines, fmt)
+  local f = io.open(path, "wb")
+  if not f then return false end
+  f:write(fmt.bom, table.concat(lines, fmt.eol), fmt.final and fmt.eol or "")
+  f:close()
+  return true
+end
+
+-- Namespaces declared by the project's files: { [lower] = original }.
+local function project_namespaces(files)
+  local seen = {}
+  for _, path in ipairs(files) do
+    local lines = read_lines(path) or {}
+    for i = 1, math.min(#lines, 20) do
+      local ns = lines[i]:match("^%s*namespace%s+([%w_%.]+)%s*;")
+      if ns then seen[ns:lower()] = seen[ns:lower()] or ns; break end
+    end
+  end
+  return seen
+end
+
+-- Longest segment prefix shared by every declared namespace ("" when none).
+local function common_prefix(seen)
+  local list = vim.tbl_values(seen)
+  table.sort(list)                       -- deterministic spelling of the result
+  local segs
+  for _, ns in ipairs(list) do
+    local s = vim.split(ns, ".", { plain = true })
+    if not segs then segs = s
+    else
+      local k = 0
+      while k < #segs and k < #s and segs[k + 1]:lower() == s[k + 1]:lower() do k = k + 1 end
+      for j = #segs, k + 1, -1 do segs[j] = nil end
+    end
+  end
+  if not segs then return "" end
+  return table.concat(segs, ".")
+end
+
+-- Plan the change across files. Returns { files = { {path, lines, fmt, n} },
+-- modified = {path}, totals = {decl, using, ref} }.
+function M.plan_change(root, old, new)
+  local files = platform.glob_al_files(root)
+  local seen = project_namespaces(files)
+  local known = {}
+  for k in pairs(seen) do known[k] = true end
+  local plan = { files = {}, modified = {}, totals = { decl = 0, using = 0, ref = 0 } }
+  for _, path in ipairs(files) do
+    local lines, fmt = read_lines(path)
+    if lines then
+      local out, n = change_ns_lines(lines, old, new, known)
+      if out then
+        local buf = loaded_buf(path)
+        if buf and vim.bo[buf].modified then
+          plan.modified[#plan.modified + 1] = path
+        else
+          plan.files[#plan.files + 1] = { path = path, lines = out, fmt = fmt, n = n }
+          for k, v in pairs(n) do plan.totals[k] = plan.totals[k] + v end
+        end
+      end
+    end
+  end
+  return plan
+end
+
+function M.apply_change(plan)
+  local written = 0
+  for _, f in ipairs(plan.files) do
+    if write_lines(f.path, f.lines, f.fmt) then
+      written = written + 1
+      local buf = loaded_buf(f.path)   -- unmodified (plan_change checked)
+      if buf then vim.api.nvim_buf_call(buf, function() vim.cmd("silent! edit!") end) end
+    end
+  end
+  return written
+end
+
+local function rel(p) return vim.fn.fnamemodify(p, ":~:.") end
+
+-- :ALChangeNamespace [old new]
+function M.change(root, old, new)
+  root = root or lsp.get_root()
+  if not root then
+    vim.notify("AL: no project root found (missing app.json)", vim.log.levels.ERROR)
+    return
+  end
+  local seen = project_namespaces(platform.glob_al_files(root))
+  if not next(seen) then
+    vim.notify("AL: no file declares a namespace — use :ALAddNamespace first", vim.log.levels.WARN)
+    return
+  end
+
+  local function run(o, nw)
+    if not valid_ns(o) or not valid_ns(nw) then
+      vim.notify(("AL: not a valid namespace: %s"):format(valid_ns(o) and nw or o), vim.log.levels.ERROR)
+      return
+    end
+    if o:lower() == nw:lower() then
+      vim.notify("AL: old and new namespace are the same", vim.log.levels.WARN)
+      return
+    end
+    local any = false
+    for k in pairs(seen) do if under(k, o) then any = true end end
+    if not any then
+      local list = vim.tbl_values(seen); table.sort(list)
+      vim.notify(("AL: no project namespace is under '%s'. Declared: %s")
+        :format(o, table.concat(list, ", ")), vim.log.levels.WARN)
+      return
+    end
+    local plan = M.plan_change(root, o, nw)
+    if #plan.modified > 0 then
+      vim.notify("AL: save these first (unsaved changes):\n  "
+        .. table.concat(vim.tbl_map(rel, plan.modified), "\n  "),
+        vim.log.levels.WARN)
+      return
+    end
+    if #plan.files == 0 then
+      vim.notify("AL: nothing to change", vim.log.levels.INFO)
+      return
+    end
+    local t = plan.totals
+    local summary = ("%d file(s): %d namespace, %d using, %d qualified reference(s)")
+      :format(#plan.files, t.decl, t.using, t.ref)
+    vim.ui.select({ "Yes — change " .. summary, "Cancel" },
+      { prompt = ("Change namespace %s → %s?"):format(o, nw) },
+      function(choice)
+        if not choice or choice == "Cancel" then return end
+        local w = M.apply_change(plan)
+        vim.notify(("AL: namespace %s → %s in %d file(s). Projects that depend on this app need their usings updated too.")
+          :format(o, nw, w), vim.log.levels.INFO)
+      end)
+  end
+
+  if old and new then return run(old, new) end
+  vim.ui.input({ prompt = "Old namespace (prefix): ", default = common_prefix(seen) }, function(o)
+    if not o or o == "" then return end
+    vim.ui.input({ prompt = "New namespace: ", default = M.suggest_namespace(root) }, function(nw)
+      if not nw or nw == "" then return end
+      run(vim.trim(o), vim.trim(nw))
+    end)
+  end)
+end
+
+M._test.change_ns_lines = change_ns_lines
+M._test.common_prefix   = common_prefix
+M._test.valid_ns        = valid_ns
+M._test.read_lines      = read_lines
+M._test.write_lines     = write_lines
+
 -- Interactive wizard: prompt for namespace, add to all eligible files,
 -- optionally fix using statements via LSP.
 function M.wizard(root)

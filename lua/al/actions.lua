@@ -119,6 +119,8 @@ local ACTIONS = {
     run = function() vim.cmd("ALAddUsings") end },
   { name = "Add Namespace",            key = "<leader>aN",  desc = "Add namespace declaration to all source files in project",
     run = function() vim.cmd("ALAddNamespace") end },
+  { name = "Change Namespace",         key = "",            desc = "Move the project's namespaces to a new prefix (POC → PTE): namespace, using, qualified references",
+    run = function() vim.cmd("ALChangeNamespace") end },
 
   -- Configuration --------------------------------------------------------
   { name = "Select Code Cops",         key = "<leader>aC",  desc = "Toggle active code analyzers (CodeCop, UICop, AppSourceCop…)",
