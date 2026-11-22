@@ -35,6 +35,83 @@ function M.available()
   return out:find("launchlspserver", 1, true) ~= nil
 end
 
+-- ── Reload after the symbol packages change ───────────────────────────────
+--
+-- The server reads .alpackages once, at startup. Probed on tool 30.0.42: a
+-- package added or replaced afterwards stays invisible — to completion, hover
+-- and diagnostics — even after workspace/didChangeWatchedFiles; a fresh server
+-- sees it. EditorServices reloaded on its own, so this was a regression when
+-- the tool's server became the backend: after a symbol download, a dependency's
+-- new table was "missing" in Neovim and offered by VS Code's completion.
+-- So the client is restarted: after :ALDownloadSymbols, on :ALReindex, and when
+-- a .app in the package cache changes on disk (VS Code's download, a copied
+-- dependency build).
+
+M.watchers = {}       -- [root] = uv fs_event handle
+M.suspended = {}      -- [root] = true while ALNvim itself is downloading
+M.RELOAD_DEBOUNCE_MS = 3000
+
+local function norm(p) return vim.fs.normalize(p or "") end
+
+local function clients_for(root)
+  local out = {}
+  for _, c in ipairs(vim.lsp.get_clients({ name = "al_agentic_lsp" })) do
+    if norm(c.root_dir) == norm(root) then out[#out + 1] = c end
+  end
+  return out
+end
+
+-- Stop root's agentic client(s) and start a fresh one on the same buffers.
+-- Returns false when no client was running for root.
+function M.restart(root, reason)
+  local olds, bufs = clients_for(root), {}
+  if #olds == 0 then return false end
+  for _, c in ipairs(olds) do
+    for b in pairs(c.attached_buffers or {}) do bufs[#bufs + 1] = b end
+    pcall(function()
+      local pid = c.rpc.handle:get_pid()
+      if pid then M.pids[pid] = nil end
+    end)
+    c:stop(true)
+  end
+  vim.notify("AL: reloading the language server — " .. (reason or "restart"), vim.log.levels.INFO)
+  -- vim.lsp.start would hand back a client that is still shutting down, so
+  -- wait until every old one has stopped (max 5s), then start once per buffer
+  -- (the first creates the client, the rest attach to it).
+  local waited, timer = 0, vim.uv.new_timer()
+  timer:start(100, 100, vim.schedule_wrap(function()
+    if timer:is_closing() then return end
+    waited = waited + 100
+    local busy = false
+    for _, c in ipairs(olds) do if not c:is_stopped() then busy = true end end
+    if busy and waited < 5000 then return end
+    timer:stop(); timer:close()
+    for _, b in ipairs(bufs) do
+      if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_is_loaded(b) then M.start(b, root) end
+    end
+  end))
+  return true
+end
+
+-- Watch root's package cache; a changed .app restarts the server once the
+-- writes settle. One watcher per root. Silent no-op where the filesystem
+-- reports no events (some network shares) — the explicit hooks still apply.
+function M.watch_packages(root, cache)
+  if M.watchers[root] or vim.fn.isdirectory(cache) == 0 then return end
+  local ev = vim.uv.new_fs_event()
+  if not ev then return end
+  local debounce = vim.uv.new_timer()
+  local ok = ev:start(cache, {}, function(err, fname)
+    if err or not fname or not fname:lower():match("%.app$") then return end
+    debounce:stop()
+    debounce:start(M.RELOAD_DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+      if M.suspended[root] then return end
+      M.restart(root, "symbol packages changed")
+    end))
+  end)
+  if ok then M.watchers[root] = ev else ev:close(); debounce:close() end
+end
+
 -- Start the agentic LSP for `root`, attaching buffer `bufnr`.
 function M.start(bufnr, root)
   local bin = M.binary()
@@ -68,6 +145,8 @@ function M.start(bufnr, root)
   if cfg.ruleset_path and cfg.ruleset_path ~= "" then
     vim.list_extend(cmd, { "--ruleset", cfg.ruleset_path })
   end
+
+  M.watch_packages(root, cache)
 
   vim.lsp.start({
     name     = "al_agentic_lsp",

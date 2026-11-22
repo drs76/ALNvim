@@ -228,10 +228,21 @@ local function run(root, source, cfg)
     or ("Server — " .. (cfg.name or "launch.json"))
   local env = cfg and altool.cred_env(cfg) or nil
 
+  -- The tool's language server never re-reads .alpackages: restart it once the
+  -- download is done (the package watcher stays quiet meanwhile, so a download
+  -- of several packages is one restart, not one per file).
+  local agentic = require("al.agentic_lsp")
+  agentic.suspended[root] = true
+  local function reload(ok)
+    agentic.suspended[root] = nil
+    if ok then agentic.restart(root, "symbols downloaded") end
+  end
+
   if t == "cli" then
     altool.run(cli_args(root, source, cfg), {
       title = "AL: Symbols — " .. label, cwd = root, env = env,
     }, function(ok, code, log, win)
+      reload(ok)
       if ok then
         log({ "", "── Done ──" })
         altool.close_later(win, 3000)
@@ -250,7 +261,7 @@ local function run(root, source, cfg)
   end
   local finish = progress_float(label .. " — al tool")
   altool.mcp_call(root, "al_downloadsymbols", mcp_args(root, source, cfg),
-    function(ok, text) finish(summarize(ok, text)) end, { env = env })
+    function(ok, text) reload(ok); finish(summarize(ok, text)) end, { env = env })
 end
 
 -- ── Public entry points ───────────────────────────────────────────────────────

@@ -1050,11 +1050,13 @@ vim.api.nvim_create_user_command("ALReindex", function()
     vim.notify("AL: No project root found (missing app.json)", vim.log.levels.ERROR)
     return
   end
+  -- The tool's server has no re-index request: restart it (re-reads .alpackages).
+  if require("al.agentic_lsp").restart(root, "re-index") then return end
   local cops = require("al.cops")
   require("al.status").set_lsp_loading(0)
   cops.apply(root, cops.get_active(root))
   vim.notify("AL: Re-indexing project…", vim.log.levels.INFO)
-end, { desc = "AL: Force server re-index via al/setActiveWorkspace (use after adding deps/changing cops)" })
+end, { desc = "AL: Re-index — restart the tool's language server, or al/setActiveWorkspace on EditorServices (use after adding deps/changing symbols)" })
 
 vim.api.nvim_create_user_command("ALDiff", function(opts)
   require("al.diff").explore(opts.args ~= "" and opts.args or nil)
