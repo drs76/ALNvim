@@ -37,7 +37,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/json.lua` | `M.pretty()` / `M.write()` — indented JSON writer for user-facing config files |
 | `lua/al/snippets.lua` | Loads snippets into LuaSnip; `M.create_from_selection()` wizard |
 | `lua/al/actions.lua` | ALActions picker — the `ACTIONS` table (name, key, desc, run); Telescope or `vim.ui.select` fallback. `tests/actions_spec.lua` checks every entry runs an existing command |
-| `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` via organizeImports |
+| `lua/al/namespace.lua` | `:ALAddNamespace` wizard: `suggest_namespace` from app.json, `has_namespace`, `add_namespace_to_file/project` (refuses modified buffers); `:ALAddUsings` / `<leader>acn` / code-action "Add missing using statements" — server-independent resolver (see below) |
 | `lua/al/preview.lua` | `:ALPreviewPage` — page layout preview |
 | `lua/al/update.lua` | `:ALUpdate` — `M.update(dir, { run, getenv })` fast-forwards the running checkout; refuses (no git mutation) on a dirty tree, a non-`master`/`main` branch, or `ALNVIM_DEV` set; every step's exit code checked, success only after `merge --ff-only` exits 0 |
 | `lua/al/install.lua` | `:ALInstallExtension` / `:ALUpdateExtension` (VSIX from vsassets.io), `:ALInstallDotnetTool` |
@@ -387,7 +387,8 @@ via PATH: clean build, `.app` produced.
 | `<leader>aN` | AddNamespace — add namespace to all source files |
 | `<leader>aA/aD/ae/af/ag` | Analyze (silent alc pass) / Diff / Explorer / ExplorerProcs / Search |
 | `<leader>aca/acf/acr` | Code actions via `al.codeactions.pick` (all / quickfix for cursor-line diagnostics / refactor) — `aca`/`acr` work in visual mode; Lua actions always, server actions only with `codeActionProvider` |
-| `<leader>acF/acn` | fixAll / organise namespaces — server-only; notify "not supported by this language server" on the agentic LSP |
+| `<leader>acF` | fixAll — server-only; notifies "not supported by this language server" on the agentic LSP |
+| `<leader>acn` / `<leader>acu` | Add missing using statements — ALNvim's own resolver (server organizeImports on EditorServices) |
 | `<leader>acx/acE` | FixCops (apply every AA0137/AA0206/AA0008 fix project-wide) / RefactorToEnum (Option field → enum) |
 | `<leader>aF` | FindRelated — publisher for `[EventSubscriber]`, handlers for `[HandlerFunctions]`, table trigger for `Rec.Insert()` |
 | `<leader>acl` | ExtractLabel (`:ALExtractLockedLabel` for `Locked = true`) |
@@ -701,6 +702,16 @@ PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` �
 
 `add_publishers` edits bottom-up: publishers after `end;`, `OnAfter…` call before `end;`, `IsHandled` block after `begin`, then the `IsHandled: Boolean` declaration. Config `setup({ codeactions = { publisher_var_params = true, initialize_is_handled = true } })`, read through `package.loaded["al"]` so the module never requires `al` itself. `promote_action` walks brace blocks (`block_end`) from the enclosing `actions` line; it appends to the first `group` in `area(Promoted)`, else creates `area(Promoted) { group(Category_Process) { … } }`.
 
+## Add missing usings (`lua/al/namespace.lua`)
+
+`:ALAddUsings` requested `source.organizeImports` from the language server; the AL tool's server has no code actions, so it only printed "method textDocument/codeAction is not supported" (2026-11-21). It now resolves usings itself (EditorServices still gets organizeImports):
+
+1. **`refs_in(lines)`** — referenced objects: `Record/Codeunit/Page/Report/Query/XmlPort/Enum/Interface/TestPage X`, `Database::/Page::/… X`, `extends`/`customizes`/`implements`, `SourceTable`, `TableRelation`, `LookupPageId`/`DrillDownPageId`/`CardPageId`, `part(…; X)`, `dataitem(…; X)`, `tableelement(…; X)`, `tabledata X`. `mask_code` blanks single-quoted literals and `//` comments but keeps `"quoted identifiers"`.
+2. **Namespace index** — every object of every package in the package cache, from the `.app`'s **`SymbolReference.json`** (`Namespaces` tree; names each object's namespace even when the package has no `.al` source), read with `platform.zip_member` (`unzip -p` / `tar -xOf`) and cached per `.app` in `stdpath("cache")/alnvim/nsindex/` (valid while newer than the `.app`). Base Application decodes to ~250 MB in ~0.8 s, so the first run notifies and `collectgarbage()`s after each package; measured 3.2 s for 10 packages, then 0.03 s. Plus the project's own files (`namespace X;` + object header).
+3. **`missing_usings`** — a reference is satisfied by the file's own namespace, an existing `using` (case-insensitive) or the global namespace; otherwise one candidate → add, several → reported, never guessed. **`insert_usings`** merges into a sorted block keeping it sorted, appends to an unsorted one, else inserts `namespace; / blank / usings / blank`.
+
+The compiler's AL0185 ("Table 'X' is missing") was not used as the source: it comes only for declarations, and `Page::X` references surface a compile later. Verified on a bc-dashboard Core copy: three namespaces added, AL0185 gone.
+
 ## Code actions (`lua/al/codeactions.lua`)
 
 The agentic LSP has no `codeActionProvider`, so `vim.lsp.buf.code_action` did nothing on the user's backend. `M.register({ id, title, kind, applicable(ctx), run(ctx) })` keeps Lua actions; `M.pick({ only, range })` builds `ctx` (`bufnr, root, lines, row, col0, line, sel_start, sel_end, visual, bounds, diagnostics` — cursor-line diagnostics only), filters by `kind` prefix (`"refactor"` matches `"refactor.extract"`), and shows `vim.ui.select`. **It requests `textDocument/codeAction` only when `lsp.client(bufnr).server_capabilities.codeActionProvider` is set** — otherwise the request sits pending forever and the Lua actions never show. Server results are merged with a `[LSP]` prefix. **The `vim.ui.select` call must not pass `kind = "codeaction"`** — snacks.nvim's `ui_select` formats that kind as LSP items and indexes `item.ctx`, so with a snacks-based config (Catnip) the picker died with "attempt to index local 'ctx'" and nothing showed. It passes `kind = "al.codeaction"`; `tests/codeactions_spec.lua` guards it. Built-in actions are registered at the bottom of the module (not in refactor.lua, which must not require codeactions). `M._test = { registry, applicable_for }`.
@@ -879,7 +890,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (370 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (382 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
