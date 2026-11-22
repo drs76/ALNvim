@@ -260,30 +260,17 @@ vim.api.nvim_create_autocmd("LspAttach", {
       client._al_last_active = vim.uv.now()
     end
 
-    -- The AL server sends completion labels as { label = "..." } objects instead of strings.
-    -- nvim-cmp calls client:request("textDocument/completion", ..., its_own_callback), so the
-    -- response bypasses vim.lsp.handlers entirely and arrives straight into its callback.
-    -- Patch client.request once to wrap any completion callback and normalise labels first.
-    if not client._al_completion_patched then
-      client._al_completion_patched = true
+    -- Completion labels arrive as { label = "..." } objects and filterText is
+    -- quoted on bare names; lsp.patch_completion (shared with the agentic
+    -- client) wraps client.request once to normalise both.
+    require("al.lsp").patch_completion(client)
+
+    -- Rename interception: wrap client.request once more (own guard).
+    if not client._al_rename_patched then
+      client._al_rename_patched = true
       local _orig = client.request
       client.request = function(self, method, params, callback, bufnr_)
-        if method == "textDocument/completion" and type(callback) == "function" then
-          local _cb = callback
-          callback = function(err, result, ...)
-            if not err and result then
-              local items = (type(result) == "table" and result.items) or result
-              if type(items) == "table" then
-                for _, item in ipairs(items) do
-                  if type(item.label) == "table" then
-                    item.label = item.label.label or ""
-                  end
-                end
-              end
-            end
-            return _cb(err, result, ...)
-          end
-        elseif method == "textDocument/rename" and type(callback) == "function" then
+        if method == "textDocument/rename" and type(callback) == "function" then
           -- Intercept rename to fix cross-file application.
           -- The AL server returns a valid WorkspaceEdit but may not include all files,
           -- or Neovim may not open+edit files that aren't loaded yet.

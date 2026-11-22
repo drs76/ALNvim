@@ -112,6 +112,129 @@ function M.watch_packages(root, cache)
   if ok then M.watchers[root] = ev else ev:close(); debounce:close() end
 end
 
+-- ── Warm-up ───────────────────────────────────────────────────────────────
+--
+-- The server answers `initialize` in ~0.5s but loads the symbols lazily, on
+-- the first semantic request: that request takes 6–9s (tool 30.0.42), however
+-- long the server sat idle before it. on_attach used to mark the client ready
+-- at once, so the statusline said "ready" and the user's first `.` waited the
+-- whole load; nvim-cmp gave up after its fetching_timeout and showed snippets
+-- only. So the warm-up sends a hover, then a completion, discards both, and
+-- only then says ready. A cap stops a server that never answers from leaving
+-- the status at "loading".
+--
+-- Probed on tool 30.0.42 (ALTest, BC 21 symbols):
+--   * The completion must be a *member* completion (just after `X.`). One at
+--     (0,0) loaded the symbols but left the first `Cust.` at 1.0–1.5s; after a
+--     member completion on any variable, `Cust.` answered in 40ms.
+--   * A document that is not on disk gets empty answers in ~80ms and loads
+--     nothing — the VimEnter anchor `_al_startup_.al` included. So the target
+--     is a real project file: the attached buffer when it is on disk and has a
+--     member access, else the first project file with one, opened for the
+--     server only (didOpen/didClose, no Neovim buffer).
+
+M.WARM_CAP_MS = 30000
+local WARM_SCAN_FILES = 200
+
+-- 0-based position just after the first member-access dot in `lines`
+-- (`Cust.Get(`, `Rec."No."`, a bare `SH.`), or nil. Skips namespace/using
+-- lines, numbers (`1.5`), ranges (`1..9`), strings and // comments.
+function M.warm_position(lines)
+  for i, line in ipairs(lines) do
+    local code = line:gsub("//.*$", ""):gsub("'[^']*'", function(q) return (" "):rep(#q) end)
+    if not code:match("^%s*namespace%s") and not code:match("^%s*using%s") then
+      local from = 1
+      while true do
+        local s = code:find('[%w_"%)]%.', from)
+        if not s then break end
+        local word = code:sub(1, s):match("[%w_]*$")
+        local nxt = code:sub(s + 2, s + 2)
+        if nxt ~= "." and not word:match("^%d+$") then
+          -- s is the 1-based index of the char before the dot; the dot is at
+          -- 1-based s+1, so 0-based "just after the dot" is s+1.
+          return { line = i - 1, character = s + 1 }
+        end
+        from = s + 2
+      end
+    end
+  end
+end
+
+local function on_disk(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  return name ~= "" and vim.fn.filereadable(name) == 1
+end
+
+-- Pick the warm-up target: { uri, pos, text? }. `text` is set when the file
+-- has to be opened for the server (not loaded in Neovim).
+function M.warm_target(buf, root)
+  if on_disk(buf) then
+    local pos = M.warm_position(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    if pos then return { uri = vim.uri_from_bufnr(buf), pos = pos } end
+  end
+  if root then
+    local files = vim.fs.find(function(name) return name:match("%.[Aa][Ll]$") ~= nil end,
+      { path = root, type = "file", limit = WARM_SCAN_FILES })
+    for _, f in ipairs(files) do
+      local fb = vim.fn.bufnr(f)
+      local loaded = fb ~= -1 and vim.api.nvim_buf_is_loaded(fb)
+      local okk, lines = pcall(vim.fn.readfile, f)
+      if okk then
+        local pos = M.warm_position(loaded and vim.api.nvim_buf_get_lines(fb, 0, -1, false) or lines)
+        if pos then
+          -- A loaded buffer was opened for the server by Neovim already (when
+          -- attached); a second didOpen would be a protocol error.
+          return { uri = vim.uri_from_fname(f), pos = pos,
+                   text = not loaded and (table.concat(lines, "\n") .. "\n") or nil }
+        end
+      end
+    end
+  end
+  if on_disk(buf) then
+    return { uri = vim.uri_from_bufnr(buf), pos = { line = 0, character = 0 } }
+  end
+end
+
+-- Warm `client` once: hover then completion, ready after the second answer or
+-- WARM_CAP_MS, whichever comes first (exactly once).
+function M.warm(client, buf, root)
+  if client._al_warm then return end
+  client._al_warm = true
+  local status = require("al.status")
+  status.set_lsp_loading()
+
+  local done = false
+  local function finish()
+    if done then return end
+    done = true
+    status.set_lsp_ready()
+  end
+
+  local target = M.warm_target(buf, root)
+  if not target then finish(); return end   -- nothing on disk to warm with
+  vim.defer_fn(finish, M.WARM_CAP_MS)
+
+  local doc = { uri = target.uri }
+  if target.text then
+    client:notify("textDocument/didOpen", { textDocument = {
+      uri = target.uri, languageId = "al", version = 0, text = target.text } })
+  end
+  local function close()
+    if target.text then client:notify("textDocument/didClose", { textDocument = doc }) end
+  end
+  local function send(method, pos, cb)
+    local okk, sent = pcall(client.request, client, method,
+      { textDocument = doc, position = pos }, cb, buf)
+    if not okk or sent == false then close(); finish() end
+    return okk and sent ~= false
+  end
+  local p = target.pos
+  local qualifier = { line = p.line, character = math.max(0, p.character - 2) }
+  send("textDocument/hover", qualifier, function()
+    send("textDocument/completion", p, function() close(); finish() end)
+  end)
+end
+
 -- Start the agentic LSP for `root`, attaching buffer `bufnr`.
 function M.start(bufnr, root)
   local bin = M.binary()
@@ -169,41 +292,15 @@ function M.start(bufnr, root)
       end)
     end,
     on_attach = function(client, buf)
-      -- The AL server (both EditorServices and launchlspserver) sends completion
-      -- labels as { label = "..." } objects instead of plain strings, which crashes
-      -- nvim-cmp's matcher (bad argument to 'byte'). nvim-cmp calls client:request
-      -- directly, bypassing vim.lsp.handlers, so patch client.request once to
-      -- normalise labels (and CompletionList.items) in the response.
-      if not client._al_completion_patched then
-        client._al_completion_patched = true
-        local _orig = client.request
-        client.request = function(self, method, params, callback, bufnr_)
-          if method == "textDocument/completion" and type(callback) == "function" then
-            local _cb = callback
-            callback = function(err, result, ...)
-              if not err and result then
-                local items = (type(result) == "table" and result.items) or result
-                if type(items) == "table" then
-                  for _, item in ipairs(items) do
-                    if type(item.label) == "table" then
-                      item.label = item.label.label or ""
-                    end
-                  end
-                end
-              end
-              return _cb(err, result, ...)
-            end
-          end
-          return _orig(self, method, params, callback, bufnr_)
-        end
-      end
+      -- Label objects and quoted filterText: one shared patch (al.lsp).
+      require("al.lsp").patch_completion(client)
 
       local status = require("al.status")
-      -- Standard LSP: no al/progressNotification or al/activeProjectLoaded events,
-      -- so surface project identity and mark ready immediately.
+      -- Standard LSP: no al/progressNotification or al/activeProjectLoaded
+      -- events. Ready is set when the warm-up below has loaded the symbols.
       local app = require("al.lsp").read_app_json(root)
       if app then status.set_project(app.name, app.version, root) end
-      status.set_lsp_ready()
+      M.warm(client, buf, root)
 
       if cfg.inlay_hints ~= false and client.server_capabilities.inlayHintProvider
          and vim.lsp.inlay_hint then

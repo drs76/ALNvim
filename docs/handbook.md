@@ -28,7 +28,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Area | Status | Evidence |
 |---|---|---|
 | Compile, publish, symbols, tests through the `al` tool | 🟢 live | Clean build with no VS Code extension installed, tool 30.0.42, 2026-10 |
-| Agentic LSP (`al launchlspserver`) | 🟢 live, the author's backend since 2026-10-01 | Formatting and base symbols probed on tools 18.0.37 and 30.0.42 |
+| Agentic LSP (`al launchlspserver`) | 🟢 live, the author's backend since 2026-10-01 | Formatting and base symbols probed on tools 18.0.37 and 30.0.42. Warm-up on attach: first `Cust.` after "ready" in 20–56 ms, 2026-11-22 |
 | EditorServices LSP (VS Code extension) | 🟢 live, default when `experimental_lsp = false` | Code actions need it |
 | On-prem debugging with nvim-dap | 🟢 live | Breakpoint hit on BC 27 on-prem, 2026-10-02 |
 | `:ALRunTests` | 🟢 live | Verified on `pcp-dev2` (BC 28.5), 2026-11-15 |
@@ -258,11 +258,22 @@ Both attach on `FileType al`. `plugin/al.lua:101` reads `experimental_lsp` and s
 4. `al/activeProjectLoaded` is a request. The handler must return `vim.NIL`.
 
 Completion items arrive with `label = { label = "begin" }`. nvim-cmp calls `client:request`
-directly, so the fix is a patch on `client.request` in `LspAttach`.
+directly, so the fix is a patch on `client.request`. Both clients use the same one,
+`lsp.patch_completion(client)`. It also removes the quotes from a `filterText` that is only the
+bare label in quotes (label `Abs`, filterText `"Abs"`). The tool's server quotes every
+filterText, and nvim-cmp then ranked bare names low.
 
 **Agentic LSP** needs only the tool and `.alpackages`. Probed on 2026-10-01 on tools 18.0.37 and
 30.0.42 with identical results: formatting and base symbols work, `codeActionProvider` is absent,
 `textDocument/definition` fails for anything in a symbol package and for local variables.
+
+The server loads symbols on the first semantic request, which takes 6–9 s. `agentic_lsp.warm`
+sends a hover and a member completion when a client attaches, and sets "ready" when the
+completion answers or after 30 s. The target must be a real file with a member access (`X.`).
+A completion at (0,0) leaves the first `Cust.` at 1 s, and a document that is not on disk gets
+empty answers. The VimEnter anchor `_al_startup_.al` is not on disk, so the warm-up opens the
+first project file that has a member access for the server only (`didOpen`, then `didClose`).
+The server sends no `textDocument/publishDiagnostics`. Diagnostics come from the `alc` pass.
 
 Features must not key on a client name. `lsp.client(bufnr)` returns the attached AL client, whichever it is. Format-on-save once looked up the EditorServices name only, and switching backends
 stopped formatting with no message.
@@ -365,7 +376,8 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 9. **Re-download of a 700 MB VSIX.** `install()` tested only the install-target directory, not where the extension already lived. Every "is it installed" check scans both `~/.vscode` and `~/.vscode-insiders`. Guard: `tests/install_spec.lua`.
 10. **`require("al")` from `ext.lua`.** `al/init.lua` seeded a default from `al.ext`, which read config back from `al`. Result: "loop or previous error loading module 'al'" and no plugin. `ext.lua` reads `package.loaded["al"]` instead.
 11. **AL1075 on every new project.** The scaffold emitted `showMyCode` beside `resourceExposurePolicy`. Microsoft's templates carry only the second. Guard: `tests/project_spec.lua`.
-12. **Locked labels.** `extract_label` emitted `Locked = true` unconditionally, so every extracted label left translation. The default is unlocked since 2026-11-15. Guard: `tests/refactor_spec.lua`.
+12. **"Ready" before the symbols load.** The agentic client set "ready" in `on_attach`, but the server loads symbols on the first request. The first `.` waited 6–9 s and nvim-cmp stopped waiting after 500 ms, so it showed snippets only. A warm-up at (0,0) or on the VimEnter anchor did not help: the first is not a member completion, and the anchor is not on disk. Guard: `tests/warmup_spec.lua`.
+13. **Locked labels.** `extract_label` emitted `Locked = true` unconditionally, so every extracted label left translation. The default is unlocked since 2026-11-15. Guard: `tests/refactor_spec.lua`.
 
 ## Worked example — a typical day on an on-prem project
 
