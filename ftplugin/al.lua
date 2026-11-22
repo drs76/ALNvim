@@ -292,11 +292,18 @@ _G.ALCompleteObjectId = function(findstart, base)
   return require("al.ids").complete(findstart, base)
 end
 vim.bo.completefunc = "ALCompleteObjectId"
--- <C-Space> sends NUL (0x00) in most Linux terminals → map both
-vim.keymap.set("i", "<C-Space>", "<C-x><C-u>",
-  { buffer = true, silent = true, desc = "AL: Next free object ID" })
-vim.keymap.set("i", "<Nul>", "<C-x><C-u>",
-  { buffer = true, silent = true, desc = "AL: Next free object ID" })
+-- With nvim-cmp and the al_ids source in this buffer's sources, IDs appear in
+-- the normal menu and <C-Space> stays cmp's (mapping it here too left one of
+-- the two dead, by load order). Otherwise — no cmp, or a host config whose AL
+-- sources lack al_ids — keep the completefunc map.
+require("al.cmp_ids").register()
+if not require("al.cmp_ids").in_sources() then
+  -- <C-Space> sends NUL (0x00) in most Linux terminals → map both
+  vim.keymap.set("i", "<C-Space>", "<C-x><C-u>",
+    { buffer = true, silent = true, desc = "AL: Next free object ID" })
+  vim.keymap.set("i", "<Nul>", "<C-x><C-u>",
+    { buffer = true, silent = true, desc = "AL: Next free object ID" })
+end
 -- Debugging
 vim.keymap.set("n", "<F5>", function()
   local ok, dap = pcall(require, "dap")
@@ -338,16 +345,6 @@ vim.keymap.set({ "o", "x" }, "if", _to.inside_proc,  { buffer = true, silent = t
 vim.keymap.set({ "o", "x" }, "aF", _to.around_block, { buffer = true, silent = true, desc = "AL: around begin/end block" })
 vim.keymap.set({ "o", "x" }, "iF", _to.inside_block, { buffer = true, silent = true, desc = "AL: inside begin/end block" })
 
--- Tighten completions for AL buffers: LSP + snippets only.
--- The global cmp config includes cmp-buffer (all buffer words as Text kind) which
--- drowns out LSP results for AL. AL LSP provides full symbol coverage so buffer
--- words are noise.
-local ok_cmp, cmp = pcall(require, "cmp")
-if ok_cmp then
-  cmp.setup.buffer({
-    sources = cmp.config.sources({
-      { name = "nvim_lsp" },
-      { name = "luasnip" },
-    }),
-  })
-end
+-- The AL cmp sources are configured once, in require("al").setup()
+-- (completion.configure_cmp) — not here, where every :e re-ran
+-- cmp.setup.buffer and overrode the user's own AL config.

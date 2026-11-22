@@ -131,6 +131,7 @@ vim.api.nvim_create_autocmd("FileType", {
       name     = "al_language_server",
       cmd      = lsp_cmd,
       root_dir = root,
+      capabilities = require("al.lsp").capabilities(),
       init_options = {
         workspacePath = root,
         alResourceConfigurationSettings = res_cfg,

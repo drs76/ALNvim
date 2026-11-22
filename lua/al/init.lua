@@ -72,6 +72,15 @@ M.defaults = {
   -- Format AL buffers with the language server on :w. false: format by hand.
   format_on_save = true,
 
+  -- nvim-cmp: configure_cmp sets the AL sources once, at setup — LSP, free
+  -- object IDs (al_ids), snippets; no buffer words. Set false to keep your own
+  -- cmp.setup.filetype("al", …); add { name = "al_ids" } there for IDs.
+  completion = { configure_cmp = true },
+
+  -- LSP client capabilities for both AL servers. nil: cmp_nvim_lsp's when it
+  -- loads, else blink.cmp's, else Neovim's defaults.
+  capabilities = nil,
+
   -- Front end ALNvim draws its output views in: "auto" | "catnip" | "native".
   -- "auto" uses Catnip's owned views when Catnip is loaded and the native
   -- windows otherwise, without a word. "catnip" warns once at setup when it is
@@ -184,6 +193,18 @@ M.config = vim.deepcopy(M.defaults)
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
   require("al.host").setup(M.config.ui)
+
+  -- nvim-cmp: register al_ids, and set the AL sources once (never per buffer).
+  if require("al.cmp_ids").register() and (M.config.completion or {}).configure_cmp ~= false then
+    local cmp = require("cmp")
+    cmp.setup.filetype("al", {
+      sources = cmp.config.sources({
+        { name = "nvim_lsp" },
+        { name = "al_ids" },
+        { name = "luasnip" },
+      }),
+    })
+  end
 
   -- ext.lua resolves the extension (and its layout) at require time, which is
   -- before this runs. A configured dotnet_path can make a previously unusable

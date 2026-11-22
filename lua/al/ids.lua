@@ -46,26 +46,46 @@ function M.invalidate()
   _used_cache = {}
 end
 
--- Return a set of IDs already used by obj_type in the project: { [id]=true }
-local function get_used_ids(root, obj_type)
-  local key = root .. "\0" .. obj_type
-  local hit = _used_cache[key]
-  if hit then return hit end
-
-  local lines = vim.fn.systemlist({
+local function used_cmd(root, obj_type)
+  return {
     "rg", "--no-heading", "--no-filename", "--color=never", "-i",
     "-e", string.format("^\\s*%s\\s+\\d+", obj_type),
     "--glob", "*.al", "--glob", "*.AL",
     root,
-  })
+  }
+end
+
+local function parse_used(lines, obj_type)
   local used = {}
   local pat = "^%s*" .. obj_type .. "%s+(%d+)"
   for _, line in ipairs(lines) do
     local id = line:lower():match(pat)
     if id then used[tonumber(id)] = true end
   end
+  return used
+end
+
+-- Return a set of IDs already used by obj_type in the project: { [id]=true }
+-- Synchronous (completefunc, wizard); the cmp source uses used_ids_async.
+local function get_used_ids(root, obj_type)
+  local key = root .. "\0" .. obj_type
+  local hit = _used_cache[key]
+  if hit then return hit end
+  local used = parse_used(vim.fn.systemlist(used_cmd(root, obj_type)), obj_type)
   _used_cache[key] = used
   return used
+end
+
+-- cb(used) — the same set, without blocking: a cache hit answers at once,
+-- a miss runs rg through explorer.rg_async and fills the cache.
+function M.used_ids_async(root, obj_type, cb)
+  local key = root .. "\0" .. obj_type
+  if _used_cache[key] then return cb(_used_cache[key]) end
+  require("al.explorer").rg_async(used_cmd(root, obj_type), function(lines)
+    local used = parse_used(lines, obj_type)
+    _used_cache[key] = used
+    cb(used)
+  end, "object IDs")
 end
 
 -- Detect the AL object type at the start of `line` (case-insensitive).
@@ -74,6 +94,13 @@ local function obj_type_from_line(line)
   local word = line:match("^%s*(%a+)")
   if word and ID_TYPES[word:lower()] then return word:lower() end
   return nil
+end
+
+-- The text before the cursor on an object header with an ID position:
+-- "<object type> <digits?>" -> (type, digits) lowercased, or nil.
+function M.header_context(before)
+  local typ, digits = before:match("^%s*(%a+)%s+(%d*)$")
+  if typ and ID_TYPES[typ:lower()] then return typ:lower(), digits end
 end
 
 -- Collect up to `max` free IDs per range, filtered by numeric prefix `prefix`.
@@ -211,6 +238,8 @@ function M.show_next()
 end
 
 -- Pure internals exposed for tests/ only. Not API.
+M.free_ids   = free_ids
+M.get_ranges = get_ranges
 M._test = { free_ids = free_ids, obj_type_from_line = obj_type_from_line }
 
 return M

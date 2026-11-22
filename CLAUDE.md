@@ -16,7 +16,8 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/publish.lua` | Compile then publish `.app` with `al publishapp` |
 | `lua/al/debug.lua` | Snapshot debugging + nvim-dap adapter config |
 | `lua/al/explorer.lua` | Telescope pickers: objects (`M.objects`), procedures (`M.procedures`), grep (`M.search`) |
-| `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard |
+| `lua/al/ids.lua` | Object ID completion from `app.json` `idRanges`; `M.next_id` used by wizard; `M.free_ids`, `M.get_ranges`, `M.header_context(before)`, `M.used_ids_async(root, type, cb)` for the cmp source |
+| `lua/al/cmp_ids.lua` | nvim-cmp source `al_ids` (free IDs on object headers, async rg); `M.register()` (idempotent), `M.in_sources()` |
 | `lua/al/cops.lua` | Code Cop selector + browser selector — config in `alnvim.json` |
 | `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
@@ -45,7 +46,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/project.lua` | `:ALNewProject` — AL Go! scaffold, built-in Hello World or extension templates |
 | `lua/al/agent.lua` | `:ALClaude` / `:ALPi` — AI agent terminal at the project root, one per (command, root) in `M._terms`; float under Catnip (`host.float_for`), `botright vsplit` natively |
 | `lua/al/textobj.lua` | `af`/`if` procedure and `aF`/`iF` block text objects |
-| `lua/al/ghost.lua` | Inline FIM ghost completions from Ollama (`:ALGhostToggle`, `<M-l>` accept) |
+| `lua/al/ghost.lua` | Inline FIM ghost completions from Ollama (`:ALGhostToggle`, `<M-l>` accept); cleared on cmp `menu_opened`; prefix capped at `M.PREFIX_LINES` (150) |
 | `ftdetect/al.vim` | `filetype=al` for `*.al`, `*.dal` |
 | `ftplugin/al.lua` | Buffer-local settings and keymaps |
 | `syntax/al.vim` | Vim syntax highlighting from `alsyntax.tmlanguage` |
@@ -446,7 +447,7 @@ via PATH: clean build, `.app` produced.
 | `<leader>adX` | DapClose — terminate session, close all debug windows, restore pre-debug buffer |
 | `<F9>`/`<leader>adb/adB/adc/adq/adi`, `<F10>`/`<F11>`/`<F12>` | nvim-dap: breakpoint / conditional / continue / terminate / inspect, step over / into / over (only when nvim-dap is installed) |
 | `gd` / `<C-o>` | AL go-to-definition / jumplist back |
-| `<C-Space>`/`<Nul>` (insert) | Object ID completion (`<C-x><C-u>`) |
+| `<C-Space>`/`<Nul>` (insert) | Object ID completion (`<C-x><C-u>`) — not mapped when the buffer's cmp sources include `al_ids` (then IDs are in the normal menu) |
 
 Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep, `<CR>` open.
 
@@ -560,6 +561,28 @@ Publisher from filename format `Publisher_Name_Major.Minor.Build.Rev.app`.
 ## Object ID completion (`lua/al/ids.lua`)
 
 `<C-Space>`/`<Nul>` in insert mode on object-type keyword line → `<C-x><C-u>`. Global `_G.ALCompleteObjectId` bridges to `require("al.ids").complete` (avoids `v:lua` compatibility issues). Shows up to 5 free IDs per range with usage info. `:ALNextId` notifies next 3 free IDs in normal mode.
+
+**With nvim-cmp: the `al_ids` source** (`lua/al/cmp_ids.lua`). Offered only when the text before
+the cursor is `<object type> <digits?>`; the root comes from `find_root_upward` (a completion
+source must never prompt); the used-ID scan goes through `explorer.rg_async`
+(`ids.used_ids_async`) and fills the same cache. `register()` runs from `setup()` and the
+ftplugin (cmp may load later). **The ftplugin drops its `<C-Space>`/`<Nul>` map only when
+`cmp_ids.in_sources()`** — the buffer's cmp config lists `al_ids`. Dropping it whenever cmp is
+loaded would remove ID completion for a host whose own `cmp.setup.filetype("al")` runs after
+ALNvim's: Catnip calls `require("al").setup` before `config.completion`, so its list
+(`nvim_lsp`, `luasnip`) wins (checked with the real config 2026-11-22). Request: add
+`{ name = "al_ids" }` there. Whether cmp's buffer remap kills ALNvim's `<C-Space>` map (handover
+C3) was not checked in a terminal; the map is only skipped when it cannot be needed.
+
+**cmp sources are set once, in `setup()`** (`completion = { configure_cmp = true }`):
+`cmp.setup.filetype("al", { nvim_lsp, al_ids, luasnip })`. The ftplugin used to call
+`cmp.setup.buffer` on every `FileType al` (and the ftplugin re-runs on `:e`), overriding the
+user's own AL config each time. `configure_cmp = false` leaves cmp alone.
+
+**Capabilities** (`lsp.capabilities()`): `setup({ capabilities })`, else
+`cmp_nvim_lsp.default_capabilities()`, else `blink.cmp`'s `get_lsp_capabilities()`, else
+Neovim's; passed by both `vim.lsp.start` calls. Tool 30.0.42 sends no commit characters,
+preselect or resolve, so this is correctness for later tool versions, not speed.
 
 **The used-ID cache must be dropped whenever ALNvim itself writes an `.al` file.** `ids.invalidate()` runs from the ftplugin `BufWritePost`, but `wizard.write_and_open` uses `vim.fn.writefile` (fires no autocommands) and `:edit` (a read) — so it calls `invalidate()` directly. Without that, `next_id` serves a stale set and two objects of the same type created in one session get the **same ID**.
 
@@ -946,7 +969,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (437 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (446 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
@@ -1004,4 +1027,4 @@ Per-machine Pi + Ollama setup (Node 22, provider extension, HTTPS/TLS) — see `
 `ALOllamaChat` is a deprecated alias → `:ALClaude`.
 
 ## Ghost completions
-`lua/al/ghost.lua` — inline FIM ghost text from an Ollama server (`<leader>aI` toggle, `<M-l>` accept). Defaults to `http://localhost:11434` / `qwen2.5-coder`; override `ghost = { endpoint, model, insecure }` via `setup()`. Set `insecure = true` for an HTTPS endpoint with a self-signed/local-CA cert.
+`lua/al/ghost.lua` — inline FIM ghost text from an Ollama server (`<leader>aI` toggle, `<M-l>` accept). The ghost clears when the cmp menu opens (`cmp.event:on("menu_opened")`, hooked on toggle); it only checked `cmp.visible()` when a suggestion arrived, so a menu opened later showed both. The FIM prefix is at most `M.PREFIX_LINES` (150) lines ending at the cursor — the whole file above the cursor was sent (prompt time on the model server was not timed). Defaults to `http://localhost:11434` / `qwen2.5-coder`; override `ghost = { endpoint, model, insecure }` via `setup()`. Set `insecure = true` for an HTTPS endpoint with a self-signed/local-CA cert.

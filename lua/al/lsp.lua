@@ -59,6 +59,23 @@ function M.client(bufnr)
   return nil
 end
 
+-- Client capabilities for both AL servers: setup({ capabilities }) when set,
+-- else the completion plugin's (cmp_nvim_lsp, then blink.cmp), else Neovim's.
+function M.capabilities()
+  local al = package.loaded["al"]
+  local set = al and al.config and al.config.capabilities
+  if set then return set end
+  local ok, cmp_lsp = pcall(require, "cmp_nvim_lsp")
+  if ok and type(cmp_lsp.default_capabilities) == "function" then
+    return cmp_lsp.default_capabilities()
+  end
+  local okb, blink = pcall(require, "blink.cmp")
+  if okb and type(blink.get_lsp_capabilities) == "function" then
+    return blink.get_lsp_capabilities()
+  end
+  return vim.lsp.protocol.make_client_capabilities()
+end
+
 -- The project picked per working directory when several were found (D8).
 M._picked = {}
 
