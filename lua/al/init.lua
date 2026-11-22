@@ -64,6 +64,12 @@ M.defaults = {
   -- brings it back by hand either way.
   explorer_return = true,
 
+  -- Front end ALNvim draws its output views in: "auto" | "catnip" | "native".
+  -- "auto" uses Catnip's owned views when Catnip is loaded and the native
+  -- windows otherwise, without a word. "catnip" warns once at setup when it is
+  -- not there. Only lua/al/host.lua acts on this.
+  ui = "auto",
+
   -- Side the compile results panel opens on: "left" or "right"
   compile_side = "left",
 
@@ -169,6 +175,7 @@ M.config = vim.deepcopy(M.defaults)
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", M.defaults, opts or {})
+  require("al.host").setup(M.config.ui)
 
   -- ext.lua resolves the extension (and its layout) at require time, which is
   -- before this runs. A configured dotnet_path can make a previously unusable

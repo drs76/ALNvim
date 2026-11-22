@@ -35,6 +35,7 @@ commands is [cheatsheet.md](cheatsheet.md). Agent-facing rules live in
 | Profiling and snapshot MCP proxies | 🟡 experimental | Tool names from `tools/list`. Stop-response shapes not verified live |
 | Lua code actions on the agentic LSP | 🟢 live | 32 tests in `tests/codeactions_spec.lua` |
 | Inlay hints | 🟠 pending upstream | Tool 30.0.42 reports `inlayHintProvider = false` |
+| Catnip host (`host.lua`): build view per root, no tab switch, every compile path | 🟢 live | `tests/host_spec.lua` against a fake; Catnip's own lifecycle tests and a real-config compile probe, 2026-11-22. Other output floats, location lists and the agent split are not on the adapter yet (W3–W5) |
 | Windows | 🟡 best effort | All OS calls go through `platform.lua`. No CI on Windows |
 | GitHub wiki | ⚪ retired 2026-11-15 | Home page points at this handbook |
 
@@ -218,7 +219,7 @@ flowchart TD
 
 ## Module layout
 
-Thirty-eight modules under `lua/al/`. The table in [CLAUDE.md](../CLAUDE.md#structure) lists each
+Thirty-nine modules under `lua/al/`. The table in [CLAUDE.md](../CLAUDE.md#structure) lists each
 one with its public functions. The groups:
 
 | Group | Modules |
@@ -228,7 +229,7 @@ one with its public functions. The groups:
 | Build and deploy | `compile`, `publish`, `symbols`, `tests`, `mcp`, `profile`, `debug` |
 | Language | `agentic_lsp`, `basedef`, `codeactions`, `fixes`, `refactor`, `textobj`, `snippets`, `ghost` |
 | Scaffolding | `wizard`, `layout`, `cops` |
-| UI | `explorer`, `diff`, `actions`, `status`, `preview`, `help`, `agent`, `startup` |
+| UI | `host` (the only module that knows about Catnip), `explorer`, `diff`, `actions`, `status`, `preview`, `help`, `agent`, `startup` |
 
 ## The tool (`altool.lua`)
 
@@ -300,6 +301,11 @@ root, because `alc` inherits Neovim's cwd. `push_diagnostics` sets `code` and `s
 so quick fixes can key on the rule. `analyze_diagnostics` bumps a generation counter per call, so
 a cancelled job's `on_exit` cannot reset the namespace.
 
+The output view comes from `host.output`: a Catnip view under Catnip, the bottom split
+otherwise. One view per project root (`alnvim.build:<root>`). Callers do not choose the view,
+so publish, tests and debug compile into the same one. A second compile of a root stops the
+first job. Its late output is dropped by the same generation guard.
+
 ## Publish, symbols, tests
 
 - **Publish** is `al publishapp` only. Send `forceUpgrade: true` from launch.json as `--forceupgrade`. The CLI does not read the key, and `:ALPublish` ignored it until 2026-11-14.
@@ -348,7 +354,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-356 cases across 25 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+419 cases across 30 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -359,6 +365,7 @@ Traps found while proving tests red:
 - Stub the fallback you prove is not taken. `altool_spec` fakes a present extension, otherwise the "no fallback" test passes with the fallback restored.
 - Record every call, not the last one. A bad path and a good path both ended at `top`, so a last-value assertion passed with the bug restored.
 - Fakes share state the way the real module does. `debug.lua` registers DAP listeners once per session. One fake per file.
+- Absent must be absent. `-u NONE` keeps `~/.config/nvim` on the runtime path, so the real Catnip loads. A failing `package.preload` entry hides it.
 - Run fake timers after the events, not inline. An inline `defer_fn` fired the 5s browser fallback before the `al/openUri` that arrives at 0.5s.
 
 ## Sharp edges
@@ -378,6 +385,9 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 11. **AL1075 on every new project.** The scaffold emitted `showMyCode` beside `resourceExposurePolicy`. Microsoft's templates carry only the second. Guard: `tests/project_spec.lua`.
 12. **"Ready" before the symbols load.** The agentic client set "ready" in `on_attach`, but the server loads symbols on the first request. The first `.` waited 6–9 s and nvim-cmp stopped waiting after 500 ms, so it showed snippets only. A warm-up at (0,0) or on the VimEnter anchor did not help: the first is not a member completion, and the anchor is not on disk. Guard: `tests/warmup_spec.lua`.
 13. **Locked labels.** `extract_label` emitted `Locked = true` unconditionally, so every extracted label left translation. The default is unlocked since 2026-11-15. Guard: `tests/refactor_spec.lua`.
+14. **Compile moved the user to another tab.** The build view had one id. Catnip's `View:open` focuses a view that is already open, and when that view is in another tab the focus switches the tab. Close the view in the other tab first. Guard: `tests/host_spec.lua` "compiling from tab B while the view is open in tab A stays in tab B".
+15. **Two builds in one view.** The same id served every project, so a second build cleared the first while its job still ran. Key the view and the state by root, and stop the old job of the same root. Guard: `tests/host_spec.lua` "two roots compile into two views; neither clear hits the other".
+16. **A private front end in a public default.** `:ALCompile` warned about a missing Catnip on every build for every other user, and publish, tests and debug still opened the bottom split under Catnip. The host adapter now selects the view, detects Catnip once and says nothing. Guard: `tests/host_spec.lua` ":ALCompile without Catnip (D3)" and the three "(D4)" cases.
 
 ## Worked example — a typical day on an on-prem project
 
