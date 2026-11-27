@@ -32,7 +32,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
 | `lua/al/help.lua` | Opens MS Learn AL docs / alguidelines.dev in browser |
-| `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)`, `M.use_telescope()` (`setup({ picker = "auto"\|"telescope"\|"select" })` for the simple pickers) |
+| `lua/al/host.lua` | **Host adapter** — the only module that may `require('catnip.*')`. `setup({ ui = "auto"\|"catnip"\|"native" })`; `M.name()` (detected once, silently), `M.output({ id, title, hint, native })` → sink (`buf`, `append`, `clear`, `open`, `close`, `close_later`, `on_enter`, `map`/`unmap`), `M.locations({ id, title, items, qf_title })` (quickfix always, then Catnip navigator or `:copen`), `M.edit(file, line, col, { from = sink })` (Catnip child tab, else the native edit-window chain), `M.to_items(qf)`, `M.show_quickfix()` (current list in the navigator, list unchanged; else `:copen`), `M.buffer_diagnostics(bufnr)` (navigator; returns false when the host is not Catnip), `M.use_telescope()` (`setup({ picker = "auto"\|"telescope"\|"select" })` for the simple pickers) |
 | `lua/al/status.lua` | Statusline state store (LSP, project, compile, publish), **one state per project root**; every setter takes an optional trailing `root` (without: the root updated last); `M.get()` shows the current buffer's project; `M.is_ready(root)` |
 | `lua/al/startup.lua` | `M.poll(opts)` — the VimEnter readiness poller behind the once-per-root background analysis; completion claimed exactly once |
 | `lua/al/platform.lua` | All platform-specific operations (paths, chmod, browser, zip) |
@@ -302,6 +302,7 @@ names the target and the fallback resolves it:
   output decided which one opened.
 - Names: take the last *quoted* segment — `Microsoft.Purchases.Document."Purch. Header"`
   has a dot inside the quotes.
+- **Under Catnip a symbol stub opens in a float** (`open_at`: `host.float_for`, `q` closes, window flag `w:al_stub_float`), not in the edit window: the stub is a cache copy, and it replaced the user's file with a buffer that was not theirs. A further `gd` inside the float reuses it. Project files and the native host are unchanged.
 - **NuGet symbol packages ship without `.al` source** (extraction stamps `0`); for those it
   notifies and hover is the answer. Server-downloaded packages usually include source.
 - First search per package extracts its sources synchronously (~8s for Base Application);
@@ -373,6 +374,8 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 
 **Sink rules (2026-11-27).** `close_later` closes only if the sink was not cleared or opened again since (`_use` counter) — a second tool run inside the 2.5 s delay had its view closed by the first run's timer. Under Catnip the first write after `clear()` replaces the buffer (Catnip's `View:append` adds below the one empty line an emptied buffer keeps, so output started on line 2), and every append moves the view's windows to the last line (Catnip does not follow the tail).
 
+**`host.edit` falls back when the view has no parent edit window.** Catnip's `View:edit_file` needs `previous_win` to be a normal window; a view opened while another float had focus has none, and `<CR>` on a diagnostic only warned. Then the view is closed and the file opens in an edit window of the current tab. `:ALInfo` fills the view `alnvim.info` under Catnip (it was a long `print`); natively it still prints.
+
 **Detection is silent (D3).** `pcall(require, "catnip.ui")` once, cached; `setup()` resets it. `ui = "catnip"` with Catnip missing warns once, at `setup()`, never per command. Natively, split build panels open one per tab: a second root's panel replaces the first in that tab, as the single panel always did.
 
 **Pickers (W6).** `host.use_telescope()` decides for the simple pickers — ALActions, the
@@ -431,11 +434,11 @@ via PATH: clean build, `.app` produced.
 |---|---|
 | `<leader>ab/ap/aP/as` | Compile / Publish / PublishOnly / DownloadSymbols |
 | `<leader>ao/al` | OpenAppJson / OpenLaunchJson |
-| `<leader>aq` | Quickfix list |
+| `<leader>aq` | Quickfix list — `host.show_quickfix()`: Catnip navigator, else `:copen` |
 | `<leader>aC/aB` | SelectCops / SelectBrowser (SelectCops moved from `<leader>ac` 2026-11-15 — it shadowed the `<leader>ac*` prefix) |
 | `<leader>am/aM` | McpSetup / McpStatus |
 | `<leader>ai/ak/aI` | Claude Code / Pi agent terminal split / Ghost completions toggle (`<M-l>` accepts) |
-| `<leader>ad` | Diagnostics for the current buffer (Telescope or loclist) |
+| `<leader>ad` | Diagnostics for the current buffer — `host.buffer_diagnostics()` under Catnip, else Telescope or loclist |
 | `<leader>av` | PreviewPage |
 | `<leader>acu` | AddUsings — server-only organizeImports |
 | `<leader>rn` | RenameObject (same as `grn`) |
@@ -565,6 +568,8 @@ does not fight a deliberate switch. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, key
 **Syntax strings use `oneline`** on `alString`, `alVerbatim`, `alQuotedIdent` — without it, unclosed quotes bleed colour across the file.
 
 ## AL Explorer (`lua/al/explorer.lua`)
+
+**Extraction runs in jobs: `explorer.with_search_dirs(root, cb)`** (2026-11-27). It unzips every package whose sources are missing or older than its `.app`, all at once, then calls `cb(search_dirs, sym_map, sym_count)`; concurrent calls for one root share one extraction. `build_search_dirs` still extracts synchronously and froze the editor about 8 s for Base Application on the first `gd`, explorer or search after a symbol download — `M.objects`, `M.search`, `basedef.find_object` and `fixes.find_publisher` now go through `with_search_dirs`. The wizard pickers and the profile viewer still call `build_search_dirs` (they run after one of the others in practice). `platform.extract_zip_cmd` is the argv both forms use.
 
 **All symbol-package searches must be async.** These cover the project *plus* every extracted package (Base Application alone is ~10k `.al` stubs), so `vim.fn.systemlist` freezes the editor for the whole search. Use `explorer.rg_async(cmd, cb)` and build the picker in the callback. The one place that cannot be async is `ids.get_used_ids` (reached from `completefunc`, which is synchronous) — it caches per project+type and `ids.invalidate()` is called from the ftplugin `BufWritePost`.
 
@@ -987,7 +992,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (466 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (474 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

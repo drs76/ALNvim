@@ -54,33 +54,46 @@ end
 
 -- ── Symbol package cache ──────────────────────────────────────────────────────
 
-local function ensure_extracted(app_path)
+-- Where app_path's sources go, and whether that copy is current.
+local function extract_target(app_path)
   local key   = vim.fn.fnamemodify(app_path, ":t:r"):gsub("%s+", "_")
   local dir   = CACHE .. "/" .. key
   local stamp = dir .. "/.ok"
-
   local app_mtime   = (vim.uv.fs_stat(app_path) or {}).mtime
   local stamp_mtime = (vim.uv.fs_stat(stamp)    or {}).mtime
-  if app_mtime and stamp_mtime and stamp_mtime.sec >= app_mtime.sec then
-    return vim.fn.isdirectory(dir .. "/src") == 1 and dir or nil
-  end
+  local fresh = app_mtime and stamp_mtime and stamp_mtime.sec >= app_mtime.sec
+  return dir, stamp, fresh and true or false
+end
 
-  -- A replaced package (same file name, new build) must not keep the old
-  -- build's stubs: a renamed object would otherwise be found under both names.
+-- A replaced package (same file name, new build) must not keep the old
+-- build's stubs: a renamed object would otherwise be found under both names.
+local function prepare_extract(dir)
   vim.fn.delete(dir .. "/src", "rf")
   vim.fn.mkdir(dir, "p")
-  platform.extract_zip(app_path, dir, { "src/*.al", "src/*.AL" })
+end
 
-  -- Check whether src/ was actually created rather than relying on exit code
-  -- (unzip returns 1 as a warning when one glob matches nothing — not a failure;
-  --  tar on Windows extracts fully so src/ will be present if the app has AL sources)
+-- Check whether src/ was actually created rather than relying on exit code
+-- (unzip returns 1 as a warning when one glob matches nothing — not a failure;
+--  tar on Windows extracts fully so src/ will be present if the app has AL sources)
+local function stamp_extract(dir, stamp)
   if vim.fn.isdirectory(dir .. "/src") == 0 then
     vim.fn.writefile({ "0" }, stamp)  -- stamp to skip future retries
     return nil
   end
-
   vim.fn.writefile({ tostring(os.time()) }, stamp)
   return dir
+end
+
+local EXTRACT_GLOBS = { "src/*.al", "src/*.AL" }
+
+local function ensure_extracted(app_path)
+  local dir, stamp, fresh = extract_target(app_path)
+  if fresh then
+    return vim.fn.isdirectory(dir .. "/src") == 1 and dir or nil
+  end
+  prepare_extract(dir)
+  platform.extract_zip(app_path, dir, EXTRACT_GLOBS)
+  return stamp_extract(dir, stamp)
 end
 
 -- ── Entry builder ─────────────────────────────────────────────────────────────
@@ -146,6 +159,49 @@ end
 
 -- Expose so wizard.lua can reuse the same search-dir logic.
 M.build_search_dirs = build_search_dirs
+
+-- build_search_dirs without the freeze: packages whose sources are not
+-- extracted yet are unzipped by jobs, all at once, and cb(search_dirs,
+-- sym_map, sym_count) runs when the last one has ended. The synchronous
+-- version held the editor for the whole unzip — about 8s for Base Application
+-- — on the first gd, explorer or search after a symbol download.
+-- Concurrent calls for one root share one extraction.
+local _extracting = {}   -- [root] = list of waiting callbacks
+
+function M.with_search_dirs(root, cb)
+  local pending = {}
+  for _, app in ipairs(vim.fn.glob(package_cache(root) .. "/*.app", false, true)) do
+    local dir, stamp, fresh = extract_target(app)
+    if not fresh then pending[#pending + 1] = { app = app, dir = dir, stamp = stamp } end
+  end
+  if #pending == 0 then return cb(build_search_dirs(root)) end
+
+  if _extracting[root] then
+    table.insert(_extracting[root], cb)
+    return
+  end
+  _extracting[root] = { cb }
+  vim.notify(("AL: extracting sources of %d symbol package(s) (first time only)…"):format(#pending),
+    vim.log.levels.INFO)
+
+  local left = #pending
+  local function one_done(p)
+    stamp_extract(p.dir, p.stamp)
+    left = left - 1
+    if left > 0 then return end
+    local waiting = _extracting[root]
+    _extracting[root] = nil
+    local dirs, sym_map, sym_count = build_search_dirs(root)
+    for _, f in ipairs(waiting) do f(dirs, sym_map, sym_count) end
+  end
+  for _, p in ipairs(pending) do
+    prepare_extract(p.dir)
+    local job = vim.fn.jobstart(platform.extract_zip_cmd(p.app, p.dir, EXTRACT_GLOBS), {
+      on_exit = function() vim.schedule(function() one_done(p) end) end,
+    })
+    if job <= 0 then vim.schedule(function() one_done(p) end) end
+  end
+end
 
 -- How many of root's symbol packages build_search_dirs would still have to
 -- extract (no stamp, or the .app is newer than it). Cheap: two stats per app.
@@ -287,7 +343,7 @@ function M.objects(root, cached)
   end
 
   -- Build search dirs: project root + extracted symbol caches
-  local search_dirs, sym_map, sym_count = build_search_dirs(root)
+  M.with_search_dirs(root, function(search_dirs, sym_map, sym_count)
 
   -- Project publisher from app.json
   local app_json         = lsp.read_app_json(root)
@@ -350,6 +406,7 @@ function M.objects(root, cached)
   _last = { root = root, entries = entries, sym_count = sym_count, sort_idx = 1 }
   show_objects_picker(root, entries, sym_count, 1)
   end, string.format("%d symbol package(s)", sym_count))
+  end)
 end
 
 -- Build and open the objects picker. Top level, with its own requires, so it can
@@ -520,16 +577,16 @@ function M.search(root)
   end
 
   local builtin = require("telescope.builtin")
-  local search_dirs = build_search_dirs(root)
-
-  builtin.live_grep({
-    prompt_title    = "AL Search",
-    search_dirs     = search_dirs,
-    glob_pattern    = { "*.al", "*.AL" },
-    additional_args = { "--smart-case" },
-    layout_strategy = "vertical",
-    layout_config   = { mirror = true, preview_height = 0.5 },
-  })
+  M.with_search_dirs(root, function(search_dirs)
+    builtin.live_grep({
+      prompt_title    = "AL Search",
+      search_dirs     = search_dirs,
+      glob_pattern    = { "*.al", "*.AL" },
+      additional_args = { "--smart-case" },
+      layout_strategy = "vertical",
+      layout_config   = { mirror = true, preview_height = 0.5 },
+    })
+  end)
 end
 
 -- Drop the cached object list. Called from the ftplugin BufWritePost hook: a

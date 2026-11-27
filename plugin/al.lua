@@ -841,6 +841,14 @@ vim.api.nvim_create_user_command("ALInfo", function()
     table.insert(lines, "  → MCP port     : " .. (mp and tostring(mp) .. (cfg.mcpServicePort and "" or " (default; set mcpServicePort to override)")
       or "(cloud — none)"))
   end
+  -- Under Catnip an owned view; otherwise the message area, as before.
+  local host = require("al.host")
+  if host.name() == "catnip" then
+    local sink = host.output({ id = "alnvim.info", title = "ALNvim info" })
+    sink:clear():append(lines):open({ focus = true })
+    pcall(vim.api.nvim_win_set_cursor, 0, { 1, 0 })
+    return
+  end
   print(table.concat(lines, "\n"))
 end, { desc = "Show ALNvim / project information" })
 

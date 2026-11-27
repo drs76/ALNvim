@@ -207,7 +207,6 @@ local function hover_text(client, bufnr, row0, col0, cb)
   end, bufnr)
 end
 
--- Open `file` read-only at `lnum`, pushing the jumplist so <C-o> returns.
 -- True when `file` lies under `root` (the user's own source, not a stub).
 local function in_project(file, root)
   if not root or root == "" then return false end
@@ -215,16 +214,37 @@ local function in_project(file, root)
   return f:sub(1, #r + 1) == r .. "/"
 end
 
+-- Open `file` at `lnum`, pushing the jumplist so <C-o> returns.
+--
+-- A file of the project opens as any file does. Anything else is an extracted
+-- copy under the cache dir: read-only, and under Catnip shown in a float (q
+-- closes) instead of replacing the file in the edit window with a buffer that
+-- is not the user's. A further gd from inside that float stays in it.
 local function open_at(file, lnum, root)
+  local own = in_project(file, root)
+  local host = require("al.host")
   vim.cmd("normal! m'")
+  if not own and host.name() == "catnip" and not vim.w.al_stub_float then
+    local scratch = vim.api.nvim_create_buf(false, true)
+    vim.bo[scratch].bufhidden = "wipe"
+    local win = host.float_for(scratch, vim.fn.fnamemodify(file, ":t") .. "  (read-only, q closes)")
+    vim.w[win].al_stub_float = true
+    vim.wo[win].number, vim.wo[win].cursorline = true, true
+  end
+  local in_float = vim.w.al_stub_float == true
   vim.cmd("edit " .. vim.fn.fnameescape(file))
   local buf = vim.api.nvim_get_current_buf()
-  -- Extracted copies under the cache dir are read-only. The search also covers
-  -- the project, and a hit there is the user's own file: locking that one left
-  -- it unmodifiable for the rest of the session.
-  if not in_project(file, root) then
+  -- The search also covers the project, and a hit there is the user's own
+  -- file: locking that one left it unmodifiable for the rest of the session.
+  if not own then
     vim.bo[buf].readonly   = true
     vim.bo[buf].modifiable = false
+    if in_float then
+      vim.bo[buf].buflisted = false
+      vim.keymap.set("n", "q", function()
+        if vim.w.al_stub_float then pcall(vim.api.nvim_win_close, 0, true) end
+      end, { buffer = buf, nowait = true, silent = true, desc = "AL: close the source float" })
+    end
   end
   pcall(vim.api.nvim_win_set_cursor, 0, { lnum, 0 })
   vim.cmd("normal! ^zz")
@@ -234,24 +254,20 @@ end
 -- cb(file, lnum) or cb(nil).
 local function find_object(root, obj, cb)
   local explorer = require("al.explorer")
-  -- The first search in a project unzips every symbol package's sources —
-  -- seconds for Base Application, during which Neovim is busy. Say so first,
-  -- rather than leave what looks like a hung keypress.
-  if explorer.pending_extracts(root) > 0 then
-    vim.notify("AL: extracting symbol package sources (first time only)…", vim.log.levels.INFO)
-    vim.cmd.redraw()
-  end
-  local dirs = explorer.build_search_dirs(root)
-  local cmd = { "rg", "-n", "-i", "-m", "1", "--no-heading", "--glob", "*.{al,AL}",
-                "-e", object_pattern(obj) }
-  vim.list_extend(cmd, dirs)
-  explorer.rg_async(cmd, function(lines)
-    for _, l in ipairs(lines) do
-      local file, lnum = l:match("^(.-):(%d+):")
-      if file then return cb(file, tonumber(lnum)) end
-    end
-    cb(nil)
-  end, obj.kind .. " " .. obj.name)
+  -- The first search in a project extracts every symbol package's sources;
+  -- with_search_dirs does that in the background and says so.
+  explorer.with_search_dirs(root, function(dirs)
+    local cmd = { "rg", "-n", "-i", "-m", "1", "--no-heading", "--glob", "*.{al,AL}",
+                  "-e", object_pattern(obj) }
+    vim.list_extend(cmd, dirs)
+    explorer.rg_async(cmd, function(lines)
+      for _, l in ipairs(lines) do
+        local file, lnum = l:match("^(.-):(%d+):")
+        if file then return cb(file, tonumber(lnum)) end
+      end
+      cb(nil)
+    end, obj.kind .. " " .. obj.name)
+  end)
 end
 
 local function fallback(client, bufnr)

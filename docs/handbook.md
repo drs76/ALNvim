@@ -357,7 +357,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-466 cases across 35 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+474 cases across 36 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -409,6 +409,9 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 32. **A view closed during the next run.** A successful tool run closes its view after 2.5 s. A second run that started in that time lost its view. The timer now closes the view only if no later run used it. Guard: `tests/review_spec.lua` "does not close a view that a later run opened again".
 33. **Two restarts for each symbol download.** The package watcher timer stayed active after the restart of the download. The server started again 3 s later and the first warm-up was lost. `restart` stops the timer. Guard: `tests/review_spec.lua` "a restart cancels the watcher's pending debounce".
 34. **A byte-order mark in `app.json`.** `json_decode` rejects it, and the project read as "Cannot read app.json". The readers remove the mark first. Guard: `tests/review_spec.lua` "reads an app.json that starts with a byte-order mark".
+35. **The first search stopped the editor.** `build_search_dirs` extracted each symbol package with a blocking call, about 8 s for Base Application. `with_search_dirs` extracts with jobs and then calls back. Guard: `tests/views2_spec.lua` "extracts in a job and does not block the caller".
+36. **Enter did nothing in a build view.** Catnip opens a source file only when the view has a parent edit window. A view opened from a different float has none. `host.edit` then closes the view and uses an edit window of the tab. Guard: `tests/views2_spec.lua` "opens the file in an edit window instead of only warning".
+37. **A symbol stub replaced the file in the edit window.** Under Catnip the stub now opens in a float, and `q` closes it. The quickfix key, the buffer diagnostics key and `:ALInfo` also use Catnip views. Guard: `tests/views2_spec.lua` "under Catnip opens a float and leaves the edit window alone".
 
 ## Worked example — a typical day on an on-prem project
 
