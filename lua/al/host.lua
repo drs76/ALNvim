@@ -188,9 +188,24 @@ function Sink:on_enter(fn)
   return self:map("<CR>", function() fn(api.nvim_get_current_line()) end, "Open the location on this line")
 end
 
+-- Close after ms, unless the sink was opened or cleared again in between: a
+-- second run started inside the delay owns the view then, and the first run's
+-- timer must not close it.
 function Sink:close_later(ms)
-  vim.defer_fn(function() if self:is_open() then self:close() end end, ms)
+  local use = self._use
+  vim.defer_fn(function()
+    if self._use == use and self:is_open() then self:close() end
+  end, ms)
   return self
+end
+
+-- Keep every window on the sink's buffer at the last line (live output).
+local function follow_tail(buf)
+  if not (buf and api.nvim_buf_is_valid(buf)) then return end
+  local last = api.nvim_buf_line_count(buf)
+  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
+    pcall(api.nvim_win_set_cursor, w, { last, 0 })
+  end
 end
 
 -- Catnip: a catnip.ui view, created on the first open.
@@ -210,6 +225,7 @@ end
 
 function CatnipSink:open(opts)
   local focus = not (opts and opts.focus == false)
+  self._use = (self._use or 0) + 1
   local cur = self.ui.get and self.ui.get(self.id)
   -- D1: View:open focuses an already-open view, and when that view sits in
   -- another tabpage, focusing it switches the user's tab. Close it there first;
@@ -223,17 +239,31 @@ function CatnipSink:open(opts)
   if self._pending then
     local p = self._pending
     self._pending = nil
-    if p.clear then self.view:set_lines({}) end
-    if #p.lines > 0 then self.view:append(p.lines) end
+    if p.clear then self.view:set_lines({}); self._empty = true end
+    if #p.lines > 0 then self:_write(p.lines) end
   end
   set_buf_maps(self)
   return self
 end
 
+-- Catnip's View:append always adds below the last line, and an emptied buffer
+-- still has one (empty) line — so the first output after clear() started on
+-- line 2. The first write after a clear replaces instead. The view does not
+-- follow its tail either; a long build left the summary off screen.
+function CatnipSink:_write(lines)
+  if self._empty then
+    self._empty = false
+    self.view:set_lines(lines)
+  else
+    self.view:append(lines)
+  end
+  follow_tail(self.view.buf)
+end
+
 function CatnipSink:append(lines)
   if #lines == 0 then return self end
   local v = self:_view()
-  if v then v:append(lines) else
+  if v then self:_write(lines) else
     self._pending = self._pending or { lines = {} }
     vim.list_extend(self._pending.lines, lines)
   end
@@ -241,8 +271,10 @@ function CatnipSink:append(lines)
 end
 
 function CatnipSink:clear()
+  self._use = (self._use or 0) + 1
   local v = self:_view()
-  if v then v:set_lines({}) else self._pending = { clear = true, lines = {} } end
+  if v then v:set_lines({}); self._empty = true
+  else self._pending = { clear = true, lines = {} } end
   return self
 end
 
@@ -329,6 +361,7 @@ end
 
 function NativeSink:open(opts)
   local focus = not (opts and opts.focus == false)
+  self._use = (self._use or 0) + 1
   self:_ensure_buf()
   if self.native == "split" then
     -- The split is the old build panel: always reopened, always focused.
@@ -350,14 +383,12 @@ function NativeSink:append(lines)
   local buf = self:_ensure_buf()
   local empty = api.nvim_buf_line_count(buf) == 1 and api.nvim_buf_get_lines(buf, 0, 1, false)[1] == ""
   api.nvim_buf_set_lines(buf, empty and 0 or -1, -1, false, lines)
-  local last = api.nvim_buf_line_count(buf)
-  for _, w in ipairs(vim.fn.win_findbuf(buf)) do
-    pcall(api.nvim_win_set_cursor, w, { last, 0 })
-  end
+  follow_tail(buf)
   return self
 end
 
 function NativeSink:clear()
+  self._use = (self._use or 0) + 1
   api.nvim_buf_set_lines(self:_ensure_buf(), 0, -1, false, {})
   return self
 end

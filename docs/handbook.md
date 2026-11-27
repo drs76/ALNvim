@@ -357,7 +357,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-453 cases across 34 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+466 cases across 35 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
@@ -401,6 +401,14 @@ Each entry: what happened, why, how to avoid it, which test guards it.
 24. **The ftplugin overwrote the cmp setup of the user.** It called `cmp.setup.buffer` on each `FileType al`. The ftplugin also runs again on `:e`. The AL sources are now set once, in `setup()`. Set `configure_cmp = false` to stop this. Guard: `tests/completion_spec.lua` "the ftplugin never calls cmp.setup.buffer".
 25. **A completion source must not block or prompt.** `completefunc` ran `rg` on the main thread on the first call for each type. The cmp source uses `explorer.rg_async`, and it finds the root with the bounded upward walk, because `get_root()` can prompt. Guard: `tests/completion_spec.lua` "never runs rg synchronously".
 26. **Removing a key map can remove the feature.** Some hosts do not list `al_ids` in their cmp sources. If ALNvim drops `<C-Space>` there, nothing completes an ID. ALNvim drops the map only when the buffer sources list `al_ids`. Guard: `tests/completion_spec.lua` "drops its <C-Space> map only when al_ids is in this buffer's sources".
+27. **The next save failed after an automatic move.** The organiser renamed the file and set the buffer name. Neovim then marks the buffer "not edited", and a plain `:w` stops with E13. The organiser now writes the buffer with `write!` after each move. Guard: `tests/review_spec.lua` "leaves the buffer writable with a plain :w".
+28. **A move replaced a different file.** `rename` replaces a target that exists. Two object names that differ only in punctuation give the same file name. The organiser now warns and does not move. Guard: `tests/review_spec.lua` "never replaces another object's file".
+29. **One analysis for all projects.** The analysis job, its timer and the diagnostics reset were shared by the session. A save in one project stopped the analysis of the other and removed its diagnostics. All three are now per project root. Guard: `tests/review_spec.lua` "analysing a second project does not cancel the first".
+30. **Each save wrote the `.app` again.** The analysis pass is a full compile, measured at 9.3 s for 59 files with three cops. It wrote the package into the project. It now writes to the cache directory with `/out:`, and a build of the same project stops it. Guard: `tests/review_spec.lua` "the analysis pass writes its package outside the project".
+31. **Go to definition locked a project file.** The object search includes the project. A result there was opened read-only, the same as a symbol stub. Only files outside the project root are locked. Guard: `tests/review_spec.lua` "locks a symbol stub but not a file of the project".
+32. **A view closed during the next run.** A successful tool run closes its view after 2.5 s. A second run that started in that time lost its view. The timer now closes the view only if no later run used it. Guard: `tests/review_spec.lua` "does not close a view that a later run opened again".
+33. **Two restarts for each symbol download.** The package watcher timer stayed active after the restart of the download. The server started again 3 s later and the first warm-up was lost. `restart` stops the timer. Guard: `tests/review_spec.lua` "a restart cancels the watcher's pending debounce".
+34. **A byte-order mark in `app.json`.** `json_decode` rejects it, and the project read as "Cannot read app.json". The readers remove the mark first. Guard: `tests/review_spec.lua` "reads an app.json that starts with a byte-order mark".
 
 ## Worked example — a typical day on an on-prem project
 

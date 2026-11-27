@@ -105,10 +105,36 @@ local function parse_output(lines, project_dir)
 end
 
 -- Track the running silent-analyze job so repeated calls cancel the previous one.
--- _analyze_gen is bumped per call so a cancelled job's late on_exit can identify
+-- The generation is bumped per call so a cancelled job's late on_exit can identify
 -- itself as stale and stay out of the way of the job that replaced it.
-local _analyze_job = nil
-local _analyze_gen = 0
+--
+-- Both are per project root. They were one pair for the session, so with two
+-- projects open a save in one cancelled the other's run, and the startup pass
+-- over a multi-root workspace analysed only the last root.
+local _analyze = {}   -- [root] = { job, gen, timer }
+local function analyze_state(root)
+  local a = _analyze[root]
+  if not a then a = { gen = 0 }; _analyze[root] = a end
+  return a
+end
+
+-- Stop root's pending (debounced) and running analysis. An explicit build
+-- publishes the same diagnostics, so it calls this first: `:w` then
+-- <leader>ab used to run two compilers on one project at the same time.
+local function cancel_analyze(root)
+  local a = _analyze[root]
+  if not a then return end
+  if a.timer then
+    a.timer:stop()
+    if not a.timer:is_closing() then a.timer:close() end
+    a.timer = nil
+  end
+  if a.job then
+    pcall(vim.fn.jobstop, a.job)
+    a.job = nil
+    a.gen = a.gen + 1   -- the stopped job's on_exit is stale
+  end
+end
 
 -- Line framing for job output lives in altool (shared with the tool runner).
 local line_stream = require("al.altool").line_stream
@@ -138,8 +164,26 @@ local function buf_highlight(buf)
   end
 end
 
-local function push_diagnostics(qf)
-  vim.diagnostic.reset(DIAG_NS)
+-- True when buffer `bufnr`'s file lies under `root`.
+local function buf_under(bufnr, root)
+  local name = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
+  local r = vim.fs.normalize(root)
+  return name:sub(1, #r + 1) == r .. "/"
+end
+
+-- Publish one build's diagnostics. With `root`, only that project's buffers
+-- are reset first: a bare reset of the namespace wiped every other open
+-- project's diagnostics each time one project was built or analysed.
+local function push_diagnostics(qf, root)
+  if root then
+    for _, d in ipairs(vim.diagnostic.get(nil, { namespace = DIAG_NS })) do
+      if d.bufnr and vim.api.nvim_buf_is_valid(d.bufnr) and buf_under(d.bufnr, root) then
+        vim.diagnostic.reset(DIAG_NS, d.bufnr)
+      end
+    end
+  else
+    vim.diagnostic.reset(DIAG_NS)
+  end
   local diag_by_buf = {}
   for _, item in ipairs(qf) do
     if item.filename then
@@ -239,7 +283,7 @@ local function finish(b, gen, qf, exit_code, on_success, project_dir)
     require("al.status").set_compile_result(#errors, #warnings, project_dir)
     b.qf = vim.deepcopy(qf)
     vim.fn.setqflist(qf, "r")
-    push_diagnostics(qf)
+    push_diagnostics(qf, project_dir)
 
     if ok then
       if project_dir then clear_lsp_diagnostics(project_dir) end
@@ -309,6 +353,7 @@ function M.compile(project_dir, extra_args, on_success)
 
   -- One build per root: a second compile of the same project stops the first
   -- before clearing its view (the generation guard drops its late output).
+  cancel_analyze(project_dir)
   local b = build_state(project_dir)
   if b.job then pcall(vim.fn.jobstop, b.job) end
   b.job = nil
@@ -381,15 +426,26 @@ function M.analyze_diagnostics(project_dir, on_done)
   if not project_dir then return end
 
   local build_cwd = vim.fn.getcwd()
-  -- Cancel any in-progress analyze job before starting a new one. The cancelled
-  -- job still fires on_exit later with truncated output — _analyze_gen lets that
-  -- callback recognise itself as stale (see on_exit below).
-  if _analyze_job then
-    pcall(vim.fn.jobstop, _analyze_job)
-    _analyze_job = nil
+  -- A build of this project is running: it publishes the same diagnostics when
+  -- it ends, and a second compiler beside it only doubles the load.
+  local building = M._builds[project_dir]
+  if building and building.job then
+    if on_done then
+      vim.notify("AL: a build of this project is running; try again when it ends", vim.log.levels.INFO)
+    end
+    return
   end
-  _analyze_gen = _analyze_gen + 1
-  local gen = _analyze_gen
+
+  -- Cancel this root's in-progress analyze job before starting a new one. The
+  -- cancelled job still fires on_exit later with truncated output — the
+  -- generation lets that callback recognise itself as stale (see on_exit).
+  local a = analyze_state(project_dir)
+  if a.job then
+    pcall(vim.fn.jobstop, a.job)
+    a.job = nil
+  end
+  a.gen = a.gen + 1
+  local gen = a.gen
 
   local prefix = compiler_prefix()
   if not prefix then return end
@@ -420,6 +476,10 @@ function M.analyze_diagnostics(project_dir, on_done)
   for _, id in ipairs(cfg.suppressed_diagnostics or {}) do
     table.insert(cmd, "/nowarn:" .. id)
   end
+  -- The pass is for diagnostics only. Without /out: it rewrote the project's
+  -- .app on every save (the file :ALPublishOnly publishes, often tracked in
+  -- git); its package goes to the cache dir instead.
+  table.insert(cmd, "/out:" .. M.analyze_out(project_dir))
 
   local output = {}
   local function consume(lines)
@@ -428,7 +488,7 @@ function M.analyze_diagnostics(project_dir, on_done)
   local feed_out, flush_out = line_stream(consume)
   local feed_err, flush_err = line_stream(consume)
 
-  _analyze_job = vim.fn.jobstart(cmd, {
+  a.job = vim.fn.jobstart(cmd, {
     on_stdout = function(_, data) feed_out(data) end,
     on_stderr = function(_, data) feed_err(data) end,
     on_exit = function(_, code)
@@ -436,15 +496,15 @@ function M.analyze_diagnostics(project_dir, on_done)
       flush_err()
       -- A job cancelled by a newer analyze call still reaches on_exit. Publishing
       -- its partial output would reset the diagnostic namespace and write
-      -- truncated results over the newer run; clearing _analyze_job would also
+      -- truncated results over the newer run; clearing the job handle would also
       -- orphan the newer job so the call after that could not cancel it.
-      if gen ~= _analyze_gen then return end
-      _analyze_job = nil
+      if gen ~= a.gen then return end
+      a.job = nil
       local qf = parse_output(output, build_cwd)
       local errors = vim.tbl_filter(function(e) return e.type == "E" end, qf)
       local warnings = vim.tbl_filter(function(e) return e.type == "W" end, qf)
       vim.schedule(function()
-        push_diagnostics(qf)
+        push_diagnostics(qf, project_dir)
         vim.notify(string.format("AL: analyze complete — %d error(s), %d warning(s)",
           #errors, #warnings), vim.log.levels.INFO)
         if on_done then on_done(qf) end
@@ -456,25 +516,33 @@ end
 -- Debounced analyze. BufWritePost fires per save, and analyze_diagnostics runs a
 -- full-project alc pass; on a burst of saves (:wa, formatter round-trips, rapid
 -- edits) that queued one rebuild per file. Coalesce them into a single run.
-local _analyze_timer = nil
 function M.analyze_soon(project_dir, delay_ms)
-  if _analyze_timer then
-    _analyze_timer:stop()
-    _analyze_timer:close()
-    _analyze_timer = nil
+  local a = analyze_state(project_dir)
+  if a.timer then
+    a.timer:stop()
+    if not a.timer:is_closing() then a.timer:close() end
+    a.timer = nil
   end
   local t = vim.uv.new_timer()
-  _analyze_timer = t
+  a.timer = t
   t:start(delay_ms or (require("al").config.analyze_debounce_ms or 1500), 0,
     vim.schedule_wrap(function()
       -- A newer call may have replaced (and closed) this timer between the uv
       -- callback firing and this scheduled function running — identity check,
       -- not a plain nil check, or we would close the timer that replaced us.
-      if _analyze_timer ~= t then return end
-      _analyze_timer = nil
+      if a.timer ~= t then return end
+      a.timer = nil
       if not t:is_closing() then t:close() end
       M.analyze_diagnostics(project_dir)
     end))
+end
+
+-- Where the analysis pass writes its package: one file per project under the
+-- cache dir, never the project folder.
+function M.analyze_out(project_dir)
+  local dir = vim.fn.stdpath("cache") .. "/alnvim/analyze"
+  vim.fn.mkdir(dir, "p")
+  return dir .. "/" .. vim.fn.sha256(vim.fs.normalize(project_dir)):sub(1, 16) .. ".app"
 end
 
 -- Open app.json for the current project
@@ -515,7 +583,8 @@ M.compiler_prefix = compiler_prefix
 
 -- Pure internals exposed for tests/ only. Not API — do not call from plugin code.
 M._test = { line_stream = line_stream, parse_output = parse_output,
-            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS }
+            push_diagnostics = push_diagnostics, DIAG_NS = DIAG_NS,
+            analyze = _analyze, cancel_analyze = cancel_analyze }
 
 -- Open .vscode/launch.json for the current project
 function M.open_launch_json()

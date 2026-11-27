@@ -49,6 +49,7 @@ end
 
 M.watchers = {}       -- [root] = uv fs_event handle
 M.suspended = {}      -- [root] = true while ALNvim itself is downloading
+M.debounces = {}      -- [root] = the watcher's debounce timer
 M.RELOAD_DEBOUNCE_MS = 3000
 
 local function norm(p) return vim.fs.normalize(p or "") end
@@ -64,6 +65,12 @@ end
 -- Stop root's agentic client(s) and start a fresh one on the same buffers.
 -- Returns false when no client was running for root.
 function M.restart(root, reason)
+  -- This restart covers whatever the package watcher has seen so far. Its
+  -- debounce timer was left running, so every symbol download restarted the
+  -- server twice: once here, and again 3s after the last .app was written —
+  -- which threw away the first warm-up (6–9s).
+  local pending = M.debounces[root]
+  if pending and not pending:is_closing() then pending:stop() end
   local olds, bufs = clients_for(root), {}
   if #olds == 0 then return false end
   for _, c in ipairs(olds) do
@@ -109,7 +116,8 @@ function M.watch_packages(root, cache)
       M.restart(root, "symbol packages changed")
     end))
   end)
-  if ok then M.watchers[root] = ev else ev:close(); debounce:close() end
+  if ok then M.watchers[root] = ev; M.debounces[root] = debounce
+  else ev:close(); debounce:close() end
 end
 
 -- ── Warm-up ───────────────────────────────────────────────────────────────
@@ -219,8 +227,14 @@ function M.warm(client, buf, root)
     client:notify("textDocument/didOpen", { textDocument = {
       uri = target.uri, languageId = "al", version = 0, text = target.text } })
   end
+  -- The warm-up takes seconds. If the user opened that same file meanwhile,
+  -- Neovim has sent its own didOpen, and a didClose here would close *their*
+  -- document on the server (no completion or hover in it until reopened).
   local function close()
-    if target.text then client:notify("textDocument/didClose", { textDocument = doc }) end
+    if not target.text then return end
+    local b = vim.fn.bufnr("^" .. vim.fn.fnameescape(vim.uri_to_fname(target.uri)) .. "$")
+    if b ~= -1 and client.attached_buffers and client.attached_buffers[b] then return end
+    client:notify("textDocument/didClose", { textDocument = doc })
   end
   local function send(method, pos, cb)
     local okk, sent = pcall(client.request, client, method,
@@ -266,7 +280,8 @@ function M.start(bufnr, root)
     vim.list_extend(cmd, { "--settingspath", vscode_settings })
   end
   if cfg.ruleset_path and cfg.ruleset_path ~= "" then
-    vim.list_extend(cmd, { "--ruleset", cfg.ruleset_path })
+    -- Expanded like compile does: a "~/…" path reached the server literally.
+    vim.list_extend(cmd, { "--ruleset", vim.fn.expand(cfg.ruleset_path) })
   end
 
   M.watch_packages(root, cache)
