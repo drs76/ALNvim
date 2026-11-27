@@ -78,21 +78,24 @@ end
 -- @param dst        destination directory (must exist)
 -- @param files_glob string or table of unzip glob patterns (Linux/macOS only;
 --                   Windows tar always extracts fully — subsequent glob still finds the files)
-function M.extract_zip(src, dst, files_glob)
+function M.extract_zip_cmd(src, dst, files_glob)
   if M.is_windows then
     -- tar.exe ships with Windows 10+ and handles ZIP archives with these flags.
-    vim.fn.system({ "tar", "-xf", src, "-C", dst })
-  else
-    local cmd = { "unzip", "-q", "-o", src }
-    if files_glob then
-      local globs = type(files_glob) == "table" and files_glob or { files_glob }
-      for _, p in ipairs(globs) do
-        table.insert(cmd, p)
-      end
-    end
-    vim.list_extend(cmd, { "-d", dst })
-    vim.fn.system(cmd)
+    return { "tar", "-xf", src, "-C", dst }
   end
+  local cmd = { "unzip", "-q", "-o", src }
+  if files_glob then
+    local globs = type(files_glob) == "table" and files_glob or { files_glob }
+    for _, p in ipairs(globs) do
+      table.insert(cmd, p)
+    end
+  end
+  vim.list_extend(cmd, { "-d", dst })
+  return cmd
+end
+
+function M.extract_zip(src, dst, files_glob)
+  vim.fn.system(M.extract_zip_cmd(src, dst, files_glob))
 end
 
 -- Read one member of a ZIP archive (a .app included — its 40-byte NAVX header

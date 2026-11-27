@@ -200,7 +200,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>ALDownloadSymbols<CR>",  vim.tbl_extend(
 -- Project files
 vim.keymap.set("n", "<leader>ao", "<cmd>ALOpenAppJson<CR>",      vim.tbl_extend("force", opts, { desc = "AL: Open app.json" }))
 vim.keymap.set("n", "<leader>al", "<cmd>ALOpenLaunchJson<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Open launch.json" }))
-vim.keymap.set("n", "<leader>aq", "<cmd>copen<CR>",              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
+vim.keymap.set("n", "<leader>aq", function() require("al.host").show_quickfix() end,              vim.tbl_extend("force", opts, { desc = "AL: Open quickfix list" }))
 vim.keymap.set("n", "<leader>aC", "<cmd>ALSelectCops<CR>",       vim.tbl_extend("force", opts, { desc = "AL: Select active code cops" }))
 vim.keymap.set("n", "<leader>aB", "<cmd>ALSelectBrowser<CR>",   vim.tbl_extend("force", opts, { desc = "AL: Select browser for BC launch" }))
 vim.keymap.set("n", "<leader>am", "<cmd>ALMcpSetup<CR>",        vim.tbl_extend("force", opts, { desc = "AL: Configure MCP server for Claude Code" }))
@@ -208,6 +208,8 @@ vim.keymap.set("n", "<leader>aM", "<cmd>ALMcpStatus<CR>",       vim.tbl_extend("
 vim.keymap.set("n", "<leader>ai", "<cmd>ALClaude<CR>",          vim.tbl_extend("force", opts, { desc = "AL: Claude Code agent (terminal, project root)" }))
 vim.keymap.set("n", "<leader>ak", "<cmd>ALPi<CR>",             vim.tbl_extend("force", opts, { desc = "AL: Pi agent (terminal, project root)" }))
 vim.keymap.set("n", "<leader>ad", function()
+  -- Under Catnip: its navigator. Otherwise Telescope or the location list.
+  if require("al.host").buffer_diagnostics(0) then return end
   if pcall(require, "telescope.builtin") then
     require("telescope.builtin").diagnostics({ bufnr = 0 })
   else

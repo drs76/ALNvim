@@ -727,13 +727,10 @@ function M.find_publisher(ctx)
     return
   end
   local explorer = require("al.explorer")
-  if explorer.pending_extracts(ctx.root) > 0 then
-    vim.notify("AL: extracting symbol package sources (first time only)…", vim.log.levels.INFO)
-    vim.cmd.redraw()
-  end
+  explorer.with_search_dirs(ctx.root, function(dirs)
   local cmd = { "rg", "-n", "-i", "--multiline", "--no-heading", "--glob", "*.{al,AL}",
                 "-e", publisher_pattern(sub.event) }
-  vim.list_extend(cmd, explorer.build_search_dirs(ctx.root))
+  vim.list_extend(cmd, dirs)
   -- Multiline matches print every matched line; keep the procedure line.
   rg_to_qf(cmd, sub.event, "publisher", function(items)
     local procs = vim.tbl_filter(function(it) return it.text:lower():find("procedure", 1, true) ~= nil end, items)
@@ -748,6 +745,7 @@ function M.find_publisher(ctx)
       require("al.host").locations({ id = "alnvim.related", items = procs,
         title = "AL: publisher — " .. sub.event })
     end
+  end)
   end)
 end
 

@@ -137,7 +137,16 @@ end
 function M.edit(file, line, col, opts)
   local from = opts and opts.from
   if from and from.view and M.name() == "catnip" then
-    return from.view:edit_file({ file = file, line = line, col = col })
+    -- Catnip's child tab needs the window the view was opened from to be a
+    -- normal one. A view opened while another float had focus (the palette,
+    -- the tool output, an agent) has none, and <CR> only warned. Then: close
+    -- the view and open the file in an edit window of this tab.
+    local pw = from.view.previous_win
+    if pw and api.nvim_win_is_valid(pw) and api.nvim_win_get_config(pw).relative == "" then
+      return from.view:edit_file({ file = file, line = line, col = col })
+    end
+    from:close()
+    from = nil
   end
   local target = native_target(from)
   api.nvim_win_call(target, function()
@@ -490,6 +499,53 @@ function M.locations(opts)
       vim.log.levels.INFO)
   end
   nav.navigator({ id = opts.id, title = opts.title, items = items })
+  return true
+end
+
+-- Show the current quickfix list: Catnip's navigator, or :copen. The list is
+-- not changed. Entries without a file stay in quickfix only.
+function M.show_quickfix()
+  local nav = M.name() == "catnip" and catnip_navigator()
+  if not nav then vim.cmd("copen"); return true end
+  local info = vim.fn.getqflist({ items = 1, title = 1 })
+  local qf = {}
+  for _, e in ipairs(info.items or {}) do
+    local name = (e.bufnr and e.bufnr > 0) and api.nvim_buf_get_name(e.bufnr) or ""
+    qf[#qf + 1] = { filename = name, lnum = e.lnum, col = e.col, type = e.type, text = e.text }
+  end
+  local items = M.to_items(qf)
+  if #items == 0 then
+    vim.notify("AL: the quickfix list has no file entries", vim.log.levels.INFO)
+    return false
+  end
+  nav.navigator({ id = "alnvim.quickfix", items = items,
+    title = (info.title and info.title ~= "") and info.title or "Quickfix" })
+  return true
+end
+
+-- Diagnostics of `bufnr` in Catnip's navigator. Returns false when the host is
+-- not Catnip (the caller keeps its own list) or there is nothing to show.
+function M.buffer_diagnostics(bufnr)
+  local nav = M.name() == "catnip" and catnip_navigator()
+  if not nav then return false end
+  bufnr = (bufnr and bufnr ~= 0) and bufnr or api.nvim_get_current_buf()
+  local file = api.nvim_buf_get_name(bufnr)
+  local sev = vim.diagnostic.severity
+  local items = {}
+  for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+    items[#items + 1] = {
+      file = file, line = d.lnum + 1, col = d.col + 1,
+      severity = d.severity == sev.ERROR and "E" or d.severity == sev.WARN and "W" or "I",
+      message = d.message or "",
+    }
+  end
+  if file == "" or #items == 0 then
+    vim.notify("AL: no diagnostics in this buffer", vim.log.levels.INFO)
+    return true
+  end
+  table.sort(items, function(a, b) return a.line < b.line end)
+  nav.navigator({ id = "alnvim.buffer.diagnostics", items = items,
+    title = "Diagnostics — " .. vim.fn.fnamemodify(file, ":t") })
   return true
 end
 
