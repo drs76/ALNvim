@@ -190,6 +190,8 @@ client:request("al/setActiveWorkspace", {
 
 **`expectedProjectReferenceDefinitions`** — always prepend implicit Microsoft base packages (System, System Application, Business Foundation, Base Application, Application) using stable GUIDs, even when `app.json` has no dependencies. Without them, AL server never loads standard symbol tables. Versions from `app.json` `platform`/`application` fields. Explicit deps appended after, duplicates skipped. Single shared builder: `require("al.lsp").build_project_refs(root)` — used by both `plugin/al.lua` (first send) and `cops.apply()` (every re-send); never build this list inline.
 
+**`read_app_json`, `decode_jsonc` and `read_launch` strip a UTF-8 byte-order mark** — `json_decode` rejects it (E474), and VS Code keeps one when the file has it.
+
 **`assemblyProbingPaths` must be a non-null JSON array** — omitting causes `ArgumentNullException("path")` crash. Sending VS Code's default `['./.netpackages']` blind hangs on CIFS/SMB, so `lsp.assembly_probing_paths` adds it only when the directory exists.
 
 ### `al/activeProjectLoaded` — must return a response
@@ -281,7 +283,9 @@ several packages are one restart), on `:ALReindex`, and from `watch_packages` �
 package cache, `.app` names only, debounced `RELOAD_DEBOUNCE_MS` (3s). Explorer re-extraction deletes
 the old `src/` first, so a renamed object does not survive as a stale stub.
 
-**`gd` = `al.basedef.definition()`.** The server's answer when it has one; otherwise hover
+**Restart and the watcher.** `restart(root)` stops the watcher's pending debounce (`M.debounces[root]`): it was left running, so every symbol download restarted the server twice and threw away the first warm-up. The warm-up's `didClose` is skipped when the user has opened that file meanwhile (it would close their document on the server).
+
+**`gd` = `al.basedef.definition()`.** `open_at(file, lnum, root)` locks only files outside the project — the object search covers the project too, and a hit there used to leave the user's own file unmodifiable. The server's answer when it has one; otherwise hover
 names the target and the fallback resolves it:
 
 - hover `(local) Mgt: Codeunit "Sales-Post"` (no qualifier) → the variable's **declaration**
@@ -367,6 +371,8 @@ Precedence, first set wins and `[]` counts as set (VS Code replaces arrays betwe
 
 **Never switch the user's tab (D1).** Catnip's `View:open` focuses a view already open in another tabpage, which switches tab. `CatnipSink:open` closes such a view first (close does not move focus when the view is not focused). Request R4 asks Catnip to fix the root cause; the guard stays either way.
 
+**Sink rules (2026-11-27).** `close_later` closes only if the sink was not cleared or opened again since (`_use` counter) — a second tool run inside the 2.5 s delay had its view closed by the first run's timer. Under Catnip the first write after `clear()` replaces the buffer (Catnip's `View:append` adds below the one empty line an emptied buffer keeps, so output started on line 2), and every append moves the view's windows to the last line (Catnip does not follow the tail).
+
 **Detection is silent (D3).** `pcall(require, "catnip.ui")` once, cached; `setup()` resets it. `ui = "catnip"` with Catnip missing warns once, at `setup()`, never per command. Natively, split build panels open one per tab: a second root's panel replaces the first in that tab, as the single panel always did.
 
 **Pickers (W6).** `host.use_telescope()` decides for the simple pickers — ALActions, the
@@ -393,6 +399,8 @@ Success: exit code 0 + empty quickfix. Error format: `/path/file.al(line,col): e
 `M.compile(dir, extra_args, on_success)` — `on_success()` called in `vim.schedule` only on clean build. `publish.lua` chains upload via this.
 
 **Job output must be line-buffered.** `jobstart` without `stdout_buffered` delivers chunks where `data[1]` continues the previous chunk's partial line and `data[#data]` is itself partial. Appending chunks verbatim splits diagnostics across two "lines" so they never match the quickfix pattern. `line_stream(on_lines)` returns `(feed, flush)`; give stdout and stderr **separate** carries and call both `flush()` in `on_exit`. Same pattern as `altool.mcp_call`.
+
+**Analysis is per project root (2026-11-27).** `_analyze[root] = { job, gen, timer }`. It was one job, one generation and one debounce timer for the session, and `push_diagnostics` reset the whole namespace: with two projects open a save in one cancelled the other's run and wiped its diagnostics, and the startup pass over a multi-root workspace analysed only the last root. `push_diagnostics(qf, root)` resets only buffers under `root`. Three more rules: the pass writes its package to `compile.analyze_out(root)` (`stdpath("cache")/alnvim/analyze/<hash>.app`) through `/out:` — without it every save rewrote the project's `.app`; `compile()` calls `cancel_analyze(root)` first, because `:w` then `<leader>ab` ran two compilers on one project; `analyze_diagnostics` returns at once while a build of that root runs. Measured on a 59-file project with three cops: one pass is 9.3 s wall, 15.6 CPU-seconds. Guard: `tests/review_spec.lua`.
 
 **`analyze_diagnostics` cancellation.** A job cancelled via `jobstop` still fires `on_exit` with partial output. `_analyze_gen` is bumped per call and captured; a stale `on_exit` returns early instead of resetting the diagnostic namespace and clobbering `_analyze_job`. `M.analyze_soon(dir)` debounces (`analyze_debounce_ms`, default 1500) — BufWritePost uses it so `:wa` schedules one build, not one per file.
 
@@ -560,7 +568,7 @@ does not fight a deliberate switch. Key colours: bg `#1E1E1E`, fg `#D4D4D4`, key
 
 **All symbol-package searches must be async.** These cover the project *plus* every extracted package (Base Application alone is ~10k `.al` stubs), so `vim.fn.systemlist` freezes the editor for the whole search. Use `explorer.rg_async(cmd, cb)` and build the picker in the callback. The one place that cannot be async is `ids.get_used_ids` (reached from `completefunc`, which is synchronous) — it caches per project+type and `ids.invalidate()` is called from the ftplugin `BufWritePost`.
 
-`M.objects`: `rg` across project root + `~/.cache/nvim/alnvim/symbols/` extracted packages. Entry: `[src]`/`[sym]` tag, publisher, type, ID, name, filename. `<C-s>` cycles sort.
+`M.objects`: `rg` across project root + `~/.cache/nvim/alnvim/symbols/` extracted packages. The package list comes from `package_cache(root)` (`packagecachepath`, default `.alpackages`) — it was hard-coded. Entry: `[src]`/`[sym]` tag, publisher, type, ID, name, filename. `<C-s>` cycles sort.
 
 **Symbol extraction:** `.app` files are ZIPs with `src/*.al` stubs, extracted to cache dir keyed on sanitised filename. `.ok` stamp skips re-extraction. `unzip` exits code 1 on no-match glob (not failure) — check `vim.fn.isdirectory(dir .. "/src")` not `vim.v.shell_error`.
 
@@ -754,6 +762,8 @@ app.json `id`; BC rejects two extensions claiming the same one.
 `M.generate_permissionset(root)` — skips the type picker, goes directly to ID → name → scan. Mirrors VS Code "AL: Generate Permission Set". Calls `run_wizard` with the permissionset entry directly.
 
 File naming (CRS): `src/<obj_type>/<SanitisedName>.<FileType>.al` — no object ID. **Spaces are removed, not replaced** (`"Private Gallery Setup"` → `PrivateGallerySetup`, the CRS default). `sanitise_name` wrote `_` until 2026-11-15, so a project whose files were already named the CRS way got a duplicate `Private_Gallery_Setup.Page.al` beside each original on the first `:w`. `build_path()` and `organise_file()` derive this independently and must stay in step; adding an ID to one would make `organise_file` rename every existing file on its next save. Interface: `src/interface/<Name>.Interface.al`. Auto-moves on `:w` (`wizard.M.organise_file` via `BufWritePost` in `ftplugin/al.lua`) — uses `vim.fn.rename` + `nvim_buf_set_name`, no reload needed.
+
+**A move never overwrites, and always ends in `write!`** (2026-11-27). `vim.fn.rename` replaces an existing target silently; two objects of one type whose names differ only in punctuation (`"Item No."` / `"Item No"`) sanitise to the same file name, so saving one deleted the other. An existing target is now a warning and no move. After a move the buffer is written with `silent write!`: `nvim_buf_set_name` marks it "not edited", and the user's next plain `:w` stopped with E13 "File exists". The old name's leftover unlisted buffer is deleted.
 
 PermissionSet scan uses `platform.glob_al_files(root)` + `io.open` (not `find` — not available on Windows). Tables generate two entries (`tabledata RIMD` + `table X`); others get `X`.
 
@@ -977,7 +987,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (453 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (466 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

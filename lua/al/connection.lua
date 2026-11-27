@@ -38,7 +38,7 @@ function M.read_launches(root)
   if not f then return {} end
   local raw  = f:read("*a")
   f:close()
-  local ok, data = pcall(vim.fn.json_decode, strip_jsonc(raw))
+  local ok, data = pcall(vim.fn.json_decode, strip_jsonc((raw:gsub("^\239\187\191", ""))))
   if not ok or type(data) ~= "table" then return {} end
   local out = {}
   for _, cfg in ipairs(data.configurations or {}) do

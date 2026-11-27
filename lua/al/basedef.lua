@@ -208,13 +208,24 @@ local function hover_text(client, bufnr, row0, col0, cb)
 end
 
 -- Open `file` read-only at `lnum`, pushing the jumplist so <C-o> returns.
-local function open_at(file, lnum)
+-- True when `file` lies under `root` (the user's own source, not a stub).
+local function in_project(file, root)
+  if not root or root == "" then return false end
+  local f, r = vim.fs.normalize(file), vim.fs.normalize(root)
+  return f:sub(1, #r + 1) == r .. "/"
+end
+
+local function open_at(file, lnum, root)
   vim.cmd("normal! m'")
   vim.cmd("edit " .. vim.fn.fnameescape(file))
   local buf = vim.api.nvim_get_current_buf()
-  -- These are extracted copies under the cache dir, not the user's source.
-  vim.bo[buf].readonly   = true
-  vim.bo[buf].modifiable = false
+  -- Extracted copies under the cache dir are read-only. The search also covers
+  -- the project, and a hit there is the user's own file: locking that one left
+  -- it unmodifiable for the rest of the session.
+  if not in_project(file, root) then
+    vim.bo[buf].readonly   = true
+    vim.bo[buf].modifiable = false
+  end
   pcall(vim.api.nvim_win_set_cursor, 0, { lnum, 0 })
   vim.cmd("normal! ^zz")
 end
@@ -298,7 +309,7 @@ local function fallback(client, bufnr)
         end
         lnum = ml
       end
-      open_at(file, lnum)
+      open_at(file, lnum, root)
     end)
   end)
 end
@@ -335,6 +346,7 @@ M._test = {
   parse_hover = parse_hover, target_at_cursor = target_at_cursor,
   hover_scope = hover_scope, declaration_line = declaration_line,
   object_pattern = object_pattern, member_line = member_line, last_segment = last_segment,
+  open_at = open_at, in_project = in_project,
 }
 
 return M

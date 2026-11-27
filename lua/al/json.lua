@@ -104,6 +104,7 @@ end
 -- Decode JSON with comments and trailing commas, which VS Code allows in its
 -- settings files and json_decode rejects. Returns nil when still invalid.
 function M.decode_jsonc(text)
+  text = text:gsub("^\239\187\191", "")   -- UTF-8 byte-order mark
   local out, i, n = {}, 1, #text
   while i <= n do
     local c = text:sub(i, i)

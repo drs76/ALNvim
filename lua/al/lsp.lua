@@ -280,6 +280,10 @@ function M.read_app_json(root)
   if not f then return nil end
   local content = f:read("*a")
   f:close()
+  -- VS Code keeps a UTF-8 byte-order mark when the file has one, and
+  -- json_decode rejects it ("E474: Unidentified byte") — the project then
+  -- read as "Cannot read app.json" with a perfectly good file.
+  content = content:gsub("^\239\187\191", "")
   local ok, decoded = pcall(vim.fn.json_decode, content)
   return ok and decoded or nil
 end

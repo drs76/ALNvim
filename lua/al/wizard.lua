@@ -1149,9 +1149,22 @@ function M.organise_file(bufnr)
   if target == path and not name_modified then return end
 
   -- ── 3. Move / rename ─────────────────────────────────────────────────────
-  vim.fn.mkdir(targetdir, "p")
+  local moved = target ~= path
+  if moved then
+    -- rename() replaces an existing target without a word. Two objects of one
+    -- type whose names differ only in punctuation ("Item No." / "Item No")
+    -- sanitise to the same file name, and saving one deleted the other.
+    if vim.uv.fs_stat(target) then
+      vim.notify(("AL: not moved — %s already exists (another object maps to the same file name)")
+        :format(vim.fn.fnamemodify(target, ":~:.")), vim.log.levels.WARN)
+      moved = false
+      target = path
+      if not name_modified then return end
+    end
+  end
 
-  if target ~= path then
+  if moved then
+    vim.fn.mkdir(targetdir, "p")
     if vim.fn.rename(path, target) ~= 0 then
       vim.notify("AL: could not rename file to " .. target, vim.log.levels.ERROR)
       return
@@ -1159,21 +1172,29 @@ function M.organise_file(bufnr)
     vim.api.nvim_buf_set_name(bufnr, target)
   end
 
-  if name_modified then
-    -- Buffer content was changed (suffix added); write! to persist it.
-    -- The file already exists at the target path so write (not write!) would
-    -- fail with E13 — force-overwrite is correct here since we own the file.
+  if name_modified or moved then
+    -- write! in both cases. After a suffix edit it persists the new line.
+    -- After a move it is what tells Neovim the buffer *is* the file now under
+    -- that name: nvim_buf_set_name marks the buffer "not edited", and without
+    -- this the user's next plain :w stopped with E13 "File exists".
     _organising = true
-    local ok, err = pcall(vim.cmd, "write!")
+    local ok, err = pcall(vim.api.nvim_buf_call, bufnr, function() vim.cmd("silent write!") end)
     _organising = false
     if not ok then
       vim.notify("AL: write failed: " .. tostring(err), vim.log.levels.ERROR)
       return
     end
+    -- nvim_buf_set_name leaves the old name behind as an unlisted alternate.
+    if moved then
+      local stale = vim.fn.bufnr("^" .. vim.fn.fnameescape(path) .. "$")
+      if stale ~= -1 and stale ~= bufnr and not vim.api.nvim_buf_is_loaded(stale) then
+        pcall(vim.api.nvim_buf_delete, stale, { force = true })
+      end
+    end
   end
 
   vim.bo[bufnr].modified = false
-  local msg = target ~= path and ("AL: organised → " .. vim.fn.fnamemodify(target, ":~:."))
+  local msg = moved and ("AL: organised → " .. vim.fn.fnamemodify(target, ":~:."))
                               or  ("AL: added suffix → " .. obj_name)
   vim.notify(msg, vim.log.levels.INFO)
 end

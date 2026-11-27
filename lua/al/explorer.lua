@@ -120,11 +120,19 @@ local sort_fns = {
 -- ── Shared: build search dirs from project root + symbol caches ───────────────
 
 -- Returns: search_dirs (list), sym_map (dir→publisher), sym_count (int)
+-- The project's package cache: setup({ packagecachepath }), default .alpackages.
+-- Compile and the language server honoured the option; this module did not, so
+-- with a custom cache the explorer and gd saw no symbol packages at all.
+local function package_cache(root)
+  local al = package.loaded["al"]
+  return root .. "/" .. ((al and al.config and al.config.packagecachepath) or ".alpackages")
+end
+
 local function build_search_dirs(root)
   local search_dirs = { root }
   local sym_map     = {}
   local sym_count   = 0
-  local apps        = vim.fn.glob(root .. "/.alpackages/*.app", false, true)
+  local apps        = vim.fn.glob(package_cache(root) .. "/*.app", false, true)
   for _, app in ipairs(apps) do
     local d = ensure_extracted(app)
     if d then
@@ -143,7 +151,7 @@ M.build_search_dirs = build_search_dirs
 -- extract (no stamp, or the .app is newer than it). Cheap: two stats per app.
 function M.pending_extracts(root)
   local n = 0
-  for _, app in ipairs(vim.fn.glob(root .. "/.alpackages/*.app", false, true)) do
+  for _, app in ipairs(vim.fn.glob(package_cache(root) .. "/*.app", false, true)) do
     local key   = vim.fn.fnamemodify(app, ":t:r"):gsub("%s+", "_")
     local stamp = (vim.uv.fs_stat(CACHE .. "/" .. key .. "/.ok") or {}).mtime
     local mt    = (vim.uv.fs_stat(app) or {}).mtime
