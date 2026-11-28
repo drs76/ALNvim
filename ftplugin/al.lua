@@ -253,6 +253,8 @@ vim.keymap.set("n", "<leader>acn", function() require("al.namespace").add_usings
   vim.tbl_extend("force", opts, { desc = "AL: Add missing using statements" }))
 vim.keymap.set("n", "<leader>acx", "<cmd>ALFixCops<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Fix cops — apply all AA0137/AA0206/AA0008 fixes project-wide" }))
+vim.keymap.set("n", "<leader>acv", "<cmd>ALSortVariables<CR>",
+  vim.tbl_extend("force", opts, { desc = "AL: Sort variables by type (AA0021)" }))
 vim.keymap.set("n", "<leader>acE", "<cmd>ALRefactorToEnum<CR>",
   vim.tbl_extend("force", opts, { desc = "AL: Convert Option field to enum" }))
 vim.keymap.set("n", "<leader>aF", "<cmd>ALFindRelated<CR>",

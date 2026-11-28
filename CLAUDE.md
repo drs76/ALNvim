@@ -27,7 +27,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
 | `lua/al/tests.lua` | Test running through the tool: `M.list` (`al listtests --appfile`), `M.run` (`al runtests --raw` → quickfix; `:ALRunTests!` = test under cursor), `M.doc` (`al doc build` → `.aldoc`), `M.run_object` (web-client URL for the buffer's object). Parsers under `M._test` |
 | `lua/al/profile.lua` | Profiling + snapshot through the tool's MCP proxies (tool 30+): `M.capture`/`M.collect` (`al launchprofilingmcpproxy`: `schedule_profiling` → `stop_schedule_and_get_profiles` → `.profiles/<ts>/`), `M.open` (`.alcpuprofile` hot-function viewer, `<CR>` jumps), `M.snapshot_capture`/`M.snapshot_collect` (`al launchsnapshotmcpproxy`). Pure helpers under `M._test` |
-| `lua/al/fixes.lua` | Diagnostic quick fixes (Create procedure, AA0137/AA0206/AA0008, `:ALFixCops`), Option→enum refactor, related-code navigation; pure helpers under `M._test`, registered as actions by codeactions.lua |
+| `lua/al/fixes.lua` | Diagnostic quick fixes (Create procedure, AA0137/AA0206/AA0008/AA0021, `:ALFixCops`), Option→enum refactor, related-code navigation; pure helpers under `M._test`, registered as actions by codeactions.lua |
 | `lua/al/basedef.lua` | `gd` for the agentic LSP: server definition, else hover-driven jump into variable declarations / extracted base-object sources |
 | `lua/al/diff.lua` | Git Diff Explorer — Telescope picker with diff preview |
 | `lua/al/layout.lua` | Report Layout Wizard — Excel generation + rendering section injection |
@@ -451,7 +451,8 @@ via PATH: clean build, `.app` produced.
 | `<leader>aca/acf/acr` | Code actions via `al.codeactions.pick` (all / quickfix for cursor-line diagnostics / refactor) — `aca`/`acr` work in visual mode; Lua actions always, server actions only with `codeActionProvider` |
 | `<leader>acF` | fixAll — server-only; notifies "not supported by this language server" on the agentic LSP |
 | `<leader>acn` / `<leader>acu` | Add missing using statements — ALNvim's own resolver (server organizeImports on EditorServices) |
-| `<leader>acx/acE` | FixCops (apply every AA0137/AA0206/AA0008 fix project-wide) / RefactorToEnum (Option field → enum) |
+| `<leader>acx/acE` | FixCops (apply every AA0137/AA0206/AA0008/AA0021 fix project-wide) / RefactorToEnum (Option field → enum) |
+| `<leader>acv` | SortVariables — every var block in the buffer in AA0021 order |
 | `<leader>aF` | FindRelated — publisher for `[EventSubscriber]`, handlers for `[HandlerFunctions]`, table trigger for `Rec.Insert()` |
 | `<leader>acl` | ExtractLabel (`:ALExtractLockedLabel` for `Locked = true`) |
 | `<leader>at/aT` | RunTests (pick codeunit → methods) / RunTests! (the `[Test]` procedure under the cursor) |
@@ -476,7 +477,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 Every `nvim_create_user_command` in `plugin/al.lua` (plus `:ALClaude`/`:ALPi`/`:ALOllamaChat` from `agent.lua`); `tests/actions_spec.lua` checks the ALActions table against this set. `docs/cheatsheet.md` carries the descriptions. `docs/handbook.md` is the engineering handbook (house style, STE wording, lint under 2.5 with `ste-lint.py`): update its Status table and Sharp edges when a fix here earns one.
 
-`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALToolOutput`, `:ALUpdate`, `:ALUpdateExtension`
+`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALSortVariables`, `:ALToolOutput`, `:ALUpdate`, `:ALUpdateExtension`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -829,6 +830,14 @@ start of alc's message) and `source = "alc"`; the LSP client sets `code` itself.
 - **AA0137** removes the declaration (one name from a `a, b: T` list), and the `var` keyword
   when nothing is left under it. **AA0206** removes a single-line `:=` statement. **AA0008**
   inserts `()` after the identifier at the column (falls back to the quoted name in the message).
+- **AA0021** sorts the var block (`sort_var_block`): Record, Report, Codeunit, XmlPort, Page,
+  Query, Notification, BigText, DateFormula, RecordId, RecordRef, FieldRef, FilterPageBuilder,
+  then every other type in its original order; `array[N] of X` ranks as X. Order probed on tool
+  30.0.42 (an Integer above `array[2] of Record` and a Label above a Record are both flagged).
+  The sort is stable, so a compliant block is unchanged. Comment, attribute and blank lines move
+  with the declaration below them; a declaration runs to its `;`. `:ALSortVariables` /
+  `<leader>acv` sorts every block in the buffer; `:ALFixCops` sorts whole files **after** the
+  line-addressed fixes, because a sort moves the lines an AA0137 points at.
 - **`:ALFixCops`** — `compile.analyze_diagnostics(root, on_done)` (the `on_done(qf)` callback
   was added for this; a cancelled run never calls it), then every fix **bottom-up per file**
   on loaded buffers, not written; quickfix lists what changed.
@@ -992,7 +1001,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (474 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (482 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh

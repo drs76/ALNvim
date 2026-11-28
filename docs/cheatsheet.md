@@ -71,7 +71,8 @@
 | `<Space>acl` | Extract string to Label (`:ALExtractLockedLabel` for a locked one) |
 | `<Space>ace` | Extract selection to local procedure (v) |
 | `<Space>acs` | Create user snippet from selection (v) |
-| `<Space>acx` | Fix cops — apply every AA0137/AA0206/AA0008 fix project-wide |
+| `<Space>acv` | Sort variables by type (AA0021) |
+| `<Space>acx` | Fix cops — apply every AA0137/AA0206/AA0008/AA0021 fix project-wide |
 | `<Space>acE` | Option field under cursor → new enum object |
 | `<Space>acF` / `<Space>acn` | Fix all / organise namespaces — server-only (not on the agentic LSP) |
 
@@ -365,7 +366,8 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALDiff [dir]` | Git diff explorer |
 | `:ALRenameObject` | Rename quoted identifier project-wide |
 | `:ALCodeAction [kind]` | Code-action picker (`refactor`, `quickfix`, `source`, `navigate`). Takes a range |
-| `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008 fixes bottom-up per file. Buffers edited, not written |
+| `:ALFixCops [dir]` | Analyze, then apply all AA0137/AA0206/AA0008/AA0021 fixes bottom-up per file. Buffers edited, not written |
+| `:ALSortVariables` | Sort every var block in the buffer by type (AA0021 order: Record, Report, Codeunit, XmlPort, Page, Query, Notification, BigText, DateFormula, RecordId, RecordRef, FieldRef, FilterPageBuilder, then the rest) |
 | `:ALRefactorToEnum [extensible]` | Option field under cursor → new enum object (`ids.next_id`), field retyped `Enum "Name"` |
 | `:ALFindRelated` | Publisher / handler / table trigger for the cursor line → quickfix (jumps when there is one hit) |
 | `:ALRefactorValidate` / `:ALRefactorEvaluate` | `X := Y;` → `Validate(X, Y);` / `Evaluate(X, Y);` (range) |
