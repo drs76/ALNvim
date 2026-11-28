@@ -355,6 +355,7 @@ Every `:AL*` command registered by `plugin/al.lua` (and `lua/al/agent.lua`). `[d
 | `:ALNewObject [dir]` | Object wizard — 18 types incl. report/permission-set extensions, profile, page customization, control add-in, entitlement |
 | `:ALGeneratePermissionSet [dir]` | Scan objects → `.PermissionSet.al` |
 | `:ALNextId` | Notify the next free object IDs for the type on the current line |
+| `:ALRenumberObjects[!]` | Move objects outside app.json `idRanges` to the next free ID of their type; `!` renumbers every object from the range start. Rewrites numeric references (`Record 50100`, `RunObject = page 50100`, `Page.Run(50100)`). One confirm; buffers with unsaved changes stop the run |
 | `:ALAddNamespace [dir]` | Add `namespace` to every source file |
 | `:ALChangeNamespace [old new]` | Move the project's namespaces from `old` to `new` (prefix): `namespace`, `using`, qualified references |
 | `:ALAddUsings` | Add missing `using` statements (server-only) |

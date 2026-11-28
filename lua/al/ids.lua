@@ -240,6 +240,7 @@ end
 -- Pure internals exposed for tests/ only. Not API.
 M.free_ids   = free_ids
 M.get_ranges = get_ranges
+M.ID_TYPES   = ID_TYPES
 M._test = { free_ids = free_ids, obj_type_from_line = obj_type_from_line }
 
 return M

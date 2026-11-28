@@ -22,6 +22,7 @@ ALNvim is a Neovim plugin (Lua) for Business Central AL, loaded via `vim.pack.ad
 | `lua/al/mcp.lua` | Writes `<project>/.claude/settings.json` for AL MCP server (never global) |
 | `lua/al/agentic_lsp.lua` | **Experimental** standard-LSP backend via `al launchlspserver` (opt-in `experimental_lsp`) |
 | `lua/al/altool.lua` | **The** AL dotnet tool module: `M.binary()` (the one resolver), `M.has(subcmd)`, `M.run()` streaming runner into the host view `alnvim.tool:<root>` (`M.output_float(title, root)` → sink, log; `M.open_output` = `:ALToolOutput`; `M.close_later(sink, ms)`), `M.connection(_flags)()`/`M.cred_env()` launch.json mapping (`connection_flags(cfg, { port = "mcp" })` = proxy port), `M.mcp_call()`/`M.mcp_call_server()` one-shot MCP client, `M.mcp_tools()` cached `tools/list` |
+| `lua/al/renumber.lua` | `:ALRenumberObjects[!]` — `plan(root, {all})` moves object IDs into `idRanges` and rewrites numeric references; `apply(plan)`; pure parts under `M._test` |
 | `lua/al/wizard.lua` | AL Object Wizard — creates new AL object files; `M.generate_permissionset()` skips type picker |
 | `lua/al/refactor.lua` | Code refactoring: `M.extract_label({locked})`, `M.extract_to_procedure()`, pure string-array refactors (`to_validate`, `to_evaluate`, `make_var_global`, `add_publishers`, `promote_action`, `create_handler_function`); parsers in `M.helpers` |
 | `lua/al/codeactions.lua` | Server-independent code actions: `M.register()` registry + `M.pick({only})` picker; merges LSP actions only when the client has `codeActionProvider` |
@@ -476,7 +477,7 @@ Explorer picker: `<C-s>` cycle sort (type/id/publisher/name), `<C-f>` live grep,
 
 Every `nvim_create_user_command` in `plugin/al.lua` (plus `:ALClaude`/`:ALPi`/`:ALOllamaChat` from `agent.lua`); `tests/actions_spec.lua` checks the ALActions table against this set. `docs/cheatsheet.md` carries the descriptions. `docs/handbook.md` is the engineering handbook (house style, STE wording, lint under 2.5 with `ste-lint.py`): update its Status table and Sharp edges when a fix here earns one.
 
-`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALToolOutput`, `:ALUpdate`, `:ALUpdateExtension`
+`:ALActions`, `:ALAddNamespace`, `:ALAddPublishers`, `:ALAddUsings`, `:ALAnalyze`, `:ALBuildOutput`, `:ALCatnipDiagnostics`, `:ALChangeNamespace`, `:ALClaude`, `:ALClearCredentials`, `:ALCodeAction`, `:ALCompile`, `:ALCreateHandler`, `:ALCreateSnippet`, `:ALDapClose`, `:ALDapOutput`, `:ALDebugSetup`, `:ALDiff`, `:ALDoc`, `:ALDownloadSymbols`, `:ALDownloadSymbolsGlobal`, `:ALExplorer`, `:ALExplorerProcs`, `:ALExplorerReopen`, `:ALExtractLabel`, `:ALExtractLockedLabel`, `:ALExtractProcedure`, `:ALFindRelated`, `:ALFixCops`, `:ALGeneratePermissionSet`, `:ALGhostToggle`, `:ALGuidelines`, `:ALHelp`, `:ALHelpTopics`, `:ALInfo`, `:ALInlayHints`, `:ALInstallDotnetTool`, `:ALInstallExtension`, `:ALLaunch`, `:ALListTests`, `:ALMakeVarGlobal`, `:ALMcpRemove`, `:ALMcpSetup`, `:ALMcpStatus`, `:ALNewObject`, `:ALNewProject`, `:ALNextId`, `:ALOllamaChat`, `:ALOpenAppJson`, `:ALOpenLaunchJson`, `:ALOpenLayout`, `:ALPi`, `:ALPreviewPage`, `:ALProfileCapture`, `:ALProfileCollect`, `:ALProfileOpen`, `:ALPromoteAction`, `:ALPublish`, `:ALPublishOnly`, `:ALRefactorEvaluate`, `:ALRefactorToEnum`, `:ALRefactorValidate`, `:ALReindex`, `:ALReloadSnippets`, `:ALRenameObject`, `:ALRenumberObjects`, `:ALReportLayout`, `:ALRunObject`, `:ALRunTests`, `:ALSearch`, `:ALSelectBrowser`, `:ALSelectCops`, `:ALSetNuGetFeeds`, `:ALSnapshotCapture`, `:ALSnapshotCollect`, `:ALSnapshotFinish`, `:ALSnapshotStart`, `:ALToolOutput`, `:ALUpdate`, `:ALUpdateExtension`
 
 ## Project root detection (`lsp.get_root()`)
 
@@ -608,6 +609,21 @@ preselect or resolve, so this is correctness for later tool versions, not speed.
 **The used-ID cache must be dropped whenever ALNvim itself writes an `.al` file.** `ids.invalidate()` runs from the ftplugin `BufWritePost`, but `wizard.write_and_open` uses `vim.fn.writefile` (fires no autocommands) and `:edit` (a read) — so it calls `invalidate()` directly. Without that, `next_id` serves a stale set and two objects of the same type created in one session get the **same ID**.
 
 Types with IDs: `table`, `tableextension`, `page`, `pageextension`, `pagecustomization`, `codeunit`, `report`, `reportextension`, `query`, `xmlport`, `enum`, `enumextension`, `permissionset`, `permissionsetextension`, `profile`, `controladdin`.
+
+## Renumber objects (`lua/al/renumber.lua`)
+
+`:ALRenumberObjects` moves every object outside app.json `idRanges` (and a second object on an
+in-range ID already taken) to the next free ID of its type, in old-ID order; objects in range keep
+their ID. `:ALRenumberObjects!` renumbers every object of each type from the start of the ranges,
+keeping the old order. Headers count only in column 1: an indented `table 50100 = X` is a
+permission entry. Numeric references to a moved object are rewritten in one pass per line (so a
+compact renumber that swaps IDs never chains): `record|page|testpage|codeunit|report|query|xmlport|enum N`
+(`T: Record 50100`, `RunObject = page 50100`) and `Page|Report|Codeunit|XmlPort.Run*(N` — single-quoted
+literals, `//` comments and quoted names are masked. The compiler rejects `Page::50100` (AL0104) and
+IDs in permission sets (AL0653) — checked on tool 30.0.42 — so those forms are not looked for. An old ID shared by two objects of one type
+gets no reference rewrite (the references cannot be told apart). Field IDs in table extensions and
+enum extension values are not changed. Files keep BOM, CRLF and final newline (namespace.lua's
+`read_lines`/`write_lines`); unsaved buffers stop the run; `ids.invalidate()` after the write.
 
 ## Code Cops (`lua/al/cops.lua`)
 
@@ -992,7 +1008,7 @@ vim.lsp.log.set_level(vim.log.levels.DEBUG)  -- log at vim.lsp.get_log_path()
 
 ## Tests
 
-`tests/run.sh` — dependency-free suite (474 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
+`tests/run.sh` — dependency-free suite (485 assertions). Runs under `nvim --headless -u NONE` with only the repo on the runtimepath: no plugin manager, no plenary, no network.
 
 ```bash
 tests/run.sh
