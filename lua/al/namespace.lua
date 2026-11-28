@@ -726,6 +726,13 @@ function M.change(root, old, new)
   end)
 end
 
+-- Shared with lua/al/renumber.lua: file IO that keeps BOM, line ending and
+-- final newline, the literal/comment mask, and the loaded-buffer lookup.
+M.read_lines  = read_lines
+M.write_lines = write_lines
+M.mask_code   = mask_code
+M.loaded_buf  = loaded_buf
+
 M._test.change_ns_lines = change_ns_lines
 M._test.common_prefix   = common_prefix
 M._test.valid_ns        = valid_ns

@@ -678,6 +678,11 @@ vim.api.nvim_create_user_command("ALNextId", function()
   require("al.ids").show_next()
 end, { desc = "Show next free object ID for the AL object type on the current line" })
 
+vim.api.nvim_create_user_command("ALRenumberObjects", function(o)
+  require("al.renumber").renumber(nil, { all = o.bang })
+end, { bang = true,
+       desc = "AL: Move object IDs into app.json idRanges (! renumbers every object from the range start)" })
+
 vim.api.nvim_create_user_command("ALExplorer", function(opts)
   require("al.explorer").objects(opts.args ~= "" and opts.args or nil)
 end, {
