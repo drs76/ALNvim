@@ -285,6 +285,16 @@ M.register({
   run = function(ctx) fixes.fix_cop_at_cursor(ctx, "AA0008") end,
 })
 M.register({
+  id = "sort_variables", kind = "quickfix", title = "Sort variables by type (AA0021)",
+  applicable = has_code({ AA0021 = true }),
+  run = function(ctx) fixes.fix_cop_at_cursor(ctx, "AA0021") end,
+})
+M.register({
+  id = "sort_variables_buffer", kind = "refactor", title = "Sort all var blocks by type (AA0021)",
+  applicable = fixes.in_var_block,
+  run = function(ctx) fixes.sort_variables(ctx.bufnr) end,
+})
+M.register({
   id = "option_to_enum", kind = "refactor.rewrite", title = "Convert Option field to enum",
   applicable = fixes.in_option_field,
   run = function() fixes.refactor_to_enum({ extensible = false }) end,

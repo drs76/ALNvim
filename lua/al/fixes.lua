@@ -257,6 +257,121 @@ local function add_parens(lines, lnum, col, name)
   return out
 end
 
+-- ── AA0021: sort variable declarations by type ───────────────────────────────
+--
+-- CodeCop order, checked against tool 30.0.42: these 13 types in this order,
+-- every other type after them in its original order. `array[N] of X` ranks as
+-- X (an Integer above `array[2] of Record Customer` is flagged). A stable sort
+-- by rank leaves a compliant block unchanged, so sorting every block in a file
+-- only touches the blocks the cop would flag.
+
+local VAR_ORDER = {
+  "record", "report", "codeunit", "xmlport", "page", "query", "notification",
+  "bigtext", "dateformula", "recordid", "recordref", "fieldref", "filterpagebuilder",
+}
+local VAR_RANK = {}
+for i, t in ipairs(VAR_ORDER) do VAR_RANK[t] = i end
+local REST_RANK = #VAR_ORDER + 1
+
+local function var_type_rank(decl)
+  local m = H.mask_strings(decl)
+  local colon = m:find(":", 1, true)
+  if not colon then return REST_RANK end
+  local typ = decl:sub(colon + 1):lower()
+  typ = typ:gsub("^%s*array%s*%b[]%s*of%s*", "")
+  local word = typ:match("^%s*([%a]+)")
+  return (word and VAR_RANK[word]) or REST_RANK
+end
+
+local function is_var_keyword(line)
+  local t = vim.trim(line or ""):lower()
+  return t == "var" or t == "protected var"
+end
+
+local function is_attached(line)
+  -- Lines that belong to the declaration below them.
+  local t = vim.trim(line or "")
+  return t == "" or t:sub(1, 2) == "//" or t:sub(1, 1) == "["
+end
+
+-- Sort the var block whose `var` keyword is at `var_lnum` (1-based) in place
+-- of a copy. Returns new lines and the line after the block.
+local function sort_block_at(lines, var_lnum)
+  local units, pending = {}, {}
+  local i = var_lnum + 1
+  while i <= #lines do
+    local line = lines[i]
+    if is_var_decl(line) then
+      local unit = { lines = pending, rank = var_type_rank(line) }
+      pending = {}
+      table.insert(unit.lines, line)
+      -- A declaration may run over several lines until its `;`.
+      while not H.mask_strings(lines[i]):match(";%s*$") and i < #lines
+            and not is_var_decl(lines[i + 1]) do
+        i = i + 1
+        table.insert(unit.lines, lines[i])
+      end
+      unit.order = #units + 1
+      units[#units + 1] = unit
+      i = i + 1
+    elseif is_attached(line) then
+      pending[#pending + 1] = line
+      i = i + 1
+    else
+      break
+    end
+  end
+  local stop = i - #pending -- trailing blank/comment lines stay where they are
+  local sorted = { unpack(units) }
+  table.sort(sorted, function(a, b)
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    return a.order < b.order
+  end)
+  local out = {}
+  for k = 1, var_lnum do out[k] = lines[k] end
+  for _, u in ipairs(sorted) do
+    for _, l in ipairs(u.lines) do out[#out + 1] = l end
+  end
+  for k = stop, #lines do out[#out + 1] = lines[k] end
+  return out, i
+end
+
+-- Find the `var` keyword of the block containing `lnum`, or nil.
+local function var_block_start(lines, lnum)
+  local k = lnum
+  while k >= 1 do
+    if is_var_keyword(lines[k]) then return k end
+    if not (is_var_decl(lines[k]) or is_attached(lines[k])) then return nil end
+    k = k - 1
+  end
+  return nil
+end
+
+-- Sort the var block that contains `lnum`. Returns new lines or nil + reason.
+local function sort_var_block(lines, lnum)
+  local s = var_block_start(lines, lnum)
+  if not s then return nil, "not inside a var block" end
+  return (sort_block_at(lines, s))
+end
+
+-- Sort every var block in the file. Returns new lines and the number of
+-- blocks whose order changed.
+local function sort_var_blocks(lines)
+  local out, changed, k = lines, 0, 1
+  while k <= #out do
+    if is_var_keyword(out[k]) then
+      local new, after = sort_block_at(out, k)
+      for j = k, after - 1 do
+        if new[j] ~= out[j] then changed = changed + 1; break end
+      end
+      out, k = new, after
+    else
+      k = k + 1
+    end
+  end
+  return out, changed
+end
+
 -- ── Option field → enum ──────────────────────────────────────────────────────
 
 -- Find the `field(...)` block enclosing `row`: returns { s, e, name } (1-based
@@ -439,10 +554,25 @@ local function apply_cop_fix(lines, d)
     return remove_assignment(lines, lnum)
   elseif code == "AA0008" then
     return add_parens(lines, lnum, d.col + 1, first_quoted(d.message))
+  elseif code == "AA0021" then
+    return sort_var_block(lines, lnum)
   end
   return nil, "no fix for " .. code
 end
-M.COP_FIXES = { AA0137 = true, AA0206 = true, AA0008 = true }
+M.COP_FIXES = { AA0137 = true, AA0206 = true, AA0008 = true, AA0021 = true }
+
+-- :ALSortVariables — sort every var block in the buffer (AA0021 order).
+function M.sort_variables(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local new, changed = sort_var_blocks(lines)
+  if changed == 0 then
+    vim.notify("AL: variables already sorted", vim.log.levels.INFO)
+    return
+  end
+  set_lines(bufnr, new)
+  vim.notify(("AL: sorted %d var block(s)"):format(changed), vim.log.levels.INFO)
+end
 
 function M.fix_cop_at_cursor(ctx, code)
   local d = diag_with_code(ctx, { [code] = true })
@@ -455,7 +585,7 @@ function M.fix_cop_at_cursor(ctx, code)
   set_lines(ctx.bufnr, new)
 end
 
--- :ALFixCops — analyze, then apply every AA0137/AA0206/AA0008 bottom-up per
+-- :ALFixCops — analyze, then apply every AA0137/AA0206/AA0008/AA0021 bottom-up per
 -- file. Buffers are edited, not written; the quickfix lists what changed.
 function M.fix_cops(root)
   root = root or require("al.lsp").get_root()
@@ -487,14 +617,31 @@ function M.fix_cops(root)
       local bufnr = vim.fn.bufadd(file)
       vim.fn.bufload(bufnr)
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      local n = 0
+      local n, sorts = 0, {}
       for _, d in ipairs(diags) do
-        local new = apply_cop_fix(lines, d)
-        if new then
+        -- AA0021 reorders lines: run it after the line-addressed fixes, over
+        -- the whole file (a compliant block stays as it is).
+        if d.code == "AA0021" then
+          sorts[#sorts + 1] = d
+        else
+          local new = apply_cop_fix(lines, d)
+          if new then
+            lines = new
+            n = n + 1
+            changed[#changed + 1] = { filename = file, lnum = d.lnum + 1, col = d.col + 1,
+                                      text = d.message }
+          end
+        end
+      end
+      if #sorts > 0 then
+        local new, blocks = sort_var_blocks(lines)
+        if blocks > 0 then
           lines = new
           n = n + 1
-          changed[#changed + 1] = { filename = file, lnum = d.lnum + 1, col = d.col + 1,
-                                    text = d.message }
+          for _, d in ipairs(sorts) do
+            changed[#changed + 1] = { filename = file, lnum = d.lnum + 1, col = d.col + 1,
+                                      text = d.message }
+          end
         end
       end
       if n > 0 then set_lines(bufnr, lines) end
@@ -504,7 +651,7 @@ function M.fix_cops(root)
       return a.lnum < b.lnum
     end)
     if #changed == 0 then
-      vim.notify("AL: no fixable cop warnings (AA0137/AA0206/AA0008)", vim.log.levels.INFO)
+      vim.notify("AL: no fixable cop warnings (AA0137/AA0206/AA0008/AA0021)", vim.log.levels.INFO)
       return
     end
     require("al.host").locations({ id = "alnvim.copfixes:" .. root,
@@ -802,6 +949,9 @@ end
 M.has_subscriber = function(ctx) return parse_subscriber(ctx.line) ~= nil end
 M.has_handlers   = function(ctx) return parse_handlers(ctx.line) ~= nil end
 M.has_record_call = function(ctx) return record_call_at(ctx.line, ctx.col0) ~= nil end
+M.in_var_block = function(ctx)
+  return var_block_start(ctx.lines, ctx.row) ~= nil
+end
 M.in_option_field = function(ctx)
   local blk = field_block(ctx.lines, ctx.row)
   return blk ~= nil and H.mask_strings(ctx.lines[blk.s]):match(";%s*[Oo]ption%s*%)") ~= nil
@@ -817,6 +967,8 @@ M._test = {
   parse_subscriber = parse_subscriber, parse_handlers = parse_handlers,
   record_call_at = record_call_at, insert_procedure = insert_procedure,
   params_from = params_from, apply_cop_fix = apply_cop_fix,
+  var_type_rank = var_type_rank, sort_var_block = sort_var_block,
+  sort_var_blocks = sort_var_blocks,
 }
 
 return M

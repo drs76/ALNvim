@@ -1137,7 +1137,11 @@ end, { desc = "AL: Create a missing handler function from [HandlerFunctions]" })
 vim.api.nvim_create_user_command("ALFixCops", function(o)
   require("al.fixes").fix_cops(o.args ~= "" and vim.fn.fnamemodify(o.args, ":p:h") or nil)
 end, { nargs = "?", complete = "dir",
-       desc = "AL: Analyze, then apply every AA0137/AA0206/AA0008 fix (unused var/assignment, missing ())" })
+       desc = "AL: Analyze, then apply every AA0137/AA0206/AA0008/AA0021 fix (unused var/assignment, missing (), var order)" })
+
+vim.api.nvim_create_user_command("ALSortVariables", function()
+  require("al.fixes").sort_variables(0)
+end, { desc = "AL: Sort every var block in the buffer by type (AA0021 order)" })
 
 vim.api.nvim_create_user_command("ALRefactorToEnum", function(o)
   require("al.fixes").refactor_to_enum({ extensible = o.args:lower() == "extensible" })

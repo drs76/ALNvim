@@ -357,7 +357,7 @@ arrays and return `(nil, reason)` on refusal. `mask_strings` blanks quoted spans
 tests/run.sh
 ```
 
-474 cases across 36 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
+482 cases across 37 spec files. Runs under `nvim --headless -u NONE` with only the repo on the
 runtime path. Tests reach pure internals through `M._test` on each module. That table is for
 tests only.
 
